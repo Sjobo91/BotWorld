@@ -61,6 +61,7 @@ code {
   font: 700 0.68rem/1.2 var(--font-body);
   white-space: nowrap;
 }
+.nametag.me { font-size: 0.95rem; border-width: 2px; z-index: 2; box-shadow: var(--shadow); }
 .blabel {
   display: flex;
   align-items: center;

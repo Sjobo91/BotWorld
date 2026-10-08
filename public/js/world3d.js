@@ -1014,6 +1014,7 @@ export async function createWorld(stage, overlay, opts) {
     return b;
   }
   function removeBot(b) {
+    if (b.beacon) removeBeacon(b);
     releasePoi(b);
     unpair(b);
     removeBubble(b);
@@ -1779,6 +1780,48 @@ export async function createWorld(stage, overlay, opts) {
     particles.push({ pts, vel, life: o.life, age: 0, gravity: o.gravity != null ? o.gravity : 3, drag: o.drag || 0, grow: o.grow || 0 });
   }
   const highlights = [];
+  // A floating arrow and a column of light over one bot, so a viewer can find
+  // their own bot on the shared stream.
+  const BEACON_SEC = 20;
+  function addBeacon(b, color) {
+    if (b.beacon) removeBeacon(b);
+    const g = new T.Group();
+    const mat = new T.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+    const arrow = mesh(new T.ConeGeometry(0.055, 0.12, 4), mat, 0, 0, 0, g);
+    arrow.rotation.x = Math.PI;
+    const beamMat = new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, blending: T.AdditiveBlending });
+    mesh(new T.CylinderGeometry(0.03, 0.03, 1.6, 8, 1, true), beamMat, 0, 0.9, 0, g);
+    g.position.y = 0.66;
+    b.parts.g.add(g);
+    b.beacon = { g, mat, beamMat, t: 0 };
+    b.tag.el.classList.add('me');
+    b.tag.el.style.borderColor = color;
+    b.tag.w = 0;
+  }
+  function removeBeacon(b) {
+    const k = b.beacon;
+    b.parts.g.remove(k.g);
+    k.g.traverse((o) => o.geometry?.dispose());
+    k.mat.dispose();
+    k.beamMat.dispose();
+    b.beacon = null;
+    b.tag.el.classList.remove('me');
+    b.tag.el.style.borderColor = '';
+    b.tag.w = 0;
+  }
+  function stepBeacons(dt) {
+    for (const b of bots.values()) {
+      const k = b.beacon;
+      if (!k) continue;
+      k.t += dt;
+      if (k.t > BEACON_SEC) { removeBeacon(b); continue; }
+      const fade = Math.min(1, (BEACON_SEC - k.t) / 2);
+      k.g.children[0].position.y = 0.04 * Math.sin(k.t * 4);
+      k.g.rotation.y += dt * 2;
+      k.mat.opacity = fade;
+      k.beamMat.opacity = 0.35 * fade;
+    }
+  }
   function stepHighlights(dt) {
     for (let i = highlights.length - 1; i >= 0; i--) {
       const h = highlights[i];
@@ -2263,10 +2306,10 @@ export async function createWorld(stage, overlay, opts) {
     }
     // Nametags under the bots.
     const showTags = camDist < 8.5 && !lapse;
-    const near = [...bots.values()].sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
+    const near = [...bots.values()].sort((a, b) => !!b.beacon - !!a.beacon || Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
     near.forEach((b, i) => {
       const L = b.tag;
-      if (!showTags || i > 24 || b.bubble || b.mode === 'arrive') { setShown(L, false); return; }
+      if (!(showTags || (b.beacon && !lapse)) || i > 24 || b.bubble || b.mode === 'arrive') { setShown(L, false); return; }
       const p = project(b.x, b.y - 0.02, b.z);
       let vis = p.vis;
       if (vis) {
@@ -2340,6 +2383,7 @@ export async function createWorld(stage, overlay, opts) {
     if (len > max) { t.x *= max / len; t.z *= max / len; }
   }
   let focus = null;
+  let zoomGoal = null; // where the mouse wheel is taking the camera
   function flyTo(x, z, want, dur, track) {
     const offset = camera.position.clone().sub(controls.target);
     // Never fly with a camera sitting on its target: look from the usual angle.
@@ -2347,6 +2391,7 @@ export async function createWorld(stage, overlay, opts) {
       const el = elevation();
       offset.set(Math.sin(0.72) * Math.cos(el), Math.sin(el), Math.cos(0.72) * Math.cos(el)).multiplyScalar(Math.max(3, want || 8));
     }
+    zoomGoal = null;
     focus = { from: controls.target.clone(), to: new T.Vector3(x, 0, z), offset, want, start: performance.now(), dur: still ? 0 : dur, track: track || null };
   }
   function stepFocus(dt) {
@@ -2369,6 +2414,28 @@ export async function createWorld(stage, overlay, opts) {
       controls.target.add(delta);
       camera.position.add(delta);
     }
+  }
+  // Wheel zoom of our own. The one in OrbitControls (three r160) divides by the
+  // whole part of devicePixelRatio, which is 0 when the browser is zoomed out
+  // below 100%, and then every notch jumps to the nearest or farthest view.
+  stage.addEventListener('wheel', (e) => {
+    if (!controls.enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+    if (!px) return;
+    focus = null;
+    const from = zoomGoal ?? camera.position.distanceTo(controls.target);
+    const notches = Math.max(-3, Math.min(3, px / 100));
+    zoomGoal = Math.max(controls.minDistance, Math.min(controls.maxDistance, from * Math.pow(1.12, notches)));
+  }, { capture: true, passive: false });
+  function stepZoom(dt) {
+    if (zoomGoal == null) return;
+    const offset = camera.position.clone().sub(controls.target);
+    const d = offset.length();
+    const next = still ? zoomGoal : d + (zoomGoal - d) * Math.min(1, dt * 14);
+    camera.position.copy(controls.target).add(offset.setLength(next));
+    if (Math.abs(next - zoomGoal) < 0.005) zoomGoal = null;
   }
   // In stream mode the camera directs itself: it flies to whatever chat just
   // did, and otherwise slowly tours the island.
@@ -2525,6 +2592,7 @@ export async function createWorld(stage, overlay, opts) {
     stepTimelapse();
     stepTour();
     stepFocus(dt);
+    stepZoom(dt);
     controls.update();
     skyTimer -= dt;
     if (skyTimer <= 0) { skyTimer = 4; updateSky(); }
@@ -2537,6 +2605,7 @@ export async function createWorld(stage, overlay, opts) {
     stepCritters(t, dt);
     stepParticles(dt);
     stepHighlights(dt);
+    stepBeacons(dt);
     stepReveals(dt);
     if (frame % 3 === 0) { followSun(false); updateFog(); renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
@@ -2658,20 +2727,23 @@ export async function createWorld(stage, overlay, opts) {
       if (scout && ev.found?.length) showBubble(scout, 'Look what I found!', 3000);
       if (at && ev.userId) interest(ev.found?.length ? 4 : 2, at.x, at.z, ev.found?.length ? 7 : 8, null, 9000);
     },
-    // !me: the camera visits your home, which glows in your colour.
+    // !me: a beacon in your colour over your bot, a glowing ring around your
+    // home, and the camera goes to see your bot.
     highlight(userId) {
       const v = homeOf(userId);
-      const bot = bots.get(userId);
-      const target = v ? v.root.position : bot ? { x: bot.x, z: bot.z } : null;
+      const b = bots.get(userId);
+      const bot = b && b.mode !== 'arrive' ? b : null;
+      const target = bot ? { x: bot.x, z: bot.z } : v ? v.root.position : null;
       if (!target) return;
+      const color = (data.builders.get(userId) || {}).color || '#3b7ddd';
       if (v) {
-        const color = (data.builders.get(userId) || {}).color || '#3b7ddd';
-        const ring = mesh(new T.TorusGeometry(R * 0.95, 0.03, 6, 48), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }), target.x, PATH_TOP + 0.04, target.z, fxGroup);
+        const ring = mesh(new T.TorusGeometry(R * 0.95, 0.03, 6, 48), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }), v.root.position.x, PATH_TOP + 0.04, v.root.position.z, fxGroup);
         ring.rotation.x = Math.PI / 2;
         highlights.push({ ring, t: 0 });
-        sparkle(target.x, v.h + 0.3, target.z);
+        sparkle(v.root.position.x, v.h + 0.3, v.root.position.z);
       }
-      if (opts.stream) interest(5, target.x, target.z, 5.5, null, 9000);
+      if (bot) addBeacon(bot, color);
+      if (opts.stream) interest(5, target.x, target.z, 5.5, bot, 9000);
       else flyTo(target.x, target.z, Math.min(camera.position.distanceTo(controls.target), 7), 1400);
     },
     eraChanged(e) {
