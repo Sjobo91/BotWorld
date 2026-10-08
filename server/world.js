@@ -11,7 +11,7 @@ import { WONDER_RING, hexDist, hexKey, ringTiles, wonderTile } from '../public/s
 import * as M from '../public/shared/terrain.js';
 import { parseCommand } from './commands.js';
 import * as E from './economy.js';
-import { Rival, freshRival } from './rival.js';
+import { Rival, freshRival, raceProgress } from './rival.js';
 
 export const DEFAULT_LIMITS = {
   maxProjects: 3,
@@ -54,6 +54,9 @@ const DAY = 864e5;
 // Commands that keep a bot busy for a while (and so can wait in line).
 const JOB_COMMANDS = new Set(['work', 'help', 'explore', 'repair']);
 const EMPTY = new Set();
+// Each town's home ground, where the other may not build: no race can
+// leave a town without its first forests, hills and ore.
+export const HOME_GROUND = 13;
 const STARTER_HATS = Object.keys(HATS).filter((h) => h !== 'none' && HATS[h].level === 1);
 const NEAR2 = [];
 for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) if ((dq || dr) && hexDist(dq, dr) <= 2) NEAR2.push([dq, dr]);
@@ -199,16 +202,12 @@ export class World {
   }
 
   // --- The race against the rival ---------------------------------------------------------
-  raceScore() {
+  raceProgress() {
     const s = this.state;
-    let n = 0;
-    let levels = 0;
-    for (const b of this.builds) if (b.built && !b.wonder && !b.home) { n++; levels += (b.level || 1) - 1; }
-    n += this.builds.filter((b) => b.home && b.built).length;
-    const w = this.currentWonder();
-    return Math.round(s.era * 250 + s.population + n * 4 + levels * 6 + (w ? E.wonderProgress(w) * 100 : 0) + (s.finished ? 500 : 0));
+    return raceProgress(s.era, s.finished, s.knowledge / this.knowledgeNeed(), this.currentWonder(), s.population);
   }
-  // The town's land: tiles within two steps of its buildings (and the middle).
+  // The town's land: tiles within two steps of its buildings, and its home
+  // ground (the middle out to 13 tiles, where its first coal and iron lie).
   ownLand() {
     if (this.ownCache && this.ownCache.n === this.builds.length) return this.ownCache.set;
     const set = new Set();
@@ -216,7 +215,7 @@ export class World {
       const t = M.tileAt(this.map, b.q, b.r);
       if (t) for (const n of M.tilesWithin(this.map, t, 2)) set.add(n.i);
     }
-    for (const t of this.map.tiles) if (t.d <= M.START_RADIUS) set.add(t.i);
+    for (const t of this.map.tiles) if (t.d <= HOME_GROUND) set.add(t.i);
     this.ownCache = { n: this.builds.length, set };
     return set;
   }
@@ -1346,7 +1345,7 @@ export class World {
       maxProjects: this.limits.maxProjects,
       plan: this.plan(needs, w, popCap),
       explored: { n: explored, total: this.map.total },
-      race: this.rival ? { you: this.raceScore(), rival: this.rival.summary() } : null,
+      race: this.rival ? { you: this.raceProgress(), rival: this.rival.summary() } : null,
     };
     if (dt > 0) {
       this.dirty = true;

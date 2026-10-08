@@ -148,11 +148,11 @@ export function createHud(state, now, opts) {
     box.hidden = false;
     const r = race.rival;
     const rows = [
-      { name: 'BotWorld', who: 'chat', color: '#3b7ddd', era: state.era, score: race.you },
-      { name: r.name, who: 'AI', color: '#d9534f', era: r.era, score: r.score },
+      { name: 'BotWorld', who: 'chat', color: '#3b7ddd', p: race.you },
+      { name: r.name, who: 'AI', color: '#d9534f', p: r.progress },
     ];
-    const max = Math.max(1, ...rows.map((x) => x.score));
-    const lead = race.you >= r.score ? 0 : 1;
+    // Ahead is whoever is further along the road to the Future.
+    const lead = race.you.total >= r.progress.total ? 0 : 1;
     const list = $('raceRows');
     list.textContent = '';
     rows.forEach((x, i) => {
@@ -161,10 +161,11 @@ export function createHud(state, now, opts) {
       const dot = el('i');
       dot.style.background = x.color;
       who.append(dot, el('b', null, x.name), el('small', null, ' ' + x.who));
-      li.append(who, el('span', 'rera', ERAS[x.era].emoji + ' ' + ERAS[x.era].name));
+      const era = ERAS[Math.min(ERAS.length - 1, x.p.era)];
+      li.append(who, el('span', 'rera', era.emoji + ' ' + era.name + ' ' + Math.round(x.p.frac * 100) + '%'));
       const bar = el('span', 'bar');
       const fill = el('span');
-      fill.style.width = Math.round((100 * x.score) / max) + '%';
+      fill.style.width = Math.round(100 * x.p.frac) + '%';
       fill.style.background = x.color;
       bar.append(fill);
       li.append(bar);
@@ -172,7 +173,7 @@ export function createHud(state, now, opts) {
     });
     const a = angleOf(r.origin);
     const way = COMPASS[Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
-    $('raceNote').textContent = r.finished ? r.name + ' reached the Future. Can BotWorld still beat their score?'
+    $('raceNote').textContent = r.finished ? r.name + ' lit their Fusion Spire first. BotWorld can still finish the race!'
       : r.met ? r.name + ' lies to the ' + way + ' with ' + r.builds + ' buildings. Claim the land between: !build outpost ' + way
       : 'An AI town far to the ' + way + ', past the fog, races BotWorld to the Future. !explore ' + way + ' to find it.';
   }

@@ -113,7 +113,7 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
 console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
 console.table(daily);
 for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
-if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town score', world.raceScore());
+if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));
 if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;

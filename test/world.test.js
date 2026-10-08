@@ -670,7 +670,8 @@ test('a rival AI town lives on the far side, builds by the same rules and keeps 
   assert.ok(events.some((e) => e.type === 'build' && e.build.rival));
   w.economy(now, 0);
   assert.equal(w.econ.race.rival.name, 'Cogsworth');
-  assert.ok(w.econ.race.rival.score > 0);
+  assert.ok(w.econ.race.rival.progress.total > 0);
+  assert.ok(w.econ.race.you.total >= 0);
   // The town never builds on the rival's land.
   revealAll(w);
   rich(w);

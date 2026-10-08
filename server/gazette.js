@@ -150,7 +150,10 @@ export class Gazette {
     const out = [];
     out.push('Era: ' + ERAS[s.era].name + ' (' + ERAS[s.era].tagline + '), era ' + (s.era + 1) + ' of ' + ERAS.length + '.');
     out.push('Day: ' + (Math.floor((Date.now() - s.createdAt) / 864e5) + 1) + '.');
-    if (econ?.race?.rival) out.push('Race: BotWorld scores ' + econ.race.you + ', the rival AI town ' + econ.race.rival.name + ' scores ' + econ.race.rival.score + ' (' + ERAS[econ.race.rival.era].name + ').');
+    if (econ?.race?.rival) {
+      const r = econ.race.rival;
+      out.push('Race to the Future: BotWorld is ' + Math.round(econ.race.you.frac * 100) + '% through the ' + ERAS[econ.race.you.era].name + ', the rival AI town ' + r.name + ' ' + Math.round(r.progress.frac * 100) + '% through the ' + ERAS[r.era].name + '.');
+    }
     if (econ) {
       out.push('Population: ' + econ.population + ' (goal for next era ' + econ.popGoal + '). Happiness: ' + econ.happy + '%.');
       if (econ.wonder) out.push('Wonder being built: ' + label(econ.wonder.item) + ', ' + Math.floor(econ.wonder.progress * 100) + '% done.');

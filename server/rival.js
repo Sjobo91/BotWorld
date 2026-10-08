@@ -37,6 +37,9 @@ export function pickOrigin(map) {
       if (TERRAIN_WATER.has(n.t)) score += 0.05;
     }
     score += kinds.size * 3;
+    // Coal and iron of its own, a little way out, like the town has.
+    const ores = new Set(M.tilesWithin(map, t, 10).filter((n) => n.f === 'coal' || n.f === 'iron').map((n) => n.f));
+    score += ores.size * 6;
     if (score > bestScore) { bestScore = score; best = t; }
   }
   return best || map.tiles.reduce((a, t) => (t.d > a.d && M.walkable(t) ? t : a), map.tiles[0]);
@@ -107,8 +110,9 @@ export class Rival {
       const t = M.tileAt(this.map, b.q, b.r);
       if (t) for (const n of M.tilesWithin(this.map, t, 2)) set.add(n.i);
     }
+    // Its home ground: 10 tiles round its square.
     const o = M.tileAt(this.map, this.s.origin.q, this.s.origin.r);
-    if (o) for (const n of M.tilesWithin(this.map, o, 3)) set.add(n.i);
+    if (o) for (const n of M.tilesWithin(this.map, o, 10)) set.add(n.i);
     this.landCache = { n: this.builds.length, set };
     return set;
   }
@@ -116,20 +120,18 @@ export class Rival {
     this.landCache = null;
   }
 
-  // How hard the rival plays: leaning towards a close race.
+  // How hard the rival plays: leaning towards a close race. Half an era
+  // behind chat it plays 40% faster, half an era ahead 35% slower.
   speed() {
-    const you = this.w.raceScore();
-    const them = this.score();
-    const lean = Math.max(-0.35, Math.min(0.45, (0.6 * (you - them)) / Math.max(150, you)));
+    const gap = this.w.raceProgress().total - this.raceProgress().total;
+    const lean = Math.max(-0.35, Math.min(0.45, 0.8 * gap));
     return Math.max(0.4, (this.w.rivalDifficulty || 1) * (1 + lean));
   }
-  score() {
+  // How far along the road to the Future: the era, plus a third each for
+  // knowledge, the wonder and people towards the next one.
+  raceProgress() {
     const s = this.s;
-    let n = 0;
-    let levels = 0;
-    for (const b of this.builds) if (b.built && !b.wonder) { n++; levels += (b.level || 1) - 1; }
-    const w = this.currentWonder();
-    return Math.round(s.era * 250 + s.population + n * 4 + levels * 6 + (w ? E.wonderProgress(w) * 100 : 0) + (s.finished ? 500 : 0));
+    return raceProgress(s.era, s.finished, s.knowledge / this.w.knowledgeNeed(), this.currentWonder(), s.population);
   }
   summary() {
     const s = this.s;
@@ -142,7 +144,7 @@ export class Rival {
       outposts: this.builds.filter((b) => b.item === 'outpost' && b.built).length,
       knowledge: Math.round((100 * s.knowledge) / this.w.knowledgeNeed()),
       wonder: w ? Math.round(E.wonderProgress(w) * 100) : 100,
-      score: this.score(),
+      progress: this.raceProgress(),
       finished: s.finished,
       met: s.met,
       origin: s.origin,
@@ -329,7 +331,7 @@ export class Rival {
     if (s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal * 1.25) add(houseFor(s.era));
     for (const r of E.unlockedResources(s.era)) if ((s.stock[r] || 0) < cap * 0.12) add(maker(r));
     const pw = E.power(this.builds, now, this.fuel, this.w.geo);
-    if (pw.demand > pw.supply) add(maker('power'));
+    if (pw.demand > pw.supply) add(this.powerMaker());
     add(Object.keys(ITEMS).find((k) => ITEMS[k].kind === 'knowledge' && ITEMS[k].era <= s.era && !this.builds.some((b) => b.item === k)));
     if (this.happy < 60) add(Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'decor' && ITEMS[k].era <= s.era).sort((a, b) => ITEMS[b].era - ITEMS[a].era)[0]);
     // A store when goods overflow (not too many), an outpost now and then.
@@ -351,6 +353,16 @@ export class Rival {
     const more = [maker(low), popCap < ERAS[s.era].popGoal * 1.8 ? houseFor(s.era) : null, decor[hashStr('d' + now) % decor.length], roomOut ? 'outpost' : maker(low)];
     const k = hashStr('m' + now) % more.length;
     for (let i = 0; i < more.length; i++) if (more[(k + i) % more.length] && this.start(more[(k + i) % more.length], now)) return;
+  }
+
+  // A power plant it can keep going: no coal plant without coal.
+  powerMaker() {
+    const s = this.s;
+    return E.makersOf('power', s.era).find((k) => {
+      const inp = ITEMS[k].recipe?.in || {};
+      const fed = Object.keys(inp).every((r) => this.makes(r) || (s.stock[r] || 0) > 30 || (RAW.includes(r) && this.knowsOre(r)));
+      return fed && this.plot(k, true);
+    }) || null;
   }
 
   // Is there a building that makes this good?
@@ -437,6 +449,12 @@ export class Rival {
     }
     return best;
   }
+}
+
+export function raceProgress(era, finished, knowledge, wonder, population) {
+  if (finished) return { era, frac: 1, total: era + 1 };
+  const frac = (Math.min(1, knowledge) + (wonder ? (wonder.status === 'done' ? 1 : E.wonderProgress(wonder)) : 0) + Math.min(1, population / ERAS[era].popGoal)) / 3;
+  return { era, frac: Math.round(frac * 1000) / 1000, total: Math.round((era + frac) * 1000) / 1000 };
 }
 
 function reachOf(t, stores) {
