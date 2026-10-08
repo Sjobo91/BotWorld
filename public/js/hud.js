@@ -4,7 +4,7 @@
 // and the big banners for wonders, new eras and the finale.
 // Viewer names and text only ever go in as text, never as HTML.
 import { ITEMS, ERAS, RESOURCES, EVENTS, TOOLS, itemsOfEra } from '../shared/catalog.js';
-import { GATHER } from '../shared/terrain.js';
+import { GATHER, angleOf } from '../shared/terrain.js';
 
 const DAY = 864e5;
 const $ = (id) => document.getElementById(id);
@@ -137,6 +137,44 @@ export function createHud(state, now, opts) {
       li.append(head, how);
       ul.append(li);
     }
+  }
+
+  // --- The race against the AI town on the far side of the world ------------------------------
+  const COMPASS = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];
+  function renderRace() {
+    const race = state.econ?.race;
+    const box = $('race');
+    if (!race || !race.rival) { box.hidden = true; return; }
+    box.hidden = false;
+    const r = race.rival;
+    const rows = [
+      { name: 'BotWorld', who: 'chat', color: '#3b7ddd', era: state.era, score: race.you },
+      { name: r.name, who: 'AI', color: '#d9534f', era: r.era, score: r.score },
+    ];
+    const max = Math.max(1, ...rows.map((x) => x.score));
+    const lead = race.you >= r.score ? 0 : 1;
+    const list = $('raceRows');
+    list.textContent = '';
+    rows.forEach((x, i) => {
+      const li = el('li', 'race-row' + (i === lead ? ' ahead' : ''));
+      const who = el('span', 'who');
+      const dot = el('i');
+      dot.style.background = x.color;
+      who.append(dot, el('b', null, x.name), el('small', null, ' ' + x.who));
+      li.append(who, el('span', 'rera', ERAS[x.era].emoji + ' ' + ERAS[x.era].name));
+      const bar = el('span', 'bar');
+      const fill = el('span');
+      fill.style.width = Math.round((100 * x.score) / max) + '%';
+      fill.style.background = x.color;
+      bar.append(fill);
+      li.append(bar);
+      list.append(li);
+    });
+    const a = angleOf(r.origin);
+    const way = COMPASS[Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
+    $('raceNote').textContent = r.finished ? r.name + ' reached the Future. Can BotWorld still beat their score?'
+      : r.met ? r.name + ' lies to the ' + way + ' with ' + r.builds + ' buildings. Claim the land between: !build outpost ' + way
+      : 'An AI town far to the ' + way + ', past the fog, races BotWorld to the Future. !explore ' + way + ' to find it.';
   }
 
   // --- What to do now: the town's next steps, from the server ---------------------------------
@@ -309,7 +347,7 @@ export function createHud(state, now, opts) {
 
   // --- Being built: town projects first, then homes ----------------------------------------
   function progressOf(b) {
-    if (b.project && b.work && !b.evolving && !b.upgrade) {
+    if (b.project && b.work && !b.evolving) {
       const extra = b.status === 'building' && b.rate && b.progressAt ? (b.rate * Math.max(0, now() - b.progressAt)) / 1000 : 0;
       return Math.max(0, Math.min(1, ((b.progress || 0) + extra) / b.work));
     }
@@ -589,7 +627,7 @@ export function createHud(state, now, opts) {
   setInterval(renderLeaders, 30e3);
   return {
     render,
-    renderEcon() { renderRes(); renderEra(); renderNext(); if (state.econ?.needs) renderHowtoNeeds(); },
+    renderEcon() { renderRes(); renderEra(); renderNext(); renderRace(); if (state.econ?.needs) renderHowtoNeeds(); },
     toast,
     showMe,
     eraBanner,

@@ -66,6 +66,7 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!wood 3` | Do it three times in a row (works for every job, up to 5) |
 | `!work bricks` | Help at a building that makes a good from other goods: `bricks`, `steel`, `parts`, `chips` |
 | `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
+| `!build outpost` | Start an outpost out in the world, near rich land (`!build outpost west` picks the way). Producers near a store work at full speed |
 | `!upgrade woodcutter` | Start a town project that takes a building up a level (also `!upgrade #12`). Three levels, each makes 50% more |
 | `!upgrade tools` | Better tools for your bot: a bigger load on every trip and faster building. Needs a level, the right era and a few goods |
 | `!upgrade` | Make your home bigger (three levels per era) |
@@ -89,6 +90,8 @@ In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DES
 
 * **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
 * **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot on a trip to chop, mine or pick on the right land, and it carries the load back to the nearest store: 2 goods with stone tools, up to 8 with laser tools. There is always something useful to do, even before the first woodcutter stands.
+* **The whole world.** Outposts take the town out over the map. Producers more than 4 tiles from a store (the pad, a stockpile, barn, warehouse or outpost) make a tenth less per extra tile, so chat builds outposts near the forests, hills and ore far away. Roads with little mule carts run from every outpost back to town.
+* **The rival.** Cogsworth, an AI town on the far side of the world, plays by the same rules: it gathers, builds, upgrades, sends out outposts and climbs the eras. Land near its buildings is its own, so both towns race for the forests and ore deposits in between. The **Race to the Future** panel shows who leads; chat finds Cogsworth by exploring (it is shown on the map once found). The rival leans towards a close race: it speeds up a little when chat is far ahead and slows down when chat is behind.
 * **Upgrades.** Every town building can go up to level 3 (`!upgrade woodcutter`), which makes 50% more per level and shows as pennants on the building. Bots get better tools with `!upgrade tools` as their viewer levels up.
 * **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge.
 * **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
@@ -151,6 +154,7 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Where the world is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
 | Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `queueMax`, `shiftSec` and more | see `server/world.js` |
+| The rival town | `limits.rival` (`false` turns it off), `limits.rivalDifficulty` (1 is normal, 0.7 easier, 1.3 harder) | on, 1 |
 
 Page options: `?stream=1` broadcast view (press Esc, or the button that shows when you move the mouse, to leave it), `&sound=1` start with sound, `&quality=low` no shadows, `&time=21:30` pretend it is that time of day.
 

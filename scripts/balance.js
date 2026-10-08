@@ -33,6 +33,7 @@ const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
   if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale' });
+  if (e.type === 'notice' && e.kind === 'rival') log.push({ day: (now - T0) / 864e5, text: e.text });
 });
 
 const viewers = Array.from({ length: VIEWERS }, (_, i) => ({ id: 'v' + i, name: 'viewer' + i, start: rnd() * 24 }));
@@ -111,7 +112,8 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
 
 console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
 console.table(daily);
-for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town score', world.raceScore());
 if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;

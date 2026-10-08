@@ -21,6 +21,7 @@ const MAX_BOTS = 60;
 const RING2 = [];
 for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) === 2) RING2.push([dq, dr]);
 const WALK = 0.42;
+const RIVAL_COLOR = '#d9534f';
 const CHAT_EMOJI = ['☕', '💬', '😄', '🔨', '🎉', '🤔', '👍', '🍕', '🌻', '✨', '🏠', '📦'];
 const LINES = {
   hello: ['Hi! I am {name}.', 'Hello there!', 'Nice island, right?', 'I build what {name} asks for.'],
@@ -277,6 +278,7 @@ export async function createWorld(stage, overlay, opts) {
     // Node numbers changed: every bot finds its feet again and carries on.
     for (const p of [...porters]) removePorter(p);
     for (const b of bots.values()) { const walking = b.mode === 'walk' || b.mode === 'job'; resnap(b); if (walking || full) b.timer = 0.05; }
+    for (const b of rivalBots) { resnap(b); b.timer = 0.05; }
     syncTrain();
     updateView();
     renderer.shadowMap.needsUpdate = true;
@@ -291,6 +293,33 @@ export async function createWorld(stage, overlay, opts) {
     let d = Infinity;
     for (const s of storeCache.list) d = Math.min(d, hexDist(s.q - b.q, s.r - b.r));
     return d <= 4 ? 1 : Math.max(0.4, 1 - 0.1 * (d - 4));
+  }
+  // --- The rival's own bots, in red, busy in their town ---------------------------------------
+  const rivalBots = [];
+  function syncRivalBots() {
+    const rv = data.econ?.race?.rival;
+    const home = rv && layout.index.get(rv.origin.q + ',' + rv.origin.r);
+    const want = home && known[home.i] && nav.nodes.length ? Math.min(low ? 3 : 6, 2 + Math.floor((rv.builds || 0) / 10)) : 0;
+    while (rivalBots.length > want) botGroup.remove(rivalBots.pop().parts.g);
+    while (rivalBots.length < want) {
+      const parts = botMesh(RIVAL_COLOR);
+      parts.antenna.visible = true;
+      const node = nearestNode(home.x, home.z);
+      const n = nav.nodes[node];
+      const b = newWalker('rival' + rivalBots.length, { name: rv.name, lastSeen: now(), hat: 'none', color: RIVAL_COLOR }, parts, { node, x: n.x, y: n.y, z: n.z });
+      b.npc = true;
+      botGroup.add(parts.g);
+      rivalBots.push(b);
+    }
+  }
+  // A rival bot walks to one of its town's buildings and works or looks there.
+  function npcDecide(b) {
+    const list = [...builds.values()].filter((v) => v.b.rival && v.root.visible && !v.b.wonder);
+    if (!list.length) { startAct(b, 'look', 3); return; }
+    const busy = list.filter((v) => v.b.status === 'building');
+    const v = busy.length && rand() < 0.6 ? pick(busy) : pick(list);
+    const s = workSpot(v.b, b.haulSalt);
+    if (!s || !goSpot(b, s, (x) => startAct(x, 'look', 2 + rand() * 4, s.yaw))) startAct(b, 'look', 3);
   }
   // --- Roads out to the outposts, and carts on them ---------------------------------------------
   const roads = { set: new Set(), paths: [], key: '' };
@@ -435,6 +464,11 @@ export async function createWorld(stage, overlay, opts) {
       if (!t) continue;
       at.set(t.i, v.b);
       if (v.b.home) homes.set(t.i, (data.builders.get(v.b.ownerId) || {}).color || '#3b7ddd');
+      // The rival's land has red edges, and stays hidden in the fog.
+      if (v.b.rival) {
+        homes.set(t.i, RIVAL_COLOR);
+        v.root.visible = !!known[t.i];
+      }
     }
     for (const t of layout.tiles) {
       drawTile(t, town, homes, at);
@@ -1000,7 +1034,7 @@ export async function createWorld(stage, overlay, opts) {
     if (b.status === 'done') return 1;
     if (b.status !== 'building') return 0;
     // Town projects: work done so far, plus what the helpers did since.
-    if (b.project && !b.evolving && !b.upgrade && b.work) {
+    if (b.project && !b.evolving && b.work) {
       const extra = b.rate && b.progressAt ? (b.rate * Math.max(0, now() - b.progressAt)) / 1000 : 0;
       return Math.max(0, Math.min(1, ((b.progress || 0) + extra) / b.work));
     }
@@ -1015,6 +1049,7 @@ export async function createWorld(stage, overlay, opts) {
       v = { id: b.id, b, root: new T.Group(), body: null, key: '', h: 0.4, anim: [], scaffold: null, stake: null, flag: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0, damaged: false, smoke: 0, shown: 0.05 };
       v.root.position.set(p.x, t && !isWater(t) ? LAND[t.t].top : TILE_TOP, p.z);
       v.root.rotation.y = Math.atan2(-p.x, -p.z);
+      if (b.rival) v.root.visible = !!(t && known[t.i]);
       buildGroup.add(v.root);
       builds.set(b.id, v);
     }
@@ -1237,6 +1272,7 @@ export async function createWorld(stage, overlay, opts) {
   // What should this bot do now? Its own build first, then its job, then rest.
   function decide(b) {
     if (b.porter) { removePorter(b); return; }
+    if (b.npc) { npcDecide(b); return; }
     if (b.mode === 'arrive') return;
     b.act = null;
     b.after = null;
@@ -2351,7 +2387,14 @@ export async function createWorld(stage, overlay, opts) {
     let title;
     let sub;
     let bar = null;
-    if (b.wonder) {
+    if (b.rival) {
+      const rv = data.econ?.race?.rival;
+      const name = rv?.name || data.rivalName || 'Rival';
+      title = name + ': ' + item.label + (b.level > 1 ? ' ' + '★'.repeat(b.level - 1) : '');
+      if (b.wonder) { sub = 'their wonder · ' + (b.status === 'done' ? 'finished' : (rv ? rv.wonder : 0) + '%'); if (b.status !== 'done' && rv) bar = rv.wonder / 100; }
+      else if (b.status === 'building') { sub = b.upgrade ? 'going up a level' : 'being built'; bar = progressOf(b); }
+      else sub = 'rival land · the race is on';
+    } else if (b.wonder) {
       const pr = progressOf(b);
       title = item.label + (b.status === 'done' ? '' : ' ' + Math.floor(pr * 100) + '%');
       const short = data.econ?.wonder?.id === b.id ? data.econ.wonder.short : [];
@@ -2474,6 +2517,7 @@ export async function createWorld(stage, overlay, opts) {
     }).sort((a, b) => b.rank - a.rank || a.d - b.d);
     let doneShown = 0;
     for (const { v, active, d } of order) {
+      if (!v.root.visible) { if (v.label) setShown(v.label, false); continue; }
       const wantDone = !active && camDist < 5.5 && d < 3.2 && doneShown < 10;
       const wonderDone = v.b.wonder && v.b.status === 'done' && camDist > 5.5;
       if (lapse || wonderDone || (!active && !wantDone && !v.b.wonder)) { if (v.label) setShown(v.label, false); continue; }
@@ -2788,6 +2832,7 @@ export async function createWorld(stage, overlay, opts) {
     updateWeather(dt);
     for (const b of [...bots.values()]) stepBot(b, t, dt);
     for (const p of [...porters]) stepBot(p, t, dt);
+    for (const n of rivalBots) stepBot(n, t, dt);
     stepBuilds(t, dt);
     stepTrain(dt);
     stepEvents(t, dt);
@@ -2835,6 +2880,7 @@ export async function createWorld(stage, overlay, opts) {
       }
       data.jobs = new Map(Object.entries(extra.jobs || {}));
       data.queues = new Map(Object.entries(extra.queues || {}));
+      if (extra.rivalName) data.rivalName = extra.rivalName;
       data.econ = extra.econ || data.econ;
       if (extra.era != null && extra.era !== era) applyEra(extra.era);
       data.finale = !!extra.finished;
@@ -2879,6 +2925,13 @@ export async function createWorld(stage, overlay, opts) {
       for (const v of builds.values()) if (v.b.ownerId === builder.id && v.label) v.label.w = 0;
       if (joined) interest(1, 0, 0, 7, null, 6000);
     },
+    // Chat's scouts found the rival town: go and have a look.
+    rivalMet(r) {
+      if (!r?.origin) return;
+      const p = hexToWorld(r.origin.q, r.origin.r);
+      if (opts.stream) interest(8, p.x, p.z, 9, null, 14000);
+      else flyTo(p.x, p.z, 9, 2200);
+    },
     // Jobs waiting in line for a bot: shown next to its name.
     setQueue(userId, n) {
       if (n) data.queues.set(userId, n);
@@ -2913,6 +2966,7 @@ export async function createWorld(stage, overlay, opts) {
     },
     setEconomy(econ) {
       data.econ = econ;
+      syncRivalBots();
     },
     produce(list) {
       const camDist = camera.position.distanceTo(controls.target);

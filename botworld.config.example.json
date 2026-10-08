@@ -13,6 +13,8 @@
     "maxProjects": 3,
     "maxHelpers": 8,
     "voteEveryMin": 60,
-    "queueMax": 5
+    "queueMax": 5,
+    "rival": true,
+    "rivalDifficulty": 1
   }
 }

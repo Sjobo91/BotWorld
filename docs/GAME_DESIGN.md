@@ -31,6 +31,22 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 * **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings fly a silver (level 2) or gold (level 3) pennant.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
 
+## Outposts and the whole world
+
+* **Outposts** (`!build outpost`, or `!build outpost north`) are small stores far out: the server puts them on rich, known land at least 6 tiles from any other store, a little further each time, and they reveal the land within 4 tiles.
+* **Reach.** A producer within 4 tiles of a store (the landing pad, a stockpile, barn, warehouse or outpost) works at full speed; every tile further takes a tenth off, down to 40%. New producers prefer spots near a store, gatherers drop their loads at the nearest one, and the plan box suggests an outpost when producers are far from one.
+* **Roads and carts.** A worn road runs from every outpost to the nearest store closer to the middle, and mule carts travel along it.
+
+## The rival town
+
+Cogsworth is an AI town about 27 tiles out, on the side of the world away from the sea. It plays by the same rules as chat, from the same catalog:
+
+* A crew of 3 to 12 AI bots gathers what the town has least of and builds. About once an hour (at normal speed) it starts something: first whatever makes the goods its wonder and this era's buildings need, then food, homes, power, knowledge and happiness, then outposts (two more every era), upgrades and more of everything.
+* Its economy, wonders and eras follow the town's rules: production with workers, happiness, power and reach, food for its people, knowledge over `eraDays`, the era's wonder and the people goal.
+* **Land.** Tiles within two steps of a rival building are the rival's, and the town cannot build or gather there; the rival keeps out of the town's land the same way. Both spread out over the map with their outposts and race for the forests, hills and ore deposits in between.
+* **The race.** Score: 250 per era, plus people, 4 per building, 6 per upgrade level and up to 100 for the wonder. The rival leans towards a close race: up to 45% faster when chat is far ahead, up to 35% slower when chat is far behind (times `limits.rivalDifficulty`).
+* **Fog.** The rival is hidden until chat's scouts reach its land; then the camera goes to look, and its buildings show on the map with red edges and red bots at work. Until then the **Race to the Future** panel says which way it lies.
+
 ## What chat sees
 
 * **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, gather the goods a project waits for (`!wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.

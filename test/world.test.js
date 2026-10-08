@@ -650,6 +650,50 @@ test('outposts go out to rich land, and producers far from a store make less', (
   assert.ok(reachOf(far, stores) >= 0.4);
 });
 
+test('a rival AI town lives on the far side, builds by the same rules and keeps to its own land', () => {
+  const { w, events } = makeWorld();
+  const r = w.rival;
+  assert.ok(r, 'the rival is on by default');
+  const o = M.tileAt(w.map, r.s.origin.q, r.s.origin.r);
+  assert.ok(o.d >= 24, 'far from the town');
+  const off = Math.atan2(Math.sin(M.angleOf(o) - (w.map.seaAngle + Math.PI)), Math.cos(M.angleOf(o) - (w.map.seaAngle + Math.PI)));
+  assert.ok(Math.abs(off) < 1, 'on the side away from the sea');
+  // A day of the rival on its own.
+  for (const k of Object.keys(r.s.stock)) r.s.stock[k] = 100;
+  let now = run(w, T0, 864e5, 60e3);
+  assert.ok(r.builds.filter((b) => !b.wonder).length >= 5, 'the rival builds');
+  const town = w.ownLand();
+  for (const b of r.builds) {
+    const t = M.tileAt(w.map, b.q, b.r);
+    if (!b.wonder) assert.ok(!town.has(t.i), 'never on the town\'s land');
+  }
+  assert.ok(events.some((e) => e.type === 'build' && e.build.rival));
+  w.economy(now, 0);
+  assert.equal(w.econ.race.rival.name, 'Cogsworth');
+  assert.ok(w.econ.race.rival.score > 0);
+  // The town never builds on the rival's land.
+  revealAll(w);
+  rich(w);
+  const land = r.land();
+  for (let i = 0; i < 3; i++) {
+    const res = say(w, { id: 'x' + i, name: 'x' + i }, '!build outpost west', now);
+    if (!res.ok) continue;
+    assert.ok(!land.has(M.tileAt(w.map, res.build.q, res.build.r).i));
+  }
+  // Meeting them is news.
+  assert.equal(r.s.met, false);
+  w.checkMet([o]);
+  assert.equal(r.s.met, true);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'rival' && /found Cogsworth/.test(e.text)));
+});
+
+test('the rival can be switched off', () => {
+  const w = new World(freshState(T0, 1), { limits: { rival: false } });
+  assert.equal(w.rival, null);
+  w.economy(T0, 0);
+  assert.equal(w.econ.race, null);
+});
+
 test('a restart catches up on homes, and projects carry on', () => {
   const { w } = makeWorld();
   rich(w);

@@ -98,11 +98,13 @@ function handle(ev) {
       state.jobs = new Map(Object.entries(ev.jobs || {}));
       state.connected = true;
       state.queues = new Map(Object.entries(ev.queues || {}));
-      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, queues: ev.queues, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo, map: ev.map, explored: ev.explored });
+      world?.load(ev.builds.concat(ev.rivalBuilds || []), ev.builders, { jobs: ev.jobs, queues: ev.queues, rivalName: ev.rival?.name, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo, map: ev.map, explored: ev.explored });
       showDevbar(ev.mode);
       if (ev.gazette && Date.now() - ev.gazette.at < 40 * 60e3) hud.gazette(ev.gazette);
       break;
     case 'build': {
+      // The rival's buildings are only drawn, never listed with the town's.
+      if (ev.build.rival) { world?.updateBuild(ev.build); break; }
       const prev = state.builds.get(ev.build.id);
       state.builds.set(ev.build.id, ev.build);
       world?.updateBuild(ev.build);
@@ -123,6 +125,9 @@ function handle(ev) {
       if (ev.joined) hud.toast('join', '🛬', ev.builder.name, ' landed on BotWorld!');
       return;
     }
+    case 'rival':
+      if (ev.met) world?.rivalMet(ev.rival);
+      return;
     case 'queue':
       if (ev.n) state.queues.set(ev.userId, ev.n);
       else state.queues.delete(ev.userId);
@@ -206,6 +211,7 @@ function handle(ev) {
     case 'notice':
       if (ev.kind === 'help') hud.toast('help', '💡', '', ev.text);
       else if (ev.kind === 'project') hud.toast('done', '🎉', '', ev.text);
+      else if (ev.kind === 'rival') hud.toast('event', '⚔️', '', ev.text);
       else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
       else if (ev.kind === 'wonder') {
         const w = state.econ?.wonder;

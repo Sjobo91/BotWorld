@@ -31,6 +31,7 @@ export function templateHeadline(facts, econ, era) {
       else if (f.key === 'blackout') lines.push('Lights out! A power plant fails and the city goes dark');
       else lines.push(ev.label + ': ' + ev.text.toLowerCase());
     }
+    if (f.kind === 'rival') lines.push(f.text.replace(/!$/, '').slice(0, 100));
     if (f.kind === 'level') lines.push(pick([f.name + ' becomes a ' + f.title + ' at level ' + f.level, 'Rising star: ' + f.name + ' reaches level ' + f.level]));
     if (f.kind === 'built' && f.count >= 3) lines.push(pick(['Building boom: ' + plural(f.count, 'new building', 'new buildings') + ' since the last edition', 'Hammers everywhere: ' + f.count + ' new buildings rise']));
     if (f.kind === 'built' && f.top) lines.push(f.top.name + ' builds ' + (f.top.count > 1 ? f.top.count + ' things' : 'a new ' + lower(f.top.item)) + '; neighbours impressed');
@@ -79,6 +80,7 @@ export class Gazette {
     if (ev.type === 'era') add({ kind: 'era', era: ev.era });
     else if (ev.type === 'finale') add({ kind: 'finale' });
     else if (ev.type === 'notice' && ev.kind === 'wonder') add({ kind: 'wonder', item: ERAS[this.world.era].wonder });
+    else if (ev.type === 'notice' && ev.kind === 'rival') add({ kind: 'rival', text: ev.text });
     else if (ev.type === 'event' && ev.event) add({ kind: 'event', key: ev.event.key, damaged: ev.damaged ? ev.damaged.length : 0, gift: ev.gift ? Object.entries(ev.gift).map(([r, n]) => n + ' ' + r).join(', ') : '' });
     else if (ev.type === 'level' && ev.level >= 3) add({ kind: 'level', name: ev.name, level: ev.level, title: ev.title });
     else if (ev.type === 'builder' && ev.joined) {
@@ -148,6 +150,7 @@ export class Gazette {
     const out = [];
     out.push('Era: ' + ERAS[s.era].name + ' (' + ERAS[s.era].tagline + '), era ' + (s.era + 1) + ' of ' + ERAS.length + '.');
     out.push('Day: ' + (Math.floor((Date.now() - s.createdAt) / 864e5) + 1) + '.');
+    if (econ?.race?.rival) out.push('Race: BotWorld scores ' + econ.race.you + ', the rival AI town ' + econ.race.rival.name + ' scores ' + econ.race.rival.score + ' (' + ERAS[econ.race.rival.era].name + ').');
     if (econ) {
       out.push('Population: ' + econ.population + ' (goal for next era ' + econ.popGoal + '). Happiness: ' + econ.happy + '%.');
       if (econ.wonder) out.push('Wonder being built: ' + label(econ.wonder.item) + ', ' + Math.floor(econ.wonder.progress * 100) + '% done.');
@@ -159,6 +162,7 @@ export class Gazette {
       if (f.kind === 'wonder') out.push('Wonder finished: ' + label(f.item) + '.');
       if (f.kind === 'event' && EVENTS[f.key]) out.push('Event: ' + EVENTS[f.key].label + ' (' + EVENTS[f.key].text + ')' + (f.damaged ? ', ' + f.damaged + ' buildings damaged' : '') + (f.gift ? ', gifts: ' + f.gift : '') + '.');
       if (f.kind === 'level') out.push('Viewer "' + f.name + '" reached level ' + f.level + ' (' + f.title + ').');
+      if (f.kind === 'rival') out.push('News about the rival AI town: ' + f.text);
       if (f.kind === 'joined') out.push('New viewers arrived: ' + f.names.slice(0, 5).map((n) => '"' + n + '"').join(', ') + '.');
       if (f.kind === 'built') out.push(f.count + ' buildings finished' + (f.top ? ', most by "' + f.top.name + '" (latest: ' + lower(f.top.item) + ')' : '') + '.');
     }

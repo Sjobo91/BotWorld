@@ -11,6 +11,7 @@ import { WONDER_RING, hexDist, hexKey, ringTiles, wonderTile } from '../public/s
 import * as M from '../public/shared/terrain.js';
 import { parseCommand } from './commands.js';
 import * as E from './economy.js';
+import { Rival, freshRival } from './rival.js';
 
 export const DEFAULT_LIMITS = {
   maxProjects: 3,
@@ -27,6 +28,9 @@ export const DEFAULT_LIMITS = {
   shiftSec: 40,
   workShiftSec: 60,
   repairSec: 20,
+  // An AI town on the far side of the world that races chat (false: off).
+  rival: true,
+  rivalDifficulty: 1,
   voteEveryMin: 60,
   voteSec: 180,
   autoEventEveryMin: 150,
@@ -49,6 +53,7 @@ const WONDER_HELPERS = 8;
 const DAY = 864e5;
 // Commands that keep a bot busy for a while (and so can wait in line).
 const JOB_COMMANDS = new Set(['work', 'help', 'explore', 'repair']);
+const EMPTY = new Set();
 const STARTER_HATS = Object.keys(HATS).filter((h) => h !== 'none' && HATS[h].level === 1);
 const NEAR2 = [];
 for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) if ((dq || dr) && hexDist(dq, dr) <= 2) NEAR2.push([dq, dr]);
@@ -181,6 +186,56 @@ export class World {
     this.relocateWonderRing();
     for (const b of this.builds) if (!b.wonder && b.rich == null) this.placeStats(b);
     this.ensureWonder(this.state.eraStartedAt);
+    this.rivalDifficulty = Number(this.limits.rivalDifficulty) || 1;
+    if (this.limits.rival) {
+      if (!this.state.rival) {
+        // A rival for an older world starts in the same era, with some goods.
+        const now0 = this.state.createdAt || now;
+        this.state.rival = freshRival(this.map, now0, this.state.era);
+        if (this.state.era > 0) for (const r of E.unlockedResources(this.state.era)) this.state.rival.stock[r] = 80;
+      }
+      this.rival = new Rival(this, this.state.rival);
+    } else this.rival = null;
+  }
+
+  // --- The race against the rival ---------------------------------------------------------
+  raceScore() {
+    const s = this.state;
+    let n = 0;
+    let levels = 0;
+    for (const b of this.builds) if (b.built && !b.wonder && !b.home) { n++; levels += (b.level || 1) - 1; }
+    n += this.builds.filter((b) => b.home && b.built).length;
+    const w = this.currentWonder();
+    return Math.round(s.era * 250 + s.population + n * 4 + levels * 6 + (w ? E.wonderProgress(w) * 100 : 0) + (s.finished ? 500 : 0));
+  }
+  // The town's land: tiles within two steps of its buildings (and the middle).
+  ownLand() {
+    if (this.ownCache && this.ownCache.n === this.builds.length) return this.ownCache.set;
+    const set = new Set();
+    for (const b of this.builds) {
+      const t = M.tileAt(this.map, b.q, b.r);
+      if (t) for (const n of M.tilesWithin(this.map, t, 2)) set.add(n.i);
+    }
+    for (const t of this.map.tiles) if (t.d <= M.START_RADIUS) set.add(t.i);
+    this.ownCache = { n: this.builds.length, set };
+    return set;
+  }
+  rivalLand() {
+    return this.rival ? this.rival.land() : EMPTY;
+  }
+  allTaken() {
+    const set = new Set(this.builds.map((b) => hexKey(b.q, b.r)));
+    if (this.rival) for (const b of this.rival.builds) set.add(hexKey(b.q, b.r));
+    return set;
+  }
+  // Newly seen land with the rival's buildings on it: chat has met them.
+  checkMet(tiles) {
+    if (!this.rival || this.rival.s.met || !tiles.length) return;
+    const land = this.rival.land();
+    if (!tiles.some((t) => land.has(t.i))) return;
+    this.rival.s.met = true;
+    this.emit({ type: 'notice', kind: 'rival', text: 'Scouts found ' + this.rival.s.name + ', the rival town! Who reaches the Future first?' });
+    this.emit({ type: 'rival', rival: this.rival.summary(), met: true });
   }
 
   // The ring around the landing pad is for wonders; anything an old save
@@ -259,6 +314,8 @@ export class World {
       event: this.state.event,
       jobs: this.state.jobs,
       queues: Object.fromEntries(Object.entries(this.state.queues || {}).map(([uid, q]) => [uid, q.length])),
+      rival: this.rival ? this.rival.summary() : null,
+      rivalBuilds: this.rival ? this.rival.builds : [],
       leaders: this.leaders(now),
     };
   }
@@ -621,6 +678,7 @@ export class World {
   finishExplore(uid, job, now) {
     const tiles = M.reveal(this.map, this.bits, job.q, job.r, M.SCOUT_RADIUS);
     const found = this.discover(tiles, now);
+    this.checkMet(tiles);
     this.saveBits();
     const b = this.state.builders[uid];
     if (b) b.trips = (b.trips || 0) + 1;
@@ -656,6 +714,7 @@ export class World {
     const tiles = M.reveal(this.map, this.bits, b.q, b.r, rad);
     if (!tiles.length) return;
     const found = this.discover(tiles, Date.now());
+    this.checkMet(tiles);
     this.saveBits();
     this.changed({ type: 'explore', userId: null, name: null, at: { q: b.q, r: b.r }, tiles: tiles.map((t) => t.i), found });
   }
@@ -721,7 +780,7 @@ export class World {
   }
 
   gatherSpots(kind) {
-    const taken = new Set();
+    const taken = new Set(this.rivalLand());
     for (const b of this.builds) { const t = M.tileAt(this.map, b.q, b.r); if (t) taken.add(t.i); }
     return M.gatherSpots(this.map, kind, this.known, taken);
   }
@@ -1042,6 +1101,7 @@ export class World {
   tick(now) {
     this.updateBuilds(now);
     this.updateJobs(now);
+    if (this.rival) this.rival.tick(now);
     if (!this.lastEcon) this.lastEcon = now;
     const dt = (now - this.lastEcon) / 1000;
     if (dt >= ECON_STEP_SEC) {
@@ -1286,6 +1346,7 @@ export class World {
       maxProjects: this.limits.maxProjects,
       plan: this.plan(needs, w, popCap),
       explored: { n: explored, total: this.map.total },
+      race: this.rival ? { you: this.raceScore(), rival: this.rival.summary() } : null,
     };
     if (dt > 0) {
       this.dirty = true;
@@ -1384,6 +1445,10 @@ export class World {
     this.ensureWonder(now);
     const evolved = this.evolve(now);
     this.changed({ type: 'era', era: s.era, at: now, evolved });
+    if (this.rival && this.rival.s.era < s.era) {
+      this.rival.s.eraFirst[s.era] = 'town';
+      this.emit({ type: 'notice', kind: 'rival', text: 'BotWorld reached the ' + ERAS[s.era].name + ' before ' + this.rival.s.name + '!' });
+    }
   }
 
   ensureWonder(now) {
@@ -1491,10 +1556,13 @@ export class World {
     const stores = prod && it.kind !== 'storage' ? this.stores() : null;
     let best = null;
     let bestScore = Infinity;
+    const theirs = this.rivalLand();
+    const taken = this.rival ? this.allTaken() : null;
+    const mine = theirs.size ? (n) => this.known(n) && !theirs.has(n.i) : this.known;
     for (const t of this.map.tiles) {
-      if (t.d <= WONDER_RING || !this.known(t)) continue;
+      if (t.d <= WONDER_RING || !this.known(t) || theirs.has(t.i)) continue;
       const key = hexKey(t.q, t.r);
-      if (at.has(key) || !M.siteOk(this.map, item, t, this.known)) continue;
+      if (at.has(key) || (taken && taken.has(key)) || !M.siteOk(this.map, item, t, mine)) continue;
       if (quick) return t;
       let s;
       if (prod) s = t.d * 0.35 - M.richness(this.map, item, t) * 5;
@@ -1527,8 +1595,9 @@ export class World {
     const want = dir ? M.DIRECTIONS[dir] : null;
     let best = null;
     let bestScore = Infinity;
+    const theirs = this.rivalLand();
     for (const t of this.map.tiles) {
-      if (t.d <= WONDER_RING + 2 || !this.known(t) || at.has(hexKey(t.q, t.r))) continue;
+      if (t.d <= WONDER_RING + 2 || !this.known(t) || at.has(hexKey(t.q, t.r)) || theirs.has(t.i)) continue;
       if (!M.siteOk(this.map, 'outpost', t, this.known)) continue;
       const ds = storeDist(t, stores);
       if (ds < 6) continue;

@@ -278,6 +278,15 @@ code {
 
 /* The right column: era, queue, leaderboard. */
 .side { position: absolute; top: 1.1rem; right: var(--edge); width: 22.5rem; display: grid; gap: 0.6rem; }
+.race-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.race-row { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.5rem; align-items: center; font: 600 0.82rem/1.2 var(--font-body); }
+.race-row .who { display: flex; gap: 0.35rem; align-items: center; }
+.race-row .who i { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; }
+.race-row .rera { color: var(--ink-soft); font-weight: 500; font-size: 0.75rem; }
+.race-row .bar { grid-column: 1 / -1; height: 0.4rem; border-radius: 0.2rem; background: var(--line); overflow: hidden; }
+.race-row .bar span { display: block; height: 100%; border-radius: 0.2rem; }
+.race-row.ahead b::after { content: ' 👑'; }
+.race-note { margin: 0.45rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
 .side .panel { position: static; padding: 0.85rem 0.95rem 0.9rem; }
 .side .panel h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
 .era-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.55rem; }
