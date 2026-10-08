@@ -1570,6 +1570,8 @@ export class World {
     const site = M.siteOf(item);
     const prod = isProducerLike(it) || !!site.near || !!site.ore;
     const stores = prod && it.kind !== 'storage' ? this.stores() : null;
+    // A new mine goes for the ore no mine digs yet.
+    const lacking = site.ore ? ['coal', 'iron'].filter((r) => !this.builds.some((b) => E.isUp(b) && b.ores?.includes(r))) : [];
     let best = null;
     let bestScore = Infinity;
     const theirs = this.rivalLand();
@@ -1581,10 +1583,12 @@ export class World {
       if (at.has(key) || (taken && taken.has(key)) || !M.siteOk(this.map, item, t, mine)) continue;
       if (quick) return t;
       let s;
-      if (prod) s = t.d * 0.35 - M.richness(this.map, item, t) * 5;
-      // Producers like to be near a store, so their goods reach town.
-      if (stores) s += 0.8 * Math.max(0, storeDist(t, stores) - REACH);
-      else if (it.zone === 'inner') s = t.d * 1.6;
+      if (prod) {
+        s = t.d * 0.35 - M.richness(this.map, item, t) * 5;
+        // Producers like to be near a store, so their goods reach town.
+        if (stores) s += 0.8 * Math.max(0, storeDist(t, stores) - REACH);
+        if (lacking.length && M.oresNear(this.map, t).some((r) => lacking.includes(r))) s -= 4;
+      } else if (it.zone === 'inner') s = t.d * 1.6;
       else s = t.d;
       for (const [dq, dr] of NEAR2) {
         const o = at.get(hexKey(t.q + dq, t.r + dr));

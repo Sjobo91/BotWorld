@@ -321,8 +321,15 @@ export class Rival {
     const cap = E.capacity(this.builds);
     const popCap = E.popCapacity(this.builds);
     const wants = [];
-    const add = (item) => { if (item && ITEMS[item] && ITEMS[item].era <= s.era && !wants.includes(item)) wants.push(item); };
-    const maker = (r) => E.makersOf(r, s.era).find((k) => this.plot(k, true));
+    // A want is a building, or a building for one good (a mine for iron).
+    const add = (want) => {
+      const w = typeof want === 'string' ? { item: want } : want;
+      if (w && ITEMS[w.item] && ITEMS[w.item].era <= s.era && !wants.some((x) => x.item === w.item && x.res === w.res)) wants.push(w);
+    };
+    const maker = (r) => {
+      const k = E.makersOf(r, s.era).find((item) => this.plot(item, true, r));
+      return k ? { item: k, res: r } : null;
+    };
     const w = this.currentWonder();
     const needed = new Set(Object.keys(w && w.status !== 'done' ? ITEMS[w.item].needs : {}));
     for (const k of itemsOfEra(s.era)) for (const r of Object.keys(ITEMS[k].cost)) needed.add(r);
@@ -344,15 +351,19 @@ export class Rival {
     if (roomOut && this.builds.length > 8 + outposts * 12) add('outpost');
     const fresh = itemsOfEra(s.era).filter((k) => ITEMS[k].kind !== 'house' && !this.builds.some((b) => b.item === k));
     add(fresh[hashStr('f' + now) % Math.max(1, fresh.length)]);
-    for (const item of wants) if (this.start(item, now)) return;
+    for (const w of wants) if (this.start(w.item, now, w.res)) return;
     if (this.upgradeOne(now)) return;
     // Nothing urgent: keep growing like a busy chat does. More homes, another
     // producer of what is shortest, something pretty, or an outpost.
     const low = E.unlockedResources(s.era).reduce((a, r) => ((s.stock[r] || 0) < (s.stock[a] || 0) ? r : a), 'wood');
     const decor = Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'decor' && ITEMS[k].era <= s.era);
-    const more = [maker(low), popCap < ERAS[s.era].popGoal * 1.8 ? houseFor(s.era) : null, decor[hashStr('d' + now) % decor.length], roomOut ? 'outpost' : maker(low)];
+    const asWant = (x) => (typeof x === 'string' ? { item: x } : x);
+    const more = [maker(low), popCap < ERAS[s.era].popGoal * 1.8 ? houseFor(s.era) : null, decor[hashStr('d' + now) % decor.length], roomOut ? 'outpost' : maker(low)].map(asWant);
     const k = hashStr('m' + now) % more.length;
-    for (let i = 0; i < more.length; i++) if (more[(k + i) % more.length] && this.start(more[(k + i) % more.length], now)) return;
+    for (let i = 0; i < more.length; i++) {
+      const w = more[(k + i) % more.length];
+      if (w && this.start(w.item, now, w.res)) return;
+    }
   }
 
   // A power plant it can keep going: no coal plant without coal.
@@ -380,12 +391,12 @@ export class Rival {
     this.saveBits();
   }
 
-  start(item, now) {
+  start(item, now, res = null) {
     const s = this.s;
     const it = ITEMS[item];
     if (!it || it.kind === 'wonder') return false;
     if (Object.entries(it.cost).some(([r, n]) => (s.stock[r] || 0) < n)) return false;
-    const t = this.plot(item, false);
+    const t = this.plot(item, false, res);
     if (!t) return false;
     for (const [r, n] of Object.entries(it.cost)) s.stock[r] -= n;
     const b = { id: ++s.seq, item, rival: true, project: true, color: null, level: 1, q: t.q, r: t.r, status: 'building', startedAt: now, walkSec: 0, buildSec: it.buildSec, work: it.buildSec * LABOR, progress: 0, progressAt: now, built: false, cost: { ...it.cost } };
@@ -411,7 +422,8 @@ export class Rival {
   }
 
   // Where the rival builds: its own known land, never on the town's land.
-  plot(item, quick) {
+  // res: the good it is for (a mine for iron sits next to iron).
+  plot(item, quick, res = null) {
     const it = ITEMS[item];
     const taken = this.w.allTaken();
     const town = this.w.ownLand();
@@ -425,6 +437,7 @@ export class Rival {
       const d = this.distTo(t);
       if (d < 1) continue;
       if (!M.siteOk(this.map, item, t, (n) => this.known(n) && !town.has(n.i))) continue;
+      if (site.ore && (res === 'coal' || res === 'iron') && !M.oresNear(this.map, t).includes(res)) continue;
       let sc;
       if (it.zone === 'far') {
         let ds = Infinity;
