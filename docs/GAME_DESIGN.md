@@ -49,12 +49,12 @@ This is what stretches the game to about two months: chat can speed it up, but e
 
 | Era starts | 2 viewers | 5 viewers | 30 viewers |
 | --- | --- | --- | --- |
-| 🌾 Village | day 9.6 | day 8.6 | day 5.9 |
-| 🏰 Medieval Town | day 19.0 | day 17.4 | day 11.8 |
-| 🏭 Industrial Age | day 28.0 | day 26.1 | day 17.7 |
-| ⚡ Electric City | day 38.0 | day 35.2 | day 23.9 |
-| ✨ Future | day 48.0 | day 44.6 | day 30.3 |
-| Finale (Fusion Spire lit) | day 55.3 | day 50.9 | day 36.7 |
+| 🌾 Village | day 9.0 | day 8.7 | day 6.0 |
+| 🏰 Medieval Town | day 18.3 | day 17.2 | day 12.3 |
+| 🏭 Industrial Age | day 27.3 | day 25.8 | day 18.9 |
+| ⚡ Electric City | day 37.4 | day 34.7 | day 25.2 |
+| ✨ Future | day 47.1 | day 43.7 | day 31.9 |
+| Finale (Fusion Spire lit) | day 53.8 | day 50.5 | day 37.9 |
 
 Each pretend viewer is online an hour and a half a day and types a command every few minutes. A busy chat of 30 fills the knowledge bar faster (schools, labs, tablets) and gets there in about five weeks; a small, loyal chat takes about two months.
 
