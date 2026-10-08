@@ -65,6 +65,9 @@ export const ITEMS = {
   fisher: { era: 0, label: 'Fishing hut', emoji: '🎣', kind: 'producer', cost: { wood: 10 }, buildSec: 20, zone: 'coast', workers: 1, recipe: { out: { food: 3 } }, evolve: 'harbor' },
   campfire: { era: 0, label: 'Campfire', emoji: '🔥', kind: 'decor', cost: { wood: 5 }, buildSec: 10, zone: 'any', comfort: 6, knowledge: 0.05 },
   stockpile: { era: 0, label: 'Stockpile', emoji: '📦', kind: 'storage', cost: { wood: 12 }, buildSec: 15, zone: 'inner', storage: 60, evolve: 'barn' },
+  // Outposts take the town out into the world: a store far from the middle,
+  // so producers out there work at full speed and gatherers walk less.
+  outpost: { era: 0, label: 'Outpost', emoji: '⛺', kind: 'storage', cost: { wood: 20, stone: 8 }, buildSec: 30, zone: 'far', storage: 20, reveal: 4 },
   totem: { era: 0, label: 'Totem', emoji: '🗿', kind: 'decor', cost: { wood: 6, stone: 14 }, buildSec: 25, zone: 'inner', comfort: 14, evolve: 'statue' },
   // --- Village ---------------------------------------------------------------
   cottage: { era: 1, label: 'Cottage', emoji: '🏠', kind: 'house', cost: { wood: 16, bricks: 10 }, buildSec: 25, zone: 'any', pop: 10, evolve: 'townhouse' },

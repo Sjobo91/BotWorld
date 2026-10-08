@@ -131,7 +131,7 @@ export function produce(builds, stock, ctx, dt) {
     m *= adjacencyBoost(b, boosters);
     // A good spot (a woodcutter in a big forest) works faster than a poor one,
     // and every upgrade adds half again.
-    m *= (b.rich || 1) * levelMult(b.level);
+    m *= (b.rich || 1) * levelMult(b.level) * (ctx.reach ? ctx.reach(b) : 1);
     let prog = (ctx.progress.get(b.id) || 0) + (dt / 60) * m;
     while (prog >= 1) {
       const inp = it.recipe.in || {};

@@ -4,7 +4,7 @@
 // The server decides everything; this file only makes it look alive.
 import { ITEMS, ERAS, RESOURCES, TOOLS, hashStr } from '../shared/catalog.js';
 import { DIRS, hexDist } from '../shared/hex.js';
-import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER } from '../shared/terrain.js';
+import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER, findPath, walkable } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat, NATURE } from './meshes.js';
 import { buildingMesh } from './buildings.js';
@@ -283,8 +283,84 @@ export async function createWorld(stage, overlay, opts) {
   }
 
   // Tiles next to a building are town: their edges are roads.
+  // How much of a producer's goods reach town (the server works it out the
+  // same way): full within 4 tiles of a store, a tenth less per tile beyond.
+  let storeCache = { frame: -1, list: [] };
+  function reachAt(b) {
+    if (storeCache.frame !== frame) storeCache = { frame, list: [{ q: 0, r: 0 }].concat([...builds.values()].filter((v) => isStore(v.b) && !v.b.damaged).map((v) => v.b)) };
+    let d = Infinity;
+    for (const s of storeCache.list) d = Math.min(d, hexDist(s.q - b.q, s.r - b.r));
+    return d <= 4 ? 1 : Math.max(0.4, 1 - 0.1 * (d - 4));
+  }
+  // --- Roads out to the outposts, and carts on them ---------------------------------------------
+  const roads = { set: new Set(), paths: [], key: '' };
+  function isStore(b) { return b.built && ITEMS[b.item]?.kind === 'storage'; }
+  function updateRoads() {
+    if (!layout.map) return;
+    const outposts = [...builds.values()].filter((v) => v.b.item === 'outpost' && v.b.built);
+    const key = outposts.map((v) => v.id).join(',') + '|' + known.reduce((a, b) => a + b, 0);
+    if (key === roads.key) return;
+    roads.key = key;
+    roads.set = new Set();
+    roads.paths = [];
+    const center = layout.index.get('0,0');
+    const ok = (t) => !!known[t.i] && walkable(t);
+    for (const v of outposts) {
+      const from = layout.index.get(v.b.q + ',' + v.b.r);
+      if (!from) continue;
+      // To the nearest store closer to the middle, else the landing pad.
+      let to = center;
+      let best = Infinity;
+      for (const o of builds.values()) {
+        if (o === v || !isStore(o.b)) continue;
+        const t = layout.index.get(o.b.q + ',' + o.b.r);
+        if (!t || t.d >= from.d) continue;
+        const d = hexDist(t.q - from.q, t.r - from.r);
+        if (d < best) { best = d; to = t; }
+      }
+      const path = findPath(layout.map, layout.map.tiles[from.i], layout.map.tiles[to.i], ok, 4000);
+      if (!path) continue;
+      const tiles = path.map((m) => layout.tiles[m.i]);
+      for (const t of tiles) roads.set.add(t.i);
+      roads.paths.push({ id: v.id, tiles, next: rand() * 15 });
+    }
+  }
+  const carts = [];
+  function cartMesh() {
+    const g = new T.Group();
+    mesh(geo('cartBed', () => new T.BoxGeometry(0.16, 0.05, 0.1)), mats.wood, 0, 0.07, 0, g);
+    mesh(geo('cartLoad', () => new T.BoxGeometry(0.12, 0.06, 0.08)), mats.crate2 || mats.wood, 0, 0.12, 0, g);
+    for (const s of [-1, 1]) mesh(geo('cartWheel', () => new T.CylinderGeometry(0.035, 0.035, 0.015, 10).rotateX(Math.PI / 2)), mats.woodDark, 0, 0.035, s * 0.06, g);
+    const mule = mesh(geo('cartMule', () => new T.BoxGeometry(0.1, 0.07, 0.05)), mats.trunk, 0.15, 0.09, 0, g);
+    mesh(geo('cartMuleHead', () => new T.BoxGeometry(0.04, 0.05, 0.04)), mats.trunk, 0.06, 0.04, 0, mule);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  function stepCarts(dt) {
+    if (lapse) return;
+    for (const p of roads.paths) {
+      p.next -= dt;
+      if (p.next > 0 || carts.length >= (low ? 3 : 8) || p.tiles.length < 2) continue;
+      p.next = 18 + rand() * 14;
+      const g = cartMesh();
+      world.add(g);
+      // From the outpost into town, along the tile middles.
+      carts.push({ g, pts: p.tiles.map((t) => ({ x: t.x, z: t.z, y: LAND[t.t].top })), i: 0, k: 0 });
+    }
+    for (let n = carts.length - 1; n >= 0; n--) {
+      const c = carts[n];
+      const a = c.pts[c.i];
+      const b = c.pts[c.i + 1];
+      if (!b) { world.remove(c.g); carts.splice(n, 1); continue; }
+      const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      c.k += (dt * 0.35) / len;
+      if (c.k >= 1) { c.k = 0; c.i++; continue; }
+      c.g.position.set(a.x + (b.x - a.x) * c.k, a.y + (b.y - a.y) * c.k, a.z + (b.z - a.z) * c.k);
+      c.g.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+    }
+  }
   function townSet() {
-    const s = new Set();
+    const s = new Set(roads.set);
     for (const t of layout.tiles) if (t.d <= 2) s.add(t.i);
     for (const v of builds.values()) {
       const c = layout.index.get(v.b.q + ',' + v.b.r);
@@ -344,6 +420,8 @@ export async function createWorld(stage, overlay, opts) {
     baseMesh.setColorAt(t.i, k >= 1 ? base : base.clone().lerp(fog, 1 - k));
     let c = t.d === 1 ? TILE_COLORS.plaza.clone() : seasonColor(t).clone();
     const b = at.get(t.i);
+    // The road out to an outpost: a worn trail across the land.
+    if (roads.set.has(t.i) && !b && !water) c.lerp(mats.path.color, 0.45);
     if (b && b.status === 'building' && !b.built && !b.wonder) c = TILE_COLORS.dirt.clone();
     topMesh.setColorAt(t.i, k >= 1 ? c : c.lerp(fog, 1 - k));
   }
@@ -2294,7 +2372,8 @@ export async function createWorld(stage, overlay, opts) {
     } else if (b.project && b.status === 'done' && !b.home) {
       title = item.label + (b.level > 1 ? ' ' + '★'.repeat(b.level - 1) : '') + ' #' + b.id;
       const founder = data.builders.get(b.founderId);
-      sub = (b.level < 3 ? '!upgrade #' + b.id + ' · ' : 'top level · ') + (founder ? 'started by ' + founder.name : 'town');
+      const reach = item.recipe ? reachAt(b) : 1;
+      sub = reach < 1 ? 'far from a store: ' + Math.round(reach * 100) + '% · !build outpost' : (b.level < 3 ? '!upgrade #' + b.id + ' · ' : 'top level · ') + (founder ? 'started by ' + founder.name : 'town');
     } else if (b.home && b.status === 'done') {
       title = (bd ? bd.name + "'s home" : item.label) + (b.level > 1 ? ' · level ' + b.level : '');
       sub = item.label + ' #' + b.id;
@@ -2716,6 +2795,7 @@ export async function createWorld(stage, overlay, opts) {
     stepParticles(dt);
     stepHighlights(dt);
     stepBeacons(dt);
+    stepCarts(dt);
     stepReveals(dt);
     if (frame % 3 === 0) { followSun(false); updateFog(); renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
@@ -2731,6 +2811,7 @@ export async function createWorld(stage, overlay, opts) {
 
   function afterBuildsChanged() {
     if (!world) return;
+    updateRoads();
     updateTownSize();
     rebuildLamps();
     refreshTiles();

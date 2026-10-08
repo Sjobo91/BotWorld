@@ -9,8 +9,10 @@ test('plain chat is not a command', () => {
 });
 
 test('build understands items, colors, filler words and "near"', () => {
-  assert.deepEqual(parseCommand('!build house'), { type: 'build', item: 'house', color: null, near: null, raw: '' });
-  assert.deepEqual(parseCommand('!build a red hut'), { type: 'build', item: 'hut', color: 'red', near: null, raw: '' });
+  assert.deepEqual(parseCommand('!build house'), { type: 'build', item: 'house', color: null, near: null, dir: null, raw: '' });
+  assert.deepEqual(parseCommand('!build a red hut'), { type: 'build', item: 'hut', color: 'red', near: null, dir: null, raw: '' });
+  assert.equal(parseCommand('!build outpost north').dir, 'north');
+  assert.equal(parseCommand('!build outpost ne').dir, 'northeast');
   assert.equal(parseCommand('!BUILD Woodcutter BLUE').color, 'blue');
   assert.equal(parseCommand('!b castle').item, 'tower');
   assert.equal(parseCommand('!build some factories please').item, 'factory');

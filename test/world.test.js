@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, freshState, migrate, LABOR, TOWN_CREW } from '../server/world.js';
+import { World, freshState, migrate, reachOf, LABOR, TOWN_CREW } from '../server/world.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
 import { ITEMS, ERAS } from '../public/shared/catalog.js';
 import * as M from '../public/shared/terrain.js';
@@ -625,6 +625,29 @@ test('the town says what it needs and what to do next', () => {
   w.economy(T0 + 5000, 5);
   assert.equal(w.econ.plan[0].kind, 'help');
   assert.equal(w.econ.projects.length, 1);
+});
+
+test('outposts go out to rich land, and producers far from a store make less', () => {
+  const { w } = makeWorld();
+  revealAll(w);
+  rich(w);
+  const res = say(w, alice, '!build outpost', T0);
+  assert.equal(res.ok, true, res.message);
+  const o = res.build;
+  assert.ok(hexDist(o.q, o.r) >= 6, 'an outpost is far from the pad');
+  const north = say(w, bob, '!build outpost north', T0).build;
+  assert.ok(M.angleOf(M.tileAt(w.map, north.q, north.r)) < -0.7, 'north is up the map');
+  // A woodcutter far from any store works slower than one next to a store.
+  const near = { item: 'woodcutter', q: o.q, r: o.r + 1, built: true, rich: 1, level: 1 };
+  const far = { item: 'woodcutter', q: o.q + 9, r: o.r, built: true, rich: 1, level: 1 };
+  const made = (b, stores) => {
+    const stock = { wood: 0 };
+    E.produce([b], stock, { employment: 1, happyFactor: 1, global: 1, powerRatio: 1, helpers: () => 0, boosts: {}, reach: (x) => reachOf(x, stores), progress: new Map(), fuel: new Map(), cap: 1000 }, 600);
+    return stock.wood;
+  };
+  const stores = [{ q: 0, r: 0 }, o];
+  assert.ok(made(near, stores) > made(far, stores) * 1.5);
+  assert.ok(reachOf(far, stores) >= 0.4);
 });
 
 test('a restart catches up on homes, and projects carry on', () => {

@@ -158,6 +158,7 @@ function parseBuild(args) {
   let item = null;
   let color = null;
   let near = null;
+  let dir = null;
   const unknown = [];
   for (let i = 0; i < args.length; i++) {
     const w = args[i];
@@ -173,7 +174,10 @@ function parseBuild(args) {
     if (asItem) { item = asItem; continue; }
     const asColor = !color && resolveColor(w);
     if (asColor) { color = asColor; continue; }
+    // "!build outpost north": which way to go.
+    const asDir = !dir && (Object.hasOwn(DIRECTIONS, w) ? w : DIRECTION_ALIASES[w]);
+    if (asDir) { dir = asDir; continue; }
     unknown.push(w);
   }
-  return { type: 'build', item, color, near, raw: unknown.join(' ') };
+  return { type: 'build', item, color, near, dir, raw: unknown.join(' ') };
 }

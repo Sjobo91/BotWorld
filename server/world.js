@@ -480,7 +480,7 @@ export class World {
     if (own) return this.refuse(u, now, 'You started the ' + label(own.item) + ' (#' + own.id + '). Help finish it first: !help');
     const tooBig = this.tooBigForStorage(it.cost);
     if (tooBig) return this.refuse(u, now, tooBig);
-    const plot = this.choosePlot(item, { near: cmd.near, ownerId: u.id, salt: s.seq + 1 });
+    const plot = this.choosePlot(item, { near: cmd.near, dir: cmd.dir, ownerId: u.id, salt: s.seq + 1 });
     if (!plot) {
       const why = M.siteOf(item).why;
       return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left nearby. Type !explore to find more!');
@@ -652,13 +652,12 @@ export class World {
 
   revealAround(b) {
     const it = ITEMS[b.item];
-    const rad = b.item === 'lighthouse' || b.item === 'tower' ? 5 : 2;
+    const rad = it.reveal || (b.item === 'lighthouse' || b.item === 'tower' ? 5 : 2);
     const tiles = M.reveal(this.map, this.bits, b.q, b.r, rad);
     if (!tiles.length) return;
     const found = this.discover(tiles, Date.now());
     this.saveBits();
     this.changed({ type: 'explore', userId: null, name: null, at: { q: b.q, r: b.r }, tiles: tiles.map((t) => t.i), found });
-    void it;
   }
 
   // --- Jobs: bots helping build, making goods, hauling, repairing, exploring -----------------
@@ -709,12 +708,16 @@ export class World {
   dropFor(t) {
     let best = { q: 0, r: 0 };
     let bd = hexDist(t.q, t.r);
-    for (const b of this.builds) {
-      if (!E.isUp(b) || ITEMS[b.item].kind !== 'storage') continue;
+    for (const b of this.stores()) {
       const d = hexDist(b.q - t.q, b.r - t.r);
       if (d < bd) { bd = d; best = b; }
     }
     return best;
+  }
+
+  // The landing pad and every working store (outposts too).
+  stores() {
+    return [{ q: 0, r: 0 }].concat(this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].kind === 'storage'));
   }
 
   gatherSpots(kind) {
@@ -1222,6 +1225,7 @@ export class World {
       powerRatio: pw.ratio,
       helpers: (id) => helpers.get(id) || 0,
       boosts: ev?.boost || {},
+      reach: reachFn(this.stores()),
       progress: this.progress,
       fuel: this.fuel,
       cap,
@@ -1351,6 +1355,11 @@ export class World {
       const up = this.upgradable(n.res);
       if (up) add({ kind: 'upgrade', item: up.item, res: n.res, text: 'Upgrade the ' + label(up.item) + ' for more ' + what, cmd: '!upgrade ' + up.item });
     }
+    if (room) {
+      const stores = this.stores();
+      const far = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe && reachOf(b, stores) < 0.75);
+      if (far.length) add({ kind: 'build', item: 'outpost', text: far.length + (far.length === 1 ? ' producer is' : ' producers are') + ' far from a store: build an outpost', cmd: '!build outpost' });
+    }
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
     add({ kind: 'explore', text: 'Explore the fog, there is more to find', cmd: '!explore' });
@@ -1473,11 +1482,13 @@ export class World {
   // Where should this go? Explored land only, on the right ground. Homes
   // cluster near the middle, producers go where the forest, hills or ore are
   // richest, parks and statues near homes.
-  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false } = {}) {
+  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false, dir = null } = {}) {
     const at = new Map(this.builds.map((b) => [hexKey(b.q, b.r), b]));
     const it = ITEMS[item];
+    if (it.zone === 'far') return this.outpostPlot(at, dir, salt, quick);
     const site = M.siteOf(item);
     const prod = isProducerLike(it) || !!site.near || !!site.ore;
+    const stores = prod && it.kind !== 'storage' ? this.stores() : null;
     let best = null;
     let bestScore = Infinity;
     for (const t of this.map.tiles) {
@@ -1487,6 +1498,8 @@ export class World {
       if (quick) return t;
       let s;
       if (prod) s = t.d * 0.35 - M.richness(this.map, item, t) * 5;
+      // Producers like to be near a store, so their goods reach town.
+      if (stores) s += 0.8 * Math.max(0, storeDist(t, stores) - REACH);
       else if (it.zone === 'inner') s = t.d * 1.6;
       else s = t.d;
       for (const [dq, dr] of NEAR2) {
@@ -1506,7 +1519,51 @@ export class World {
     }
     return best;
   }
+
+  // An outpost goes out to rich land where no store is near yet, a few
+  // steps further each time, the way chat asks ("!build outpost north").
+  outpostPlot(at, dir, salt, quick) {
+    const stores = this.stores();
+    const want = dir ? M.DIRECTIONS[dir] : null;
+    let best = null;
+    let bestScore = Infinity;
+    for (const t of this.map.tiles) {
+      if (t.d <= WONDER_RING + 2 || !this.known(t) || at.has(hexKey(t.q, t.r))) continue;
+      if (!M.siteOk(this.map, 'outpost', t, this.known)) continue;
+      const ds = storeDist(t, stores);
+      if (ds < 6) continue;
+      if (want != null) {
+        const off = Math.atan2(Math.sin(M.angleOf(t) - want), Math.cos(M.angleOf(t) - want));
+        if (Math.abs(off) > 0.8) continue;
+      }
+      if (quick) return t;
+      let value = 0;
+      for (const n of M.tilesWithin(this.map, t, 3)) {
+        if (!this.known(n)) { value += 0.15; continue; }
+        if (n.t === 'forest' || n.t === 'hills' || n.t === 'meadow') value += 0.6;
+        if (n.f === 'coal' || n.f === 'iron') value += 3;
+        if (at.has(hexKey(n.q, n.r))) value -= 0.5;
+      }
+      const s = -value + ds * 0.4 + ((hashStr(salt + ':o' + t.i) % 1000) / 1000) * 1.5;
+      if (s < bestScore) { bestScore = s; best = t; }
+    }
+    return best;
+  }
 }
+
+// Producers more than REACH tiles from a store lose a tenth per extra tile
+// (down to 40%): their goods have a long way to town.
+const REACH = 4;
+function storeDist(t, stores) {
+  let d = Infinity;
+  for (const s of stores) d = Math.min(d, hexDist(s.q - t.q, s.r - t.r));
+  return d;
+}
+export function reachOf(t, stores) {
+  const d = storeDist(t, stores);
+  return d <= REACH ? 1 : Math.max(0.4, 1 - 0.1 * (d - REACH));
+}
+const reachFn = (stores) => (b) => reachOf(b, stores);
 
 function compass(a) {
   const names = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];

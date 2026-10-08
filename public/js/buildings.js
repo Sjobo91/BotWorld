@@ -179,6 +179,24 @@ const BUILDERS = {
     for (let i = 0; i < 3; i++) k.part('pileStone', () => new T.DodecahedronGeometry(0.045, 0), mats.stone, 0.24 - i * 0.05, 0.04, -0.2 + i * 0.03);
     return 0.26;
   },
+  // A camp out in the wild: a canvas tent, a tall flag that can be seen from
+  // far, crates waiting for the cart.
+  outpost(k) {
+    k.part('opYard', () => cyl(0.38, 0.38, 0.012, 6), mats.soil, 0, 0.006, 0);
+    k.part('opTent', () => roundRoof(0.2, 0.24), trimMat('#efe6d2'), -0.06, 0, -0.06);
+    k.part('opBand', () => new T.TorusGeometry(0.2, 0.014, 6, 20).rotateX(Math.PI / 2), k.trim, -0.06, 0.03, -0.06);
+    k.part('opDoor', () => box(0.08, 0.11, 0.02), mats.black, -0.06, 0.055, 0.13);
+    k.part('opPole', () => cyl(0.008, 0.008, 0.62, 5), mats.woodDark, 0.2, 0.31, -0.2);
+    k.anim.push({ kind: 'flag', o: k.part('opFlag', () => box(0.15, 0.09, 0.005).translate(0.075, 0, 0), k.trim, 0.2, 0.57, -0.2) });
+    for (const [x, y, z] of [[0.16, 0.05, 0.12], [0.26, 0.05, 0.06], [0.2, 0.15, 0.1]]) {
+      const c = k.part('crate', () => box(1, 1, 1), mats.crate2 || mats.wood, x, y, z);
+      c.scale.setScalar(0.1);
+      c.rotation.y = k.r() * 0.6;
+    }
+    k.part('opCart', () => box(0.16, 0.05, 0.1), mats.wood, -0.22, 0.07, 0.2);
+    for (const s of [-1, 1]) k.part('opWheel', () => cyl(0.035, 0.035, 0.015, 10), mats.woodDark, -0.22, 0.035, 0.2 + s * 0.06).rotation.x = Math.PI / 2;
+    return 0.62;
+  },
   totem(k) {
     const segs = [mats.trunk, k.trim, mats.woodDark, k.trim, mats.trunk];
     segs.forEach((m, i) => k.part('totemSeg' + (i % 2), () => cyl(0.07, 0.075, 0.13, 8), m, 0, 0.065 + i * 0.13, 0));
