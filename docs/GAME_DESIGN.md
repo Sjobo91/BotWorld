@@ -46,14 +46,16 @@ Three bars on screen, all three must be full:
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:
 
-| Era starts | 2 viewers | 5 viewers |
-| --- | --- | --- |
-| 🌾 Village | day 9.6 | day 8.6 |
-| 🏰 Medieval Town | day 19.0 | day 17.4 |
-| 🏭 Industrial Age | day 28.0 | day 26.1 |
-| ⚡ Electric City | day 38.0 | day 35.2 |
-| ✨ Future | day 48.0 | day 44.6 |
-| Finale (Fusion Spire lit) | day 55.3 | day 50.9 |
+| Era starts | 2 viewers | 5 viewers | 30 viewers |
+| --- | --- | --- | --- |
+| 🌾 Village | day 9.6 | day 8.6 | day 5.9 |
+| 🏰 Medieval Town | day 19.0 | day 17.4 | day 11.8 |
+| 🏭 Industrial Age | day 28.0 | day 26.1 | day 17.7 |
+| ⚡ Electric City | day 38.0 | day 35.2 | day 23.9 |
+| ✨ Future | day 48.0 | day 44.6 | day 30.3 |
+| Finale (Fusion Spire lit) | day 55.3 | day 50.9 | day 36.7 |
+
+Each pretend viewer is online an hour and a half a day and types a command every few minutes. A busy chat of 30 fills the knowledge bar faster (schools, labs, tablets) and gets there in about five weeks; a small, loyal chat takes about two months.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 
