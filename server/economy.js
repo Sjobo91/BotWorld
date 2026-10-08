@@ -7,7 +7,7 @@
 //     speed = jobs filled x happiness x power x helping bots x events x boosts
 //   residents eat, power plants burn coal, the era's wonder takes deliveries
 //   and knowledge grows (faster with campfires, schools and labs)
-import { ITEMS, RESOURCES } from '../public/shared/catalog.js';
+import { ITEMS, RESOURCES, homePop } from '../public/shared/catalog.js';
 import { daylight } from '../public/shared/sun.js';
 import { hexBetween } from '../public/shared/hex.js';
 
@@ -15,7 +15,7 @@ export const BASE_CAP = 100;
 export const FOOD_PER_POP_MIN = 0.05;
 // Later eras farm and store food better, so each resident needs less.
 export const foodPerPop = (era) => FOOD_PER_POP_MIN * [1, 0.9, 0.8, 0.65, 0.5, 0.4][Math.min(5, era)];
-export const START_STOCK = { wood: 40, stone: 25, food: 30 };
+export const START_STOCK = { wood: 70, stone: 45, food: 40 };
 export const RESERVE = 0.2; // wonders leave this share of storage for normal builds
 export const MAX_HELPERS = 3; // bots that can help at one building
 export const WONDER_SPEED_PER_HELPER = 0.6;
@@ -37,9 +37,11 @@ export function comfortOf(b) {
   return it.kind === 'wonder' ? it.comfort : it.comfort * (b.level || 1);
 }
 
+// People living in one house: your own home is small, the town's homes are big.
+export const popOf = (b) => (b.home ? homePop(b.level) : itemOf(b)?.pop || 0);
 export function popCapacity(builds) {
   let n = 0;
-  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'house') n += itemOf(b).pop;
+  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'house') n += popOf(b);
   return n;
 }
 
@@ -83,10 +85,11 @@ export function happiness(builds, { foodShort, powerRatio, bonus = 0 }) {
       const it = itemOf(house);
       let local = 0;
       for (const d of decor) if (hexBetween(house, d) <= 2) local += comfortOf(d);
-      let v = 40 + 60 * Math.min(1, (local + shared) / (it.pop * 2));
+      const pop = popOf(house);
+      let v = 40 + 60 * Math.min(1, (local + shared) / (pop * 2));
       if (it.power < 0 && powerRatio < 1) v -= 25 * (1 - powerRatio);
-      sum += v * it.pop;
-      weight += it.pop;
+      sum += v * pop;
+      weight += pop;
     }
     h = sum / weight;
   }
@@ -95,12 +98,11 @@ export function happiness(builds, { foodShort, powerRatio, bonus = 0 }) {
 }
 
 // Windmills make the farms around them faster.
-function adjacencyBoost(b, builds) {
+function adjacencyBoost(b, boosters) {
   let boost = 1;
-  for (const o of builds) {
-    const ot = itemOf(o);
-    if (!ot?.boost || ot.boost.item !== b.item || !isUp(o)) continue;
-    if (hexBetween(b, o) <= ot.boost.radius) boost += ot.boost.by;
+  for (const o of boosters) {
+    const ob = itemOf(o).boost;
+    if (ob.item === b.item && hexBetween(b, o) <= ob.radius) boost += ob.by;
   }
   return Math.min(2, boost);
 }
@@ -112,6 +114,7 @@ export function produce(builds, stock, ctx, dt) {
   const used = {};
   const pops = [];
   const stalled = {};
+  const boosters = builds.filter((o) => isUp(o) && itemOf(o)?.boost);
   for (const b of builds) {
     if (!isUp(b)) continue;
     const it = itemOf(b);
@@ -119,11 +122,15 @@ export function produce(builds, stock, ctx, dt) {
     let m = ctx.employment * ctx.happyFactor * ctx.global;
     if (it.power < 0) m *= ctx.powerRatio;
     m *= 1 + 0.5 * Math.min(MAX_HELPERS, ctx.helpers(b.id));
-    const out = it.recipe.out || {};
+    let out = it.recipe.out || {};
+    // A mine digs only the ores that lie around it.
+    if (b.ores) out = Object.fromEntries(Object.entries(out).filter(([r]) => b.ores.includes(r)).map(([r, n]) => [r, b.ores.length === 1 ? Math.max(n, 2) : n]));
     let ev = 1;
     for (const r of Object.keys(out)) ev = Math.max(ev, ctx.boosts[r] || 1);
     m *= ev;
-    m *= adjacencyBoost(b, builds);
+    m *= adjacencyBoost(b, boosters);
+    // A good spot (a woodcutter in a big forest) works faster than a poor one.
+    m *= b.rich || 1;
     let prog = (ctx.progress.get(b.id) || 0) + (dt / 60) * m;
     while (prog >= 1) {
       const inp = it.recipe.in || {};
@@ -185,6 +192,17 @@ export function unlockedResources(era) {
   return Object.keys(RESOURCES).filter((r) => RESOURCES[r].era <= era);
 }
 
+// Every building of this era (or earlier) that makes a resource (or
+// electricity when res is 'power'), the best first.
+export function makersOf(res, era) {
+  const out = [];
+  for (const [k, it] of Object.entries(ITEMS)) {
+    if (it.era > era || it.kind === 'wonder') continue;
+    const amount = res === 'power' ? it.power : it.recipe?.out?.[res];
+    if (amount > 0) out.push({ key: k, era: it.era, amount });
+  }
+  return out.sort((a, b) => b.era - a.era || b.amount - a.amount).map((m) => m.key);
+}
 // The best building of this era (or earlier) that makes a resource, or
 // electricity when res is 'power'.
 export function bestMaker(res, era) {

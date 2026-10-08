@@ -52,11 +52,49 @@ export function createHud(state, now, opts) {
   const nameOf = (id) => (state.builders.get(id) || {}).name || 'someone';
   let shownEra = -1;
 
-  // --- How to play: the buildings of this era and what they cost ------------------------
+  // --- How to play: three pages that take turns -----------------------------------------
+  // 1. the commands, 2. where every good comes from, 3. this era's buildings.
+  const PAGES = [['howPlay', 'Commands'], ['howGoods', 'Goods'], ['howBuild', 'Buildings']];
+  let page = 0;
+  const tabs = $('howTabs');
+  PAGES.forEach(([id, name], i) => {
+    const b = el('button', 'how-tab', name);
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.addEventListener('click', () => { showPage(i); pageTimer = Date.now() + 60e3; });
+    tabs.append(b);
+  });
+  let pageTimer = 0;
+  function showPage(i) {
+    page = i;
+    PAGES.forEach(([id], k) => { $(id).hidden = k !== i; tabs.children[k].setAttribute('aria-selected', String(k === i)); });
+  }
+  showPage(0);
+  setInterval(() => { if (Date.now() > pageTimer) showPage((page + 1) % PAGES.length); }, opts.stream ? 14000 : 20000);
+
   function renderHowto() {
+    const keys = itemsOfEra(state.era);
+    const starter = keys.find((k) => ITEMS[k].kind === 'producer') || keys[1];
+    const cmds = $('cmds');
+    cmds.textContent = '';
+    const row = (c, text) => {
+      const li = el('li');
+      li.append(code(c), el('span', null, text));
+      cmds.append(li);
+    };
+    row('!home', 'get your own home and bot');
+    row('!build ' + starter, 'start a town project');
+    row('!help', 'help build it, more bots go faster');
+    row('!work wood', 'help make goods');
+    row('!explore', 'scout the fog for new land');
+    row('!help wonder', 'haul goods to the wonder');
+    row('!me', 'find your home · !upgrade it');
+    renderSources();
+    $('howBuildTitle').textContent = 'Build in the ' + ERAS[state.era].name;
+    $('howBuildCmd').textContent = '!build ' + starter;
+    $('queueCmd').textContent = '!build ' + starter;
     const items = $('items');
     items.textContent = '';
-    const keys = itemsOfEra(state.era);
     const want = new Set((state.econ?.needs || []).map((n) => n.item));
     for (const key of keys) {
       const it = ITEMS[key];
@@ -66,16 +104,50 @@ export function createHud(state, now, opts) {
       li.append(el('span', 'em', it.emoji), el('span', 'key', key), cost);
       items.append(li);
     }
-    $('devText').placeholder = '!build ' + ERAS[state.era].house;
     const quick = $('quick');
     quick.textContent = '';
-    const cmds = ['!build house', '!build ' + keys[1], '!build ' + keys[2], '!work', '!work wonder', '!upgrade', '!vote 1', '!repair', '!me', '!dance'];
-    for (const c of cmds) {
+    for (const c of ['!home', '!build ' + starter, '!help', '!work', '!explore', '!help wonder', '!upgrade', '!vote 1', '!repair', '!me', '!dance']) {
       const b = el('button', 'devbtn', c);
       b.type = 'button';
       b.dataset.cmd = c;
       quick.append(b);
     }
+  }
+  // Every good the town can have yet, the building that makes it and where.
+  function renderSources() {
+    const ul = $('sources');
+    ul.textContent = '';
+    for (const [r, info] of Object.entries(RESOURCES)) {
+      if (info.era > state.era) continue;
+      const li = el('li');
+      const head = el('span', 's-head');
+      head.append(el('span', 'em', info.emoji), el('b', null, info.label));
+      const how = el('span', 's-how');
+      how.append(el('span', null, ITEMS[info.from].emoji + ' ' + ITEMS[info.from].label.toLowerCase() + ', ' + info.where + ' '), code('!work ' + r));
+      li.append(head, how);
+      ul.append(li);
+    }
+  }
+
+  // --- What to do now: the town's next steps, from the server ---------------------------------
+  const STEP_ICON = { help: '🔨', gather: '📦', build: '🎯', explore: '🧭', wonder: '🏛️' };
+  function renderNext() {
+    const plan = state.econ?.plan || [];
+    const box = $('next');
+    box.hidden = !plan.length || !state.connected;
+    const list = $('nextList');
+    list.textContent = '';
+    plan.slice(0, 3).forEach((st, i) => {
+      const li = el('li', 'step' + (i === 0 ? ' first' : ''));
+      const em = st.res && RESOURCES[st.res] && st.kind !== 'help' ? RESOURCES[st.res].emoji : st.item && ITEMS[st.item] && st.kind === 'help' ? ITEMS[st.item].emoji : STEP_ICON[st.kind] || '•';
+      const text = el('span', 'st-text', st.text);
+      if (st.kind === 'help') {
+        const p = (state.econ.projects || []).find((x) => x.id === st.id);
+        if (p) text.append(el('small', null, ' ' + Math.floor(p.progress * 100) + '%' + (p.helpers ? ' · ' + p.helpers + (p.helpers === 1 ? ' helper' : ' helpers') : '')));
+      }
+      li.append(el('span', 'em', em), text, code(st.cmd));
+      list.append(li);
+    });
   }
 
   // --- Goods in storage ------------------------------------------------------------------
@@ -146,7 +218,7 @@ export function createHud(state, now, opts) {
       const w = econ.wonder;
       if (w) {
         const it = ITEMS[w.item];
-        const short = w.short && w.short.length ? 'waiting for ' + w.short.map((r) => resEm(r) + ' ' + resLabel(r)).join(', ') : '!work wonder to help haul';
+        const short = w.short && w.short.length ? 'waiting for ' + w.short.map((r) => resEm(r) + ' ' + resLabel(r)).join(', ') : '!help wonder to help haul';
         goals.append(goal(it.emoji, it.label, Math.floor(w.progress * 100) + '%', w.progress, w.progress >= 1 ? '' : short, w.progress >= 1));
       }
       const k = econ.knowledge / econ.knowledgeNeed;
@@ -164,6 +236,7 @@ export function createHud(state, now, opts) {
     chip(econ.happy >= 70 ? '😊' : econ.happy >= 45 ? '🙂' : '😟', econ.happy + '%', 'Happiness', econ.happy < 45);
     if (econ.jobs > 0) chip('🔨', econ.employment + '%', 'Jobs filled', econ.employment < 70);
     if (econ.power && (econ.power.supply || econ.power.demand)) chip('⚡', fmt(econ.power.supply) + '/' + fmt(econ.power.demand), 'Power made and needed', econ.power.demand > econ.power.supply);
+    if (econ.explored) chip('🧭', Math.max(1, Math.round((100 * econ.explored.n) / econ.explored.total)) + '% explored', 'Land explored so far');
     for (const n of econ.needs || []) {
       const li = el('li', 'need');
       const it = ITEMS[n.item];
@@ -224,29 +297,44 @@ export function createHud(state, now, opts) {
     }
   }
 
-  // --- The build queue ---------------------------------------------------------------------
+  // --- Being built: town projects first, then homes ----------------------------------------
+  function progressOf(b) {
+    if (b.project && b.work && !b.evolving && !b.upgrade) {
+      const extra = b.status === 'building' && b.rate && b.progressAt ? (b.rate * Math.max(0, now() - b.progressAt)) / 1000 : 0;
+      return Math.max(0, Math.min(1, ((b.progress || 0) + extra) / b.work));
+    }
+    if (b.status !== 'building') return 0;
+    const total = ((b.walkSec || 0) + (b.buildSec || 1)) * 1000;
+    return Math.max(0, Math.min(1, (now() - b.startedAt) / total));
+  }
   function renderQueue() {
     const list = $('queueList');
     const active = [...state.builds.values()].filter((b) => b.status !== 'done' && !b.wonder);
-    const building = active.filter((b) => b.status === 'building').sort((a, b) => a.startedAt - b.startedAt);
-    const queued = active.filter((b) => b.status === 'queued').sort((a, b) => a.requestedAt - b.requestedAt);
-    const rows = building.concat(queued);
-    const max = 4;
+    const helpersAt = (id) => { let n = 0; for (const j of state.jobs.values()) if (j.buildId === id && j.kind === 'build') n++; return n; };
+    const rank = (b) => (b.project && !b.evolving ? 0 : b.home && !b.evolving ? 1 : 2);
+    const rows = active.sort((a, b) => rank(a) - rank(b) || (a.status === 'building' ? 0 : 1) - (b.status === 'building' ? 0 : 1) || a.id - b.id);
+    const max = 5;
     list.textContent = '';
+    const projects = active.filter((b) => b.project && !b.evolving).length;
+    $('queueCount').textContent = projects ? projects + ' of ' + (state.econ?.maxProjects || 3) + ' projects' : '';
     for (const b of rows.slice(0, max)) {
       const item = ITEMS[b.item] || { label: b.item, emoji: '📦' };
       const to = b.upgrade ? ITEMS[b.upgrade.item] : null;
-      const li = el('li', 'row' + (b.status === 'queued' ? ' queued' : ''));
+      const li = el('li', 'row' + (b.status === 'queued' ? ' queued' : '') + (b.project && !b.evolving ? ' project' : ''));
       const main = el('span', 'row-main');
       let title = (b.color ? b.color + ' ' : '') + item.label.toLowerCase();
-      if (to && to !== item) title = item.label.toLowerCase() + ' → ' + to.label.toLowerCase();
-      else if (b.upgrade) title += ' → level ' + b.upgrade.level;
-      main.append(el('b', null, title), el('small', null, (b.evolving ? 'rebuilding itself' : nameOf(b.ownerId)) + ' · #' + b.id));
+      let sub;
+      if (b.evolving) { title = item.label.toLowerCase() + ' → ' + (to || item).label.toLowerCase(); sub = 'rebuilding itself'; }
+      else if (b.home) { title = nameOf(b.ownerId) + "'s home" + (b.upgrade ? ' → level ' + b.upgrade.level : ''); sub = item.label.toLowerCase() + ' · #' + b.id; }
+      else {
+        const h = helpersAt(b.id);
+        sub = '#' + b.id + ' · ' + (h ? h + (h === 1 ? ' helper' : ' helpers') : 'needs helpers') + ' · !help #' + b.id;
+      }
+      main.append(el('b', null, title), el('small', null, sub));
       const bar = el('span', 'bar');
       if (b.status === 'building') {
         const fill = el('span');
-        const total = (b.walkSec + b.buildSec) * 1000;
-        fill.style.width = Math.round(Math.max(0, Math.min(1, (now() - b.startedAt) / total)) * 100) + '%';
+        fill.style.width = Math.round(progressOf(b) * 100) + '%';
         bar.append(fill);
       } else {
         bar.classList.add('wait');
@@ -255,7 +343,7 @@ export function createHud(state, now, opts) {
       li.append(el('span', 'em', (to || item).emoji), main, bar);
       list.append(li);
     }
-    if (rows.length > max) list.append(el('li', 'more', '+' + (rows.length - max) + ' more waiting'));
+    if (rows.length > max) list.append(el('li', 'more', '+' + (rows.length - max) + ' more'));
     $('queueEmpty').hidden = rows.length > 0;
   }
 
@@ -331,7 +419,9 @@ export function createHud(state, now, opts) {
       facts.append(li);
     };
     fact('⭐', fmt(c.xp) + ' xp, ' + fmt(c.xpTo - c.xp) + ' to level ' + (c.level + 1));
-    fact('🏠', c.buildings + ' of ' + c.slots + ' building slots');
+    fact('🏡', c.home ? 'Home: ' + ITEMS[c.home.item].label.toLowerCase() + ', level ' + c.home.level : 'No home yet: type !home');
+    fact('🔨', 'Helped build ' + c.built + (c.built === 1 ? ' building' : ' buildings') + (c.founded ? ', started ' + c.founded : ''));
+    if (c.trips) fact('🧭', c.trips + (c.trips === 1 ? ' trip' : ' trips') + ' into the fog');
     fact('🔥', c.streak + (c.streak === 1 ? ' day' : ' days') + ' in a row');
     if (c.rank) fact('🏆', '#' + c.rank + ' this week');
     if (c.job) {
@@ -450,7 +540,7 @@ export function createHud(state, now, opts) {
   function blocked() {
     const app = $('app').getBoundingClientRect();
     const out = [];
-    for (const id of ['title', 'res', 'centerTop', 'era', 'queue', 'leaders', 'howto', 'ticker', 'devbar', 'emptyCta', 'meCard', 'banner', 'lapse', 'gazette']) {
+    for (const id of ['title', 'res', 'next', 'vote', 'eventBar', 'era', 'queue', 'leaders', 'howto', 'ticker', 'devbar', 'emptyCta', 'meCard', 'banner', 'lapse', 'gazette']) {
       const r = rectOf(id);
       if (r && r.height > 0) out.push({ l: r.left - app.left, r: r.right - app.left, t: r.top - app.top, b: r.bottom - app.top });
     }
@@ -465,6 +555,7 @@ export function createHud(state, now, opts) {
     renderStats();
     renderRes();
     renderEra();
+    renderNext();
     renderVote();
     renderEvent();
     renderQueue();
@@ -478,7 +569,7 @@ export function createHud(state, now, opts) {
   setInterval(renderLeaders, 30e3);
   return {
     render,
-    renderEcon() { renderRes(); renderEra(); if (state.econ?.needs) renderHowtoNeeds(); },
+    renderEcon() { renderRes(); renderEra(); renderNext(); if (state.econ?.needs) renderHowtoNeeds(); },
     toast,
     showMe,
     eraBanner,

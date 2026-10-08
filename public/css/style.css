@@ -217,8 +217,19 @@ code {
 .rchip.cap { box-shadow: none; background: rgba(251, 252, 255, 0.7); }
 .rchip.cap .r-rate { color: var(--ink-soft); }
 
-/* --- Votes and events, top center --------------------------------------------- */
-.center-top { position: absolute; top: 5.4rem; left: 50%; transform: translateX(-50%); width: 30rem; display: grid; gap: 0.5rem; justify-items: center; pointer-events: none; }
+/* --- What to do now, votes and events, top center ------------------------------ */
+.center-top { position: absolute; top: 5.4rem; left: 50%; transform: translateX(-50%); width: 33rem; display: grid; gap: 0.5rem; justify-items: center; pointer-events: none; }
+.next { position: static; width: 100%; box-sizing: border-box; padding: 0.7rem 0.85rem 0.75rem; background: rgba(251, 252, 255, 0.94); border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.next h2 { margin-bottom: 0.45rem; font-size: 1.05rem; color: var(--accent); }
+.next-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.32rem; }
+.step { display: flex; align-items: center; gap: 0.5rem; font: 400 0.86rem/1.25 var(--font-body); color: var(--ink-soft); }
+.step .em { font-size: 1rem; width: 1.3rem; text-align: center; flex: none; }
+.step .st-text { flex: 1; min-width: 0; }
+.step .st-text small { font: 500 0.72rem/1 var(--font-mono); color: var(--ink-soft); }
+.step code { flex: none; font-size: 0.85rem; }
+.step.first { font: 700 1rem/1.25 var(--font-body); color: var(--ink); padding: 0.25rem 0.35rem; margin: 0 -0.35rem; border-radius: 0.6rem; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.step.first .em { font-size: 1.2rem; }
+.step.first code { font-size: 1.05rem; padding: 0.25em 0.5em; background: var(--accent); color: var(--accent-ink); }
 .vote { position: static; width: 100%; box-sizing: border-box; padding: 0.8rem 0.95rem 0.9rem; border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .vote h2 { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem; font-size: 1.15rem; }
 .vote-time { font: 500 0.8rem/1 var(--font-mono); color: var(--ink-soft); }
@@ -303,6 +314,23 @@ code {
 .row.queued { background: transparent; }
 .rows .more { font: 500 0.72rem/1 var(--font-mono); color: var(--ink-soft); padding: 0.1rem 0.4rem; }
 .queue .empty { margin: 0; font: 400 0.85rem/1.45 var(--font-body); color: var(--ink-soft); }
+.queue h2 small { font: 500 0.7rem/1 var(--font-mono); color: var(--ink-soft); margin-left: 0.3rem; }
+.row.project { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.row.project .bar > span { background: var(--accent); }
+.exit-stream {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  font: 700 0.9rem/1 var(--font-body);
+  color: var(--ink);
+  cursor: pointer;
+  z-index: 5;
+}
 
 .lead-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.28rem; }
 .lead { display: flex; align-items: center; gap: 0.45rem; font: 400 0.85rem/1.2 var(--font-body); }
@@ -311,9 +339,21 @@ code {
 .l-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .lead b { font: 500 0.72rem/1 var(--font-mono); color: var(--ink-soft); }
 
-/* How to play, bottom left. */
-.howto { left: var(--edge); bottom: var(--edge); width: 25rem; }
-.howto h2 { margin-bottom: 0.4rem; }
+/* How to play, bottom left: three pages that take turns. */
+.howto { left: var(--edge); bottom: var(--edge); width: 25rem; padding-top: 0.75rem; }
+.howto h2 { margin-bottom: 0.45rem; }
+.how-tabs { display: flex; gap: 0.3rem; margin-bottom: 0.55rem; }
+.how-tab { flex: 1; padding: 0.22rem 0.4rem; border-radius: 0.6rem; border: 1px solid var(--line); background: transparent; font: 600 0.7rem/1 var(--font-body); color: var(--ink-soft); cursor: pointer; }
+.how-tab[aria-selected="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+html[data-stream="1"] .how-tab { cursor: default; }
+.cmds { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.32rem; }
+.cmds li { display: grid; grid-template-columns: 10.2rem minmax(0, 1fr); align-items: center; gap: 0.5rem; font: 400 0.84rem/1.25 var(--font-body); }
+.cmds code { justify-self: start; font-size: 0.86rem; }
+.sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.32rem; }
+.sources li { display: grid; gap: 0.1rem; }
+.s-head { display: flex; align-items: center; gap: 0.35rem; font: 700 0.86rem/1.2 var(--font-body); }
+.s-how { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font: 400 0.74rem/1.3 var(--font-body); color: var(--ink-soft); padding-left: 1.5rem; }
+.s-how code { font-size: 0.7rem; }
 .howto .big { margin: 0 0 0.6rem; font: 700 1.05rem/1.3 var(--font-body); }
 .howto .big code { font-size: 1.15rem; }
 .items { list-style: none; margin: 0 0 0.6rem; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; }
@@ -495,9 +535,9 @@ code {
 
 /* Browse mode: the test bar sits at the bottom, so the overlays move up. */
 html:not([data-stream="1"]) .mecard, html:not([data-stream="1"]) .lapse { bottom: 11rem; }
-html:not([data-stream="1"]) .gazette { bottom: auto; top: 5.4rem; max-width: 40rem; }
-html:not([data-stream="1"]) .center-top { top: 8.4rem; }
-html:not([data-stream="1"]) .howto { bottom: auto; top: 20rem; width: 21rem; }
+html:not([data-stream="1"]) .gazette { bottom: 9.5rem; max-width: 40rem; }
+html:not([data-stream="1"]) .center-top { top: 5.4rem; }
+html:not([data-stream="1"]) .howto { bottom: auto; top: 21rem; width: 22rem; }
 html:not([data-stream="1"]) .ticker { width: 21rem; }
 html:not([data-stream="1"]) #howColor { display: none; }
 

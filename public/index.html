@@ -19,7 +19,7 @@
 </head>
 <body>
 <div id="app">
-  <div id="stage" role="img" aria-label="BotWorld: an island where chat decides what the bots build"></div>
+  <div id="stage" role="img" aria-label="BotWorld: a world where chat decides what the bots build"></div>
   <div id="overlay" aria-hidden="true"></div>
 
   <header class="title" id="title">
@@ -30,6 +30,10 @@
   <ul class="res" id="res" aria-label="Goods in storage"></ul>
 
   <div class="center-top" id="centerTop">
+    <section class="panel next" id="next" hidden aria-label="What to do now">
+      <h2>🎯 What to do now</h2>
+      <ol class="next-list" id="nextList"></ol>
+    </section>
     <section class="panel vote" id="vote" hidden aria-label="Chat vote">
       <h2><span>🗳️ Chat vote!</span> <span class="vote-time" id="voteTime"></span></h2>
       <ol class="vote-list" id="voteList"></ol>
@@ -44,10 +48,20 @@
   <section class="ticker" id="ticker" aria-live="polite" aria-label="What just happened"></section>
 
   <section class="panel howto" id="howto" aria-label="How to play">
-    <h2>Build with chat</h2>
-    <p class="big">Type <code>!build house</code></p>
-    <ul class="items" id="items"></ul>
-    <p class="more" id="howMore"><code>!work wood</code> help make goods &nbsp;<code>!work wonder</code> haul to the wonder<br><code>!upgrade</code> <code>!vote 1</code> <code>!me</code> <code>!hat</code> <code>!dance</code> &nbsp;<span id="howColor"><br>add a color: <code>!build red house</code></span></p>
+    <div class="how-tabs" id="howTabs" role="tablist"></div>
+    <div class="how-page" id="howPlay">
+      <h2>How to play</h2>
+      <ul class="cmds" id="cmds"></ul>
+    </div>
+    <div class="how-page" id="howGoods" hidden>
+      <h2>Where goods come from</h2>
+      <ul class="sources" id="sources"></ul>
+    </div>
+    <div class="how-page" id="howBuild" hidden>
+      <h2 id="howBuildTitle">Build together</h2>
+      <p class="big">Start one with <code id="howBuildCmd">!build woodcutter</code>, then everyone <code>!help</code></p>
+      <ul class="items" id="items"></ul>
+    </div>
   </section>
 
   <aside class="side" id="side">
@@ -61,10 +75,10 @@
       <ul class="town" id="town"></ul>
       <ul class="needs" id="needs"></ul>
     </section>
-    <section class="panel queue" id="queue" aria-label="Building now">
-      <h2>Building now</h2>
+    <section class="panel queue" id="queue" aria-label="Being built">
+      <h2>🔨 Being built <small id="queueCount"></small></h2>
       <ol class="rows" id="queueList"></ol>
-      <p class="empty" id="queueEmpty">Nobody is building. Type <code>!build house</code> to start!</p>
+      <p class="empty" id="queueEmpty">Nothing is being built. Start a project: <code id="queueCmd">!build woodcutter</code></p>
     </section>
     <section class="panel leaders" id="leaders" aria-label="Top builders this week">
       <h2>🏆 Top builders this week</h2>
@@ -73,14 +87,16 @@
   </aside>
 
   <div class="cta" id="emptyCta" hidden>
-    <strong>A brand new island</strong>
-    <span>It all starts with sticks and stones. Type <code>!build house</code> in chat and your bot lands to build the very first hut.</span>
+    <strong>A brand new world</strong>
+    <span>It all starts with sticks and stones. Type <code>!home</code> in chat and your bot lands to build your own hut. Then build the town together: <code>!build woodcutter</code> and <code>!help</code></span>
   </div>
 
   <section class="mecard" id="meCard" hidden aria-live="polite"></section>
   <section class="banner" id="banner" hidden aria-live="polite"></section>
   <div class="lapse" id="lapse" hidden><b>⏪ Timelapse</b><span id="lapseText"></span><span class="bar"><span id="lapseFill"></span></span></div>
   <div class="gazette" id="gazette" hidden><span class="gz-tag">📰 BotWorld Gazette</span><span class="gz-text" id="gazetteText"></span></div>
+
+  <button type="button" class="exit-stream" id="exitStream" hidden>✕ Leave stream view (Esc)</button>
 
   <form class="devbar" id="devbar" hidden autocomplete="off">
     <div class="devrow">
@@ -93,7 +109,7 @@
       <label class="sr" for="devUser">Name</label>
       <input id="devUser" value="tester" maxlength="25" size="9" aria-label="Pretend to be">
       <label class="sr" for="devText">Command</label>
-      <input id="devText" placeholder="!build hut" maxlength="200" aria-label="Chat message">
+      <input id="devText" placeholder="!home" maxlength="200" aria-label="Chat message">
       <label class="devcheck"><input type="checkbox" id="devMod"> mod</label>
       <button class="devbtn primary" type="submit">Send</button>
     </div>

@@ -1,21 +1,28 @@
 // The rules of BotWorld. The server owns the world: what gets built where,
-// what it costs, what the village produces, when an era ends, and what
-// every viewer's bot is doing. The page only animates what it hears.
-import { ITEMS, ERAS, EVENTS, HATS, PALETTE, RESOURCES, hashStr, houseFor, itemsOfEra, levelFor, titleFor, xpForLevel, buildSlots, evolvedItem } from '../public/shared/catalog.js';
-import { MAX_RING, WONDER_RING, hexDist, hexKey, landRingFor, ringTiles, wonderTile } from '../public/shared/hex.js';
+// what it costs, what the town produces, which land is explored, when an era
+// ends, and what every viewer's bot is doing. The page only animates it.
+//
+// Every viewer has one home of their own (!home). Everything else is a town
+// project: someone starts it (!build farm), everyone helps (!help), and the
+// more bots help, the faster it rises. Around the town lies a big world in
+// fog, explored by scouts (!explore), with forests, hills, ore and ruins.
+import { ITEMS, ERAS, EVENTS, HATS, PALETTE, RESOURCES, HOME_LEVELS, hashStr, houseFor, itemsOfEra, levelFor, titleFor, xpForLevel, evolvedItem } from '../public/shared/catalog.js';
+import { WONDER_RING, hexDist, hexKey, ringTiles, wonderTile } from '../public/shared/hex.js';
+import * as M from '../public/shared/terrain.js';
 import { parseCommand } from './commands.js';
 import * as E from './economy.js';
 
 export const DEFAULT_LIMITS = {
-  maxBuildsPerUser: 30,
+  maxProjects: 3,
+  maxHelpers: 8,
   maxQueue: 30,
-  maxConcurrentBuilds: 6,
   hatCooldownSec: 10,
   danceCooldownSec: 30,
   noticeCooldownSec: 20,
   helpCooldownSec: 30,
   meCooldownSec: 30,
   workMinutes: 10,
+  helpMinutes: 10,
   repairSec: 20,
   voteEveryMin: 60,
   voteSec: 180,
@@ -23,13 +30,18 @@ export const DEFAULT_LIMITS = {
 };
 // eraDays: how long an era takes at base speed. Schools and labs can make
 // knowledge up to 1.5x faster, and helpers speed up the wonder.
-export const DEFAULT_PACE = { eraDays: 9 };
+export const DEFAULT_PACE = { eraDays: 11 };
 
 const ECON_STEP_SEC = 5;
 const WALK_BASE_SEC = 3;
-const WALK_SEC_PER_RING = 2;
-const UPGRADE_COST = 0.7;
-const UPGRADE_TIME = 0.6;
+const WALK_SEC_PER_RING = 1.5;
+// Bot-seconds of work a town project needs per second of its build time:
+// a hut (20 s) takes one bot 2 minutes, four bots half a minute.
+export const LABOR = 6;
+// Townsfolk always lend a hand, so projects finish even when chat is asleep.
+export const TOWN_CREW = 0.2;
+const HOME_BUILD_SEC = 25;
+const HOME_COST = 0.5;
 const WONDER_HELPERS = 8;
 const DAY = 864e5;
 const STARTER_HATS = Object.keys(HATS).filter((h) => h !== 'none' && HATS[h].level === 1);
@@ -42,14 +54,16 @@ export function weekKey(ms) {
   const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
   return dayKey(monday);
 }
-const res = (r) => RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase();
+const res = (r) => (r === 'power' ? '⚡ power' : RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase());
+const label = (item) => ITEMS[item].label.toLowerCase();
 const scaleCost = (cost, f) => Object.fromEntries(Object.entries(cost).map(([r, n]) => [r, Math.max(1, Math.ceil(n * f))]));
 const withArticle = (s) => (/^[aeiou]/i.test(s) ? 'an ' : 'a ') + s;
 const rndPick = (id) => (hashStr(id + ':' + Math.floor(Date.now() / 60e3)) % 1000) / 1000;
+const isProducerLike = (it) => ['producer', 'power', 'storage'].includes(it.kind);
 
-export function freshState(now) {
+export function freshState(now, seed) {
   return {
-    version: 2,
+    version: 3,
     createdAt: now,
     seq: 0,
     builds: [],
@@ -66,10 +80,14 @@ export function freshState(now) {
     nextVoteAt: now + 20 * 60e3,
     nextAutoEventAt: now + 90 * 60e3,
     finished: false,
+    mapSeed: seed != null ? seed : hashStr('botworld:' + now) % 1e9,
+    explored: '',
+    cleared: [],
+    found: [],
   };
 }
 
-// Older saves (from before eras) are brought up to date in place.
+// Older saves are brought up to date in place.
 const V1_ITEMS = { house: 'hut', shop: 'market', tower: 'tower', farm: 'farm', windmill: 'windmill', lighthouse: 'lighthouse', fountain: 'fountain', park: 'park', garden: 'garden', statue: 'statue', campfire: 'campfire' };
 export function migrate(state, now) {
   const s = state;
@@ -84,7 +102,35 @@ export function migrate(state, now) {
     }
     s.version = 2;
   }
-  const fresh = freshState(now);
+  if (s.version === 2) {
+    // Before the big world: every viewer keeps their first house as their
+    // home, everything else becomes a town building, and the land under
+    // every building is cleared so it stands on grass.
+    s.mapSeed = s.mapSeed != null ? s.mapSeed : hashStr('botworld:' + s.createdAt) % 1e9;
+    s.cleared = [...new Set(s.builds.map((b) => hexKey(b.q, b.r)))];
+    const hasHome = new Set();
+    for (const b of [...s.builds].sort((a, c) => a.id - c.id)) {
+      if (b.wonder) continue;
+      const house = ITEMS[b.item]?.kind === 'house';
+      if (house && b.ownerId && !hasHome.has(b.ownerId) && b.built) {
+        hasHome.add(b.ownerId);
+        b.home = true;
+        b.level = Math.min(HOME_LEVELS, b.level || 1);
+        continue;
+      }
+      b.project = true;
+      b.founderId = b.ownerId || null;
+      b.ownerId = null;
+      b.helpers = {};
+      b.work = (ITEMS[b.item].buildSec || 20) * LABOR;
+      if (b.status === 'building' && !b.built) { b.progress = 0; b.startedAt = now; }
+      else b.progress = b.status === 'done' ? b.work : 0;
+    }
+    s.explored = '';
+    s.found = [];
+    s.version = 3;
+  }
+  const fresh = freshState(now, s.mapSeed);
   for (const k of Object.keys(fresh)) if (s[k] === undefined) s[k] = fresh[k];
   for (const r of Object.keys(E.START_STOCK)) if (typeof s.stock[r] !== 'number') s.stock[r] = 0;
   return s;
@@ -112,11 +158,31 @@ export class World {
     this.happy = 50;
     this.lastHappy = 0;
     this.lastEcon = 0;
+    this.lastBuildTick = 0;
     this.econ = null;
     this.wonderShort = [];
     this.recent = new Map();
-    this.relocateWonderRing(this.state.eraStartedAt);
+    this.map = M.makeMap(this.state.mapSeed, this.state.cleared);
+    this.bits = M.decodeBits(this.state.explored, this.map);
+    this.known = (t) => M.isExplored(this.bits, t.i);
+    if (!this.state.explored) {
+      M.reveal(this.map, this.bits, 0, 0, M.START_RADIUS);
+      for (const b of this.builds) M.reveal(this.map, this.bits, b.q, b.r, 2);
+      this.saveBits();
+    }
+    this.relocateWonderRing();
+    for (const b of this.builds) if (!b.wonder && b.rich == null) this.placeStats(b);
     this.ensureWonder(this.state.eraStartedAt);
+  }
+
+  // The ring around the landing pad is for wonders; anything an old save
+  // left there moves out.
+  relocateWonderRing() {
+    for (const b of this.builds) {
+      if (b.wonder || hexDist(b.q, b.r) > WONDER_RING) continue;
+      const plot = this.choosePlot(b.item, { home: b.home, salt: b.id });
+      if (plot) { b.q = plot.q; b.r = plot.r; this.dirty = true; }
+    }
   }
 
   on(fn) {
@@ -136,10 +202,19 @@ export class World {
   get era() {
     return this.state.era;
   }
-
-  landRing() {
-    const maxBuilt = this.builds.reduce((m, b) => Math.max(m, hexDist(b.q, b.r)), 0);
-    return landRingFor(maxBuilt);
+  saveBits() {
+    this.state.explored = M.encodeBits(this.bits);
+    this.dirty = true;
+  }
+  tileOf(b) {
+    return M.tileAt(this.map, b.q, b.r);
+  }
+  // How good a spot is for what stands on it, remembered on the building.
+  placeStats(b) {
+    const t = this.tileOf(b);
+    if (!t) return;
+    b.rich = Math.round(M.richness(this.map, b.item, t) * 100) / 100;
+    if (M.siteOf(b.item).ore) b.ores = M.oresNear(this.map, t);
   }
   knowledgeNeed() {
     return this.pace.eraDays * 1440;
@@ -147,6 +222,13 @@ export class World {
   currentWonder() {
     const key = ERAS[this.state.era].wonder;
     return this.builds.find((b) => b.wonder && b.item === key) || null;
+  }
+  homeOf(userId) {
+    return this.builds.find((b) => b.home && b.ownerId === userId) || null;
+  }
+  // Town projects that are not finished yet (not the wonder, not homes).
+  projects() {
+    return this.builds.filter((b) => b.project && b.status !== 'done' && !b.evolving);
   }
 
   snapshot(now) {
@@ -161,7 +243,9 @@ export class World {
       finishedAt: this.state.finishedAt || null,
       builds: this.builds,
       builders: Object.values(this.state.builders),
-      landRing: this.landRing(),
+      map: { seed: this.state.mapSeed, cleared: this.state.cleared },
+      explored: this.state.explored,
+      found: this.state.found,
       econ: this.econ,
       vote: this.voteView(),
       event: this.state.event,
@@ -183,123 +267,170 @@ export class World {
     if (!u.id) return { ok: false, message: 'Unknown user.' };
     this.recent.set(u.id, now);
     switch (cmd.type) {
-      case 'build': return this.build(cmd, u, now);
+      case 'build': return cmd.item === 'house' && !this.homeOf(u.id) ? this.home(cmd, u, now) : this.build(cmd, u, now);
+      case 'home': return this.home(cmd, u, now);
+      case 'help': return this.help(cmd, u, now);
       case 'upgrade': return this.upgrade(u, now);
       case 'work': return this.work(cmd, u, now);
+      case 'explore': return this.explore(cmd, u, now);
       case 'repair': return this.repair(u, now);
       case 'vote': return this.vote(cmd, u, now);
       case 'hat': return this.hat(cmd, u, now);
       case 'dance': return this.dance(u, now);
       case 'me': return this.me(u, now);
-      case 'help': return this.help(now);
-      case 'demolish': return this.demolish(cmd, u, now);
+      case 'commands': return this.commands(now);
+      case 'demolish': return this.refuse(u, now, 'Town buildings belong to everyone. Mods can !remove #id.');
       case 'remove': return this.remove(cmd, u);
       case 'event': return this.forceEvent(cmd, u, now);
       default: return { ok: false, message: 'Unknown command.' };
     }
   }
 
-  // --- Building -----------------------------------------------------------------
-  buildable() {
-    const out = [];
-    for (let e = this.state.era; e >= 0; e--) for (const k of itemsOfEra(e)) out.push(k);
-    return out;
-  }
-
-  build(cmd, u, now) {
+  // --- Homes: one per viewer ----------------------------------------------------------
+  home(cmd, u, now) {
     const s = this.state;
-    if (!cmd.item) return this.refuse(u, now, 'Try !build house. In the ' + ERAS[s.era].name + ' you can build: ' + itemsOfEra(s.era).join(', ') + '.');
-    const item = cmd.item === 'house' ? houseFor(s.era) : cmd.item;
-    const it = ITEMS[item];
-    if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in the ' + ERAS[it.era].name + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
-    const busy = this.pendingOf(u.id);
-    if (busy) return this.refuse(u, now, 'Your bot is still busy with #' + busy.id + ' (' + ITEMS[busy.upgrade ? busy.upgrade.item : busy.item].label.toLowerCase() + ').');
-    const mine = this.builds.filter((b) => b.ownerId === u.id).length;
-    const slots = this.slotsOf(u.id);
-    if (mine >= slots) return this.refuse(u, now, 'You have ' + mine + ' buildings, your limit at your level. Level up (!work, !upgrade) for more, or !demolish an old one.');
-    if (this.builds.filter((b) => b.status === 'queued').length >= this.limits.maxQueue) return this.refuse(u, now, 'The builders are swamped. Try again in a minute!');
-    const tooBig = this.tooBigForStorage(it.cost);
-    if (tooBig) return this.refuse(u, now, tooBig);
-    let plot = this.choosePlot(item, u.id, s.seq + 1, cmd.near);
-    let replaced = null;
-    if (!plot) {
-      // A full island reuses plots of viewers who have not been around for a week.
-      replaced = this.recyclable(now);
-      if (!replaced) {
-        const mine2 = this.builds.filter((b) => b.ownerId === u.id && b.status === 'done' && !b.wonder).sort((a, b) => ITEMS[a.item].era - ITEMS[b.item].era || a.id - b.id)[0];
-        return this.refuse(u, now, 'The island is full!' + (mine2 ? ' !demolish #' + mine2.id + ' (your ' + ITEMS[mine2.item].label.toLowerCase() + ') to make room, or !upgrade.' : ' Try !upgrade.'));
-      }
-      plot = [replaced.q, replaced.r];
-      this.removeBuild(replaced.id);
-    }
+    const mine = this.homeOf(u.id);
+    if (mine) return this.refuse(u, now, 'You already have a home (#' + mine.id + '). Make it bigger with !upgrade, or help the town: !help');
+    if (this.builds.filter((b) => b.home && b.status === 'queued').length >= this.limits.maxQueue) return this.refuse(u, now, 'So many new homes at once! Try again in a minute.');
+    const item = houseFor(s.era);
+    const plot = this.choosePlot(item, { home: true, ownerId: u.id, salt: s.seq + 1 });
+    if (!plot) return this.refuse(u, now, 'No free land for a home right now. Type !explore to find more!');
     this.touchBuilder(u, now);
     const b = {
       id: ++s.seq,
       item,
+      home: true,
       color: cmd.color || null,
       level: 1,
-      q: plot[0],
-      r: plot[1],
+      q: plot.q,
+      r: plot.r,
       ownerId: u.id,
       status: 'queued',
       requestedAt: now,
       startedAt: null,
-      walkSec: WALK_BASE_SEC + hexDist(plot[0], plot[1]) * WALK_SEC_PER_RING,
-      buildSec: it.buildSec,
+      walkSec: WALK_BASE_SEC + plot.d * WALK_SEC_PER_RING,
+      buildSec: HOME_BUILD_SEC,
       doneAt: null,
-      cost: { ...it.cost },
+      cost: scaleCost(ITEMS[item].cost, HOME_COST),
       built: false,
     };
     this.builds.push(b);
     this.changed({ type: 'build', build: b });
     this.tick(now);
-    const what = (b.color ? b.color + ' ' : '') + it.label.toLowerCase();
     const wait = b.status === 'queued' ? this.missingText(b.cost) : '';
-    const over = replaced ? ' where an abandoned ' + ITEMS[replaced.item].label.toLowerCase() + ' stood' : '';
-    return { ok: true, message: u.name + ' is building ' + withArticle(what) + over + ' (#' + b.id + ')' + (wait ? ', waiting for ' + wait : '') + '.', build: b };
+    return { ok: true, message: u.name + ' is building their own home (#' + b.id + ')' + (wait ? ', waiting for ' + wait : '') + '. Welcome to BotWorld!', build: b };
   }
 
   upgrade(u, now) {
-    const s = this.state;
-    const busy = this.pendingOf(u.id);
-    if (busy) return this.refuse(u, now, 'Your bot is still busy with #' + busy.id + '.');
-    const mine = this.builds.filter((b) => b.ownerId === u.id && b.status === 'done');
-    if (!mine.length) return this.refuse(u, now, 'Build something first: !build house');
-    const newHouse = houseFor(s.era);
-    let target = mine.filter((b) => ITEMS[b.item].kind === 'house' && b.item !== newHouse).sort((a, b) => ITEMS[a.item].era - ITEMS[b.item].era || a.id - b.id)[0];
-    let upgrade;
-    let cost;
-    if (target) {
-      upgrade = { item: newHouse, level: 1 };
-      cost = scaleCost(ITEMS[newHouse].cost, UPGRADE_COST);
-    } else {
-      target = mine.filter((b) => ITEMS[b.item].maxLevel && b.level < ITEMS[b.item].maxLevel).sort((a, b) => b.doneAt - a.doneAt)[0];
-      if (!target) return this.refuse(u, now, 'Your homes are already the newest kind. A new era brings new homes to upgrade to!');
-      upgrade = { item: target.item, level: target.level + 1 };
-      cost = scaleCost(ITEMS[target.item].cost, 0.6 * target.level);
-    }
+    const home = this.homeOf(u.id);
+    if (!home) return this.refuse(u, now, 'You have no home yet. Type !home to build one!');
+    if (home.status !== 'done') return this.refuse(u, now, 'Your home (#' + home.id + ') is still being built.');
+    if ((home.level || 1) >= HOME_LEVELS) return this.refuse(u, now, 'Your home is as big as it gets in the ' + ERAS[this.state.era].name + '. A new era makes it grow again!');
+    const cost = scaleCost(ITEMS[home.item].cost, 0.4 * (home.level || 1));
     const tooBig = this.tooBigForStorage(cost);
     if (tooBig) return this.refuse(u, now, tooBig);
     this.touchBuilder(u, now);
-    Object.assign(target, {
-      status: 'queued',
-      upgrade,
-      cost,
-      requestedAt: now,
-      startedAt: null,
-      buildSec: Math.round(ITEMS[upgrade.item].buildSec * UPGRADE_TIME),
-    });
-    this.changed({ type: 'build', build: target });
+    Object.assign(home, { status: 'queued', upgrade: { item: home.item, level: (home.level || 1) + 1 }, cost, requestedAt: now, startedAt: null, buildSec: 20 });
+    this.changed({ type: 'build', build: home });
     this.tick(now);
-    return { ok: true, message: u.name + ' is upgrading #' + target.id + ' to ' + withArticle(ITEMS[upgrade.item].label.toLowerCase()) + (upgrade.level > 1 ? ' (level ' + upgrade.level + ')' : '') + '.', build: target };
+    return { ok: true, message: u.name + ' is making their home bigger (level ' + home.upgrade.level + ').', build: home };
   }
 
-  demolish(cmd, u, now) {
-    const b = this.builds.find((x) => x.id === cmd.id);
-    if (!b || b.ownerId !== u.id) return this.refuse(u, now, 'You can only !demolish your own buildings, like !demolish #12.');
-    if (b.status === 'building') return this.refuse(u, now, 'Wait until #' + b.id + ' is finished.');
-    this.removeBuild(b.id);
-    return { ok: true, message: 'Demolished #' + b.id + '. The plot is free again.' };
+  // --- Town projects: started by one, built by all --------------------------------------------
+  build(cmd, u, now) {
+    const s = this.state;
+    if (!cmd.item) return this.refuse(u, now, 'Try !build ' + itemsOfEra(s.era)[1] + '. In the ' + ERAS[s.era].name + ' the town can build: ' + itemsOfEra(s.era).join(', ') + '.');
+    const item = cmd.item === 'house' ? houseFor(s.era) : cmd.item;
+    const it = ITEMS[item];
+    if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in the ' + ERAS[it.era].name + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
+    const active = this.projects();
+    if (active.length >= this.limits.maxProjects) {
+      return this.refuse(u, now, active.length + ' projects are being built already (' + active.map((b) => '#' + b.id + ' ' + label(b.item)).join(', ') + '). Help finish one: !help');
+    }
+    const own = active.find((b) => b.founderId === u.id);
+    if (own) return this.refuse(u, now, 'You started the ' + label(own.item) + ' (#' + own.id + '). Help finish it first: !help');
+    const tooBig = this.tooBigForStorage(it.cost);
+    if (tooBig) return this.refuse(u, now, tooBig);
+    const plot = this.choosePlot(item, { near: cmd.near, ownerId: u.id, salt: s.seq + 1 });
+    if (!plot) {
+      const why = M.siteOf(item).why;
+      return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left nearby. Type !explore to find more!');
+    }
+    this.touchBuilder(u, now);
+    const b = {
+      id: ++s.seq,
+      item,
+      project: true,
+      color: cmd.color || null,
+      level: 1,
+      q: plot.q,
+      r: plot.r,
+      ownerId: null,
+      founderId: u.id,
+      status: 'queued',
+      requestedAt: now,
+      startedAt: null,
+      walkSec: 0,
+      buildSec: it.buildSec,
+      work: it.buildSec * LABOR,
+      progress: 0,
+      helpers: {},
+      doneAt: null,
+      cost: { ...it.cost },
+      built: false,
+    };
+    this.placeStats(b);
+    this.builds.push(b);
+    this.changed({ type: 'build', build: b });
+    const job = s.jobs[u.id];
+    if (!job || job.kind === 'gather') this.startJob(u, { buildId: b.id, kind: 'build', until: now + this.limits.helpMinutes * 60e3 }, now);
+    this.tick(now);
+    const what = (b.color ? b.color + ' ' : '') + label(item);
+    const wait = b.status === 'queued' ? this.missingText(b.cost) : '';
+    return { ok: true, message: u.name + ' started ' + withArticle(what) + ' (#' + b.id + ')' + (wait ? '. It needs ' + wait : '') + '. Everyone can help: !help', build: b };
+  }
+
+  // The project that needs hands most: one being built, with the fewest helpers.
+  pickProject() {
+    return this.projects().sort((a, b) => (a.status === 'building' ? 0 : 1) - (b.status === 'building' ? 0 : 1) || this.helpersAt(a.id) - this.helpersAt(b.id) || a.id - b.id)[0] || null;
+  }
+
+  help(cmd, u, now) {
+    const s = this.state;
+    const job = s.jobs[u.id];
+    if (job && job.kind === 'explore') return this.refuse(u, now, 'Your bot is out exploring. It is back soon!');
+    let target = cmd.id ? this.builds.find((b) => b.id === cmd.id) : null;
+    if (cmd.target === 'wonder' || target?.wonder) return this.helpWonder(u, now);
+    if (cmd.id && (!target || target.status === 'done')) return this.refuse(u, now, 'There is no project #' + cmd.id + ' to help with. See the projects on screen, or just type !help');
+    if (target && target.home) return this.refuse(u, now, '#' + target.id + ' is someone\'s own home. Help a town project instead: !help');
+    if (!target) target = this.pickProject();
+    if (!target) {
+      const w = this.currentWonder();
+      if (w && w.status !== 'done') return this.helpWonder(u, now);
+      return this.commands(now, u);
+    }
+    if (target.status === 'queued' && target.waitingFor?.length) {
+      const r = target.waitingFor[0];
+      if (this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r])) {
+        const res2 = this.work({ type: 'work', target: r }, u, now);
+        if (res2.ok) res2.message = 'The ' + label(target.item) + ' is waiting for ' + res(r) + ', so ' + u.name + ' goes to make some.';
+        return res2;
+      }
+    }
+    if (job && job.kind === 'build' && job.buildId === target.id) return { ok: false, message: 'Your bot is already helping (#' + target.id + ').' };
+    if (this.helpersAt(target.id) >= this.limits.maxHelpers) return this.refuse(u, now, 'The ' + label(target.item) + ' has enough helpers. Try another project or !explore');
+    if (job) this.endJob(u.id, false, now);
+    return this.startJob(u, { buildId: target.id, kind: 'build', until: now + this.limits.helpMinutes * 60e3 }, now, ITEMS[target.item].label);
+  }
+
+  helpWonder(u, now) {
+    const w = this.currentWonder();
+    if (!w || w.status === 'done') return this.refuse(u, now, 'The wonder is finished! Try !help or !explore.');
+    if (this.helpersAt(w.id) >= WONDER_HELPERS) return this.refuse(u, now, 'The wonder has enough haulers right now. Try !help');
+    const job = this.state.jobs[u.id];
+    if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, 'Your bot is busy right now (#' + (job.buildId || '…') + ').');
+    if (job) this.endJob(u.id, false, now);
+    return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.workMinutes * 60e3 }, now, ITEMS[w.item].label);
   }
 
   remove(cmd, u) {
@@ -319,66 +450,120 @@ export class World {
     this.changed({ type: 'remove', id });
   }
 
-  // The oldest building whose owner has been gone for a week, oldest era first.
-  recyclable(now) {
-    const gone = (b) => !b.ownerId || !this.state.builders[b.ownerId] || now - this.state.builders[b.ownerId].lastSeen > 7 * DAY;
-    return this.builds.filter((b) => !b.wonder && b.status === 'done' && gone(b)).sort((a, b) => ITEMS[a.item].era - ITEMS[b.item].era || a.id - b.id)[0] || null;
-  }
-
-  // A new era: old buildings with a modern version rebuild themselves.
+  // A new era: buildings with a modern version rebuild themselves, and every
+  // home becomes the new kind of home.
   evolve(now) {
     const s = this.state;
     let n = 0;
     for (const b of this.builds) {
       if (b.wonder || !b.built || b.status !== 'done') continue;
-      const to = evolvedItem(b.item, s.era);
+      const to = b.home ? houseFor(s.era) : evolvedItem(b.item, s.era);
       if (to === b.item) continue;
-      Object.assign(b, { status: 'building', upgrade: { item: to, level: 1 }, cost: {}, requestedAt: now, startedAt: now, walkSec: 0, buildSec: 15 + (n % 6) * 5, evolving: true });
+      Object.assign(b, { status: 'building', upgrade: { item: to, level: b.home ? 1 : b.level || 1 }, cost: {}, requestedAt: now, startedAt: now, walkSec: 0, buildSec: 15 + (n % 6) * 5, evolving: true });
       this.changed({ type: 'build', build: b });
       n++;
     }
     return n;
   }
 
-  // --- Jobs: bots helping at producers, the wonder, or with repairs ---------------
+  // --- Exploring the fog ---------------------------------------------------------------------
+  explore(cmd, u, now) {
+    const s = this.state;
+    if (cmd.raw && !cmd.dir) return this.refuse(u, now, 'Try !explore, or pick a way: !explore north, east, south or west.');
+    const job = s.jobs[u.id];
+    if (job && job.kind !== 'gather') return this.refuse(u, now, job.kind === 'explore' ? 'Your bot is already out exploring!' : 'Your bot is busy (#' + job.buildId + '). Try again when it is done.');
+    const map = this.map;
+    const front = M.frontier(map, this.bits).filter((t) => M.walkable(t) || M.neighborsOf(map, t).some((n) => this.known(n) && M.walkable(n)));
+    let cands = front;
+    if (cmd.dir) {
+      const want = M.DIRECTIONS[cmd.dir];
+      cands = front.filter((t) => Math.abs(Math.atan2(Math.sin(M.angleOf(t) - want), Math.cos(M.angleOf(t) - want))) < 0.7);
+    }
+    if (!cands.length) return this.refuse(u, now, cmd.dir ? 'Nothing left to find to the ' + cmd.dir + '. Try another way!' : 'The whole world is explored!');
+    const taken = Object.values(s.jobs).filter((j) => j.kind === 'explore');
+    const score = (t) => t.d + ((hashStr(u.id + ':' + now + ':' + t.i) % 1000) / 1000) * 4 + (taken.some((j) => hexDist(j.q - t.q, j.r - t.r) <= 3) ? 6 : 0);
+    const target = cands.reduce((best, t) => (score(t) < score(best) ? t : best), cands[0]);
+    const secs = 12 + 2.5 * target.d;
+    this.startJob(u, { kind: 'explore', q: target.q, r: target.r, until: now + secs * 1000 }, now);
+    const way = cmd.dir || compass(M.angleOf(target));
+    return { ok: true, message: u.name + ' sets off to explore the ' + way + '. Back in about ' + Math.round(secs) + ' seconds!' };
+  }
+
+  finishExplore(uid, job, now) {
+    const tiles = M.reveal(this.map, this.bits, job.q, job.r, M.SCOUT_RADIUS);
+    const found = this.discover(tiles, now);
+    this.saveBits();
+    const b = this.state.builders[uid];
+    if (b) b.trips = (b.trips || 0) + 1;
+    this.grant(uid, 6 + 4 * found.length, now);
+    this.changed({ type: 'explore', userId: uid, name: this.nameOf(uid), at: { q: job.q, r: job.r }, tiles: tiles.map((t) => t.i), found });
+  }
+
+  // What the newly seen land holds: ore to mine, ruins with goods, old
+  // tablets full of knowledge.
+  discover(tiles, now) {
+    const s = this.state;
+    const found = [];
+    for (const t of tiles) {
+      if (!t.f) continue;
+      const key = hexKey(t.q, t.r);
+      if (t.f === 'coal' || t.f === 'iron') found.push({ f: t.f, q: t.q, r: t.r });
+      else if (!s.found.includes(key)) {
+        s.found.push(key);
+        if (t.f === 'ruins') found.push({ f: 'ruins', q: t.q, r: t.r, gift: this.gift(0.08) });
+        else if (t.f === 'tablet') {
+          s.knowledge = Math.min(this.knowledgeNeed(), s.knowledge + 120);
+          found.push({ f: 'tablet', q: t.q, r: t.r });
+        }
+      }
+    }
+    void now;
+    return found;
+  }
+
+  revealAround(b) {
+    const it = ITEMS[b.item];
+    const rad = b.item === 'lighthouse' || b.item === 'tower' ? 5 : 2;
+    const tiles = M.reveal(this.map, this.bits, b.q, b.r, rad);
+    if (!tiles.length) return;
+    const found = this.discover(tiles, Date.now());
+    this.saveBits();
+    this.changed({ type: 'explore', userId: null, name: null, at: { q: b.q, r: b.r }, tiles: tiles.map((t) => t.i), found });
+    void it;
+  }
+
+  // --- Jobs: bots helping build, making goods, hauling, repairing, exploring -----------------
   work(cmd, u, now) {
     const s = this.state;
-    if (!s.builders[u.id]) return this.refuse(u, now, 'Build something first to get a bot: !build house');
     const job = s.jobs[u.id];
-    if (job && job.kind !== 'gather') return this.refuse(u, now, 'Your bot is already working (#' + job.buildId + ').');
-    const own = this.pendingOf(u.id);
-    if (own && own.status === 'building') return this.refuse(u, now, 'Your bot is busy building #' + own.id + '.');
+    if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, job.kind === 'explore' ? 'Your bot is out exploring!' : 'Your bot is already working (#' + job.buildId + ').');
     let target = cmd.target;
-    if (!target && cmd.raw) return this.refuse(u, now, 'Try !work wood, !work stone, !work food or !work wonder.');
+    if (!target && cmd.raw) return this.refuse(u, now, 'Try !work wood, !work stone, !work food, or !help to build.');
     if (!target) target = this.suggestWork(u.id);
-    if (target === 'wonder') {
-      const w = this.currentWonder();
-      if (!w || w.status === 'done') return this.refuse(u, now, 'The wonder is finished! Try !work wood or !work stone.');
-      if (this.helpersAt(w.id) >= WONDER_HELPERS) return this.refuse(u, now, 'The wonder has enough helpers right now. Try !work wood.');
-      return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.workMinutes * 60e3 }, now, ITEMS[w.item].label);
-    }
-    if (!RESOURCES[target]) return this.refuse(u, now, 'Try !work wood, !work stone, !work food or !work wonder.');
-    const makers = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[target]);
+    if (target === 'wonder') return this.helpWonder(u, now);
+    if (!RESOURCES[target]) return this.refuse(u, now, 'Try !work wood, !work stone, !work food, or !help to build.');
+    const makers = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[target] && (!b.ores || b.ores.includes(target)));
     if (!makers.length) {
-      const who = Object.keys(ITEMS).find((k) => ITEMS[k].recipe?.out?.[target] && ITEMS[k].era <= s.era);
-      if (!who) return this.refuse(u, now, RESOURCES[target].label + ' arrives in the ' + ERAS[RESOURCES[target].era].name + '.');
-      return this.refuse(u, now, 'Nobody makes ' + res(target) + ' yet. Build ' + withArticle(ITEMS[who].label.toLowerCase()) + ' first!');
+      const who = RESOURCES[target].from;
+      if (RESOURCES[target].era > s.era) return this.refuse(u, now, RESOURCES[target].label + ' arrives in the ' + ERAS[RESOURCES[target].era].name + '.');
+      return this.refuse(u, now, 'Nobody makes ' + res(target) + ' yet. Start ' + withArticle(label(who)) + ': !build ' + who);
     }
     const open = makers.filter((b) => this.helpersAt(b.id) < E.MAX_HELPERS);
-    if (!open.length) return this.refuse(u, now, 'Every place that makes ' + res(target) + ' has helpers already. Try another job!');
+    if (!open.length) return this.refuse(u, now, 'Every place that makes ' + res(target) + ' has helpers already. Try !help');
     const least = Math.min(...open.map((b) => this.helpersAt(b.id)));
     const pickFrom = open.filter((b) => this.helpersAt(b.id) === least);
     const b = pickFrom[hashStr(u.id + ':' + now) % pickFrom.length];
-    if (job) this.endJob(u.id, false);
+    if (job) this.endJob(u.id, false, now);
     return this.startJob(u, { buildId: b.id, kind: 'work', res: target, until: now + this.limits.workMinutes * 60e3 }, now, ITEMS[b.item].label);
   }
 
   suggestWork(userId) {
-    const waiting = this.builds.find((b) => b.ownerId === userId && b.status === 'queued' && b.waitingFor?.length);
-    if (waiting) return waiting.waitingFor[0];
+    const mine = this.builds.find((b) => (b.founderId === userId || b.ownerId === userId) && b.status === 'queued' && b.waitingFor?.length);
+    if (mine) return mine.waitingFor[0];
+    const any = this.projects().find((b) => b.waitingFor?.length);
+    if (any) return any.waitingFor[0];
     const w = this.currentWonder();
     const cap = this.econ ? this.econ.cap : E.BASE_CAP;
-    // The wonder is waiting for something: go make that.
     const short = (this.wonderShort || []).find((r) => this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]));
     if (short && rndPick(userId) < 0.6) return short;
     if (w && w.status !== 'done' && this.helpersAt(w.id) < WONDER_HELPERS) return 'wonder';
@@ -392,23 +577,24 @@ export class World {
     job.startedAt = now;
     this.state.jobs[u.id] = job;
     this.changed({ type: 'job', userId: u.id, job });
-    const verb = job.kind === 'wonder' ? 'is hauling goods to the' : job.kind === 'repair' ? 'is repairing the' : 'is helping at the';
-    return { ok: true, message: u.name + ' ' + verb + ' ' + where + ' (#' + job.buildId + ').' };
+    if (job.kind === 'explore') return { ok: true, message: u.name + ' sets off to explore.' };
+    const verb = { wonder: 'is hauling goods to the', repair: 'is repairing the', build: 'is helping build the' }[job.kind] || 'is helping at the';
+    return { ok: true, message: u.name + ' ' + verb + ' ' + (where || 'town') + ' (#' + job.buildId + ').' };
   }
 
   endJob(userId, finished, now) {
     const job = this.state.jobs[userId];
     if (!job) return;
     delete this.state.jobs[userId];
-    const b = this.builds.find((x) => x.id === job.buildId);
+    const b = job.buildId ? this.builds.find((x) => x.id === job.buildId) : null;
     if (finished) {
       if (job.kind === 'repair' && b) {
         b.damaged = false;
         delete b.repairBy;
         this.changed({ type: 'build', build: b });
-        this.emit({ type: 'notice', kind: 'repair', user: this.nameOf(userId), text: 'repaired the ' + ITEMS[b.item].label.toLowerCase() + ' (#' + b.id + ')' });
+        this.emit({ type: 'notice', kind: 'repair', user: this.nameOf(userId), text: 'repaired the ' + label(b.item) + ' (#' + b.id + ')' });
       }
-      this.grant(userId, { work: 6, wonder: 8, repair: 12, gather: 3 }[job.kind] || 0, now);
+      this.grant(userId, { work: 6, wonder: 8, repair: 12, gather: 3, build: 4 }[job.kind] || 0, now);
     } else if (job.kind === 'repair' && b) delete b.repairBy;
     this.changed({ type: 'job', userId, job: null });
   }
@@ -421,29 +607,28 @@ export class World {
 
   repair(u, now) {
     const s = this.state;
-    if (!s.builders[u.id]) return this.refuse(u, now, 'Build something first to get a bot: !build house');
     const job = s.jobs[u.id];
-    if (job && job.kind !== 'gather') return this.refuse(u, now, 'Your bot is already busy (#' + job.buildId + ').');
-    const own = this.pendingOf(u.id);
-    if (own && own.status === 'building') return this.refuse(u, now, 'Your bot is busy building #' + own.id + '.');
+    if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, 'Your bot is busy right now.');
     const broken = this.builds.filter((b) => b.damaged && !b.repairBy).sort((a, b) => a.id - b.id);
     if (!broken.length) return this.refuse(u, now, 'Nothing is broken right now!');
     const b = broken[0];
-    if (job) this.endJob(u.id, false);
+    if (job) this.endJob(u.id, false, now);
     b.repairBy = u.id;
     this.changed({ type: 'build', build: b });
-    return this.startJob(u, { buildId: b.id, kind: 'repair', until: now + this.limits.repairSec * 1000 }, now, ITEMS[b.item].label.toLowerCase());
+    return this.startJob(u, { buildId: b.id, kind: 'repair', until: now + this.limits.repairSec * 1000 }, now, label(b.item));
   }
 
   // A viewer whose build waits for goods sends their bot to help make them.
   autoGather(b, now) {
     const s = this.state;
-    if (!b.ownerId || s.jobs[b.ownerId] || !b.waitingFor?.length) return;
+    const uid = b.home ? b.ownerId : b.founderId;
+    if (!uid || !s.builders[uid] || (s.jobs[uid] && s.jobs[uid].kind !== 'build') || !b.waitingFor?.length) return;
+    if (s.jobs[uid] && s.jobs[uid].buildId !== b.id) return;
     for (const r of b.waitingFor) {
       const maker = this.builds.find((x) => E.isUp(x) && ITEMS[x.item].recipe?.out?.[r] && this.helpersAt(x.id) < E.MAX_HELPERS);
       if (maker) {
-        s.jobs[b.ownerId] = { buildId: maker.id, kind: 'gather', res: r, until: now + 30 * 60e3, startedAt: now, forBuild: b.id };
-        this.changed({ type: 'job', userId: b.ownerId, job: s.jobs[b.ownerId] });
+        s.jobs[uid] = { buildId: maker.id, kind: 'gather', res: r, until: now + 30 * 60e3, startedAt: now, forBuild: b.id };
+        this.changed({ type: 'job', userId: uid, job: s.jobs[uid] });
         return;
       }
     }
@@ -521,22 +706,23 @@ export class World {
     const s = this.state;
     s.event = { key, startedAt: now, endsAt: now + ev.mins * 60e3 };
     const extra = {};
-    if (ev.gift) extra.gift = this.merchantGift();
+    if (ev.gift) extra.gift = this.gift(0.1);
     if (ev.knowledgeMin) s.knowledge = Math.min(this.knowledgeNeed(), s.knowledge + ev.knowledgeMin);
     if (ev.damage) extra.damaged = this.damage(ev.damage, ev.damageKind);
     this.changed({ type: 'event', event: s.event, ...extra });
   }
 
-  merchantGift() {
+  // A fair gift of the two goods the town has least of.
+  gift(share) {
     const s = this.state;
     const cap = E.capacity(this.builds);
-    const gift = {};
+    const out = {};
     const rs = E.unlockedResources(s.era).sort((a, b) => (s.stock[a] || 0) - (s.stock[b] || 0)).slice(0, 2);
     for (const r of rs) {
-      const n = Math.max(0, Math.min(Math.round(cap * 0.1), 30 + 30 * s.era, cap - (s.stock[r] || 0)));
-      if (n > 0) { s.stock[r] = (s.stock[r] || 0) + n; gift[r] = n; }
+      const n = Math.max(0, Math.min(Math.round(cap * share), 30 + 30 * s.era, cap - (s.stock[r] || 0)));
+      if (n > 0) { s.stock[r] = (s.stock[r] || 0) + n; out[r] = n; }
     }
-    return gift;
+    return out;
   }
 
   damage(n, kind) {
@@ -581,19 +767,17 @@ export class World {
 
   // --- Small commands --------------------------------------------------------------------
   hat(cmd, u, now) {
-    const builder = this.state.builders[u.id];
-    if (!builder) return this.refuse(u, now, 'Build something first to get a bot: !build house');
     if (!cmd.hat) return this.refuse(u, now, 'Hats: ' + Object.keys(HATS).join(', ') + '.');
+    const builder = this.touchBuilder(u, now);
     const level = levelFor(builder.xp || 0);
     if (HATS[cmd.hat].level > level) return this.refuse(u, now, 'The ' + HATS[cmd.hat].label.toLowerCase() + ' unlocks at level ' + HATS[cmd.hat].level + '. You are level ' + level + '.');
     if (this.onCooldown('hat:' + u.id, this.limits.hatCooldownSec, now)) return { ok: false, message: 'Hold on, still trying on the last hat.' };
     builder.hat = cmd.hat;
-    this.touchBuilder(u, now);
+    this.emit({ type: 'builder', builder, joined: false });
     return { ok: true, message: u.name + ' now wears: ' + HATS[cmd.hat].label + '.' };
   }
 
   dance(u, now) {
-    if (!this.state.builders[u.id]) return this.refuse(u, now, 'Build something first to get a bot: !build house');
     if (this.onCooldown('dance:' + u.id, this.limits.danceCooldownSec, now)) return { ok: false, message: 'Your bot needs a breather.' };
     this.touchBuilder(u, now);
     this.emit({ type: 'dance', userId: u.id });
@@ -601,12 +785,12 @@ export class World {
   }
 
   me(u, now) {
-    if (!this.state.builders[u.id]) return this.refuse(u, now, 'Build something first to get a bot: !build house');
     if (this.onCooldown('me:' + u.id, this.limits.meCooldownSec, now)) return { ok: false, message: '' };
     this.touchBuilder(u, now);
     const card = this.card(u.id, now);
     this.emit({ type: 'me', card });
-    return { ok: true, message: u.name + ': level ' + card.level + ' ' + card.title + ', ' + card.buildings + (card.buildings === 1 ? ' building.' : ' buildings.') };
+    const home = card.home ? 'home #' + card.home.id : 'no home yet (!home)';
+    return { ok: true, message: u.name + ': level ' + card.level + ' ' + card.title + ', ' + home + ', helped build ' + card.built + (card.built === 1 ? ' building.' : ' buildings.') };
   }
 
   card(id, now) {
@@ -615,6 +799,7 @@ export class World {
     const level = levelFor(xp);
     const ranked = this.leaders(now, 1000);
     const rank = ranked.findIndex((x) => x.id === id) + 1;
+    const home = this.homeOf(id);
     return {
       id,
       name: b.name,
@@ -626,17 +811,20 @@ export class World {
       xpFrom: xpForLevel(level),
       xpTo: xpForLevel(level + 1),
       streak: b.streak || 1,
-      buildings: this.builds.filter((x) => x.ownerId === id && x.built).length,
-      slots: this.slotsOf(id),
+      home: home ? { id: home.id, item: home.item, level: home.level || 1, q: home.q, r: home.r } : null,
+      built: this.builds.filter((x) => x.project && x.built && x.helpers && x.helpers[id]).length,
+      founded: this.builds.filter((x) => x.project && x.founderId === id).length,
+      trips: b.trips || 0,
       rank: rank || null,
       job: this.state.jobs[id] || null,
     };
   }
 
-  help(now) {
-    if (this.onCooldown('help', this.limits.helpCooldownSec, now)) return { ok: false, message: '' };
-    const text = '!build house · !build ' + itemsOfEra(this.state.era)[1] + ' · !work wood · !work wonder · !upgrade · !vote 1 · !me';
+  commands(now, u) {
+    const text = '!home your own house · !build ' + itemsOfEra(this.state.era)[1] + ' start a project · !help build it · !work wood · !explore · !vote 1 · !me';
+    if (this.onCooldown('help', this.limits.helpCooldownSec, now)) return { ok: true, message: text };
     this.emit({ type: 'notice', kind: 'help', text });
+    void u;
     return { ok: true, message: text };
   }
 
@@ -663,17 +851,35 @@ export class World {
   }
 
   updateBuilds(now) {
+    const dt = this.lastBuildTick ? Math.min(60, Math.max(0, (now - this.lastBuildTick) / 1000)) : 0;
+    this.lastBuildTick = now;
+    const speed = this.activeEvent(now)?.buildSpeed || 1;
     for (const b of this.builds) {
       if (b.status !== 'building' || b.wonder) continue;
-      if (now < b.startedAt + (b.walkSec + b.buildSec) * 1000) continue;
+      if (b.project && !b.evolving && !b.upgrade) {
+        // Town projects grow with every helping bot.
+        let rate = TOWN_CREW;
+        for (const [uid, j] of Object.entries(this.state.jobs)) {
+          if (j.buildId !== b.id || j.kind !== 'build') continue;
+          rate += 1;
+          b.helpers[uid] = (b.helpers[uid] || 0) + dt;
+          const bd = this.state.builders[uid];
+          if (bd) bd.helpedSec = (bd.helpedSec || 0) + dt;
+        }
+        rate *= speed;
+        b.progress = Math.min(b.work, (b.progress || 0) + dt * rate);
+        b.rate = Math.round(rate * 100) / 100;
+        b.progressAt = now;
+        if (b.progress >= b.work - 1e-6) this.finishProject(b, now);
+        continue;
+      }
+      if (now < b.startedAt + (b.walkSec + b.buildSec / speed) * 1000) continue;
       this.finishBuild(b, now);
     }
-    let running = this.builds.filter((b) => b.status === 'building' && !b.wonder && !b.evolving).length;
     const queued = this.builds.filter((b) => b.status === 'queued').sort((a, b) => a.requestedAt - b.requestedAt || a.id - b.id);
     // A build that has waited long gets first claim on what it is missing.
     const reserved = new Set();
     for (const b of queued) {
-      if (running >= this.limits.maxConcurrentBuilds) break;
       const missing = this.missing(b.cost);
       const blocked = Object.keys(b.cost).some((r) => reserved.has(r));
       if (missing.length || blocked) {
@@ -687,37 +893,71 @@ export class World {
       for (const [r, n] of Object.entries(b.cost)) this.state.stock[r] -= n;
       b.status = 'building';
       b.startedAt = now;
+      b.progressAt = now;
       delete b.waitingFor;
-      if (this.activeEvent(now)?.buildSpeed) b.buildSec = Math.ceil(b.buildSec / this.activeEvent(now).buildSpeed);
-      const job = this.state.jobs[b.ownerId];
-      if (job && job.kind === 'gather') this.endJob(b.ownerId, true, now);
-      running++;
+      const uid = b.home ? b.ownerId : b.founderId;
+      const job = uid && this.state.jobs[uid];
+      if (job && job.kind === 'gather' && job.forBuild === b.id) {
+        this.endJob(uid, true, now);
+        if (b.project) this.state.jobs[uid] = { buildId: b.id, kind: 'build', until: now + this.limits.helpMinutes * 60e3, startedAt: now };
+        if (b.project) this.changed({ type: 'job', userId: uid, job: this.state.jobs[uid] });
+      }
       this.changed({ type: 'build', build: b });
     }
   }
 
+  // Homes, upgrades and buildings changing with the era: timed, by their owner.
   finishBuild(b, now) {
-    const builder = this.state.builders[b.ownerId];
     if (b.upgrade) {
       b.item = b.upgrade.item;
       b.level = b.upgrade.level;
       delete b.upgrade;
       if (b.evolving) delete b.evolving;
-      else this.grant(b.ownerId, 8 + 4 * ITEMS[b.item].era, now);
-    } else {
+      else if (b.ownerId) this.grant(b.ownerId, 8 + 4 * ITEMS[b.item].era, now);
+      this.placeStats(b);
+    } else if (b.ownerId) {
       this.grant(b.ownerId, 10 + 5 * ITEMS[b.item].era, now);
-      if (builder) builder.builds = (builder.builds || 0) + 1;
     }
+    const fresh = !b.built;
     b.status = 'done';
     b.doneAt = now;
     b.built = true;
+    if (b.project) b.progress = b.work;
     this.changed({ type: 'build', build: b });
+    if (fresh) this.revealAround(b);
+  }
+
+  finishProject(b, now) {
+    b.status = 'done';
+    b.doneAt = now;
+    b.built = true;
+    b.progress = b.work;
+    delete b.rate;
+    const era = ITEMS[b.item].era;
+    if (b.founderId) this.grant(b.founderId, 10 + 5 * era, now);
+    for (const [uid, sec] of Object.entries(b.helpers || {})) this.grant(uid, Math.max(2, Math.round(sec / 10)), now);
+    for (const [uid, j] of Object.entries(this.state.jobs)) if (j.buildId === b.id && j.kind === 'build') this.endJob(uid, true, now);
+    b.crew = Object.entries(b.helpers || {}).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([uid]) => uid);
+    this.changed({ type: 'build', build: b });
+    const names = b.crew.map((uid) => this.nameOf(uid));
+    const more = Object.keys(b.helpers || {}).length - names.length;
+    const who = names.length ? ' Built by ' + names.join(', ') + (more > 0 ? ' and ' + more + ' more' : '') + '.' : ' Built by the townsfolk.';
+    this.emit({ type: 'notice', kind: 'project', text: 'The ' + label(b.item) + ' (#' + b.id + ') is finished!' + who });
+    this.revealAround(b);
   }
 
   updateJobs(now) {
     for (const [uid, job] of Object.entries(this.state.jobs)) {
+      if (job.kind === 'explore') {
+        if (now >= job.until) {
+          delete this.state.jobs[uid];
+          this.finishExplore(uid, job, now);
+          this.changed({ type: 'job', userId: uid, job: null });
+        }
+        continue;
+      }
       const b = this.builds.find((x) => x.id === job.buildId);
-      if (!b || (job.kind === 'wonder' && b.status === 'done')) { this.endJob(uid, !!b, now); continue; }
+      if (!b || (job.kind === 'wonder' && b.status === 'done') || (job.kind === 'build' && b.status === 'done')) { this.endJob(uid, !!b, now); continue; }
       if (job.kind === 'gather') {
         const waiting = this.builds.find((x) => x.id === job.forBuild && x.status === 'queued');
         if (!waiting || now >= job.until) this.endJob(uid, !!waiting, now);
@@ -742,7 +982,7 @@ export class World {
     }
     const robots = Math.min(2, builds.filter((b) => E.isUp(b) && ITEMS[b.item].global).length);
     const helpers = new Map();
-    for (const j of Object.values(s.jobs)) helpers.set(j.buildId, (helpers.get(j.buildId) || 0) + 1);
+    for (const j of Object.values(s.jobs)) if (j.buildId) helpers.set(j.buildId, (helpers.get(j.buildId) || 0) + 1);
     const out = E.produce(builds, s.stock, {
       employment,
       happyFactor: 0.6 + (0.8 * this.happy) / 100,
@@ -786,6 +1026,7 @@ export class World {
     }
     this.stalled = out.stalled;
     const needs = this.needs(cap, pw);
+    const explored = M.exploredCount(this.map, this.bits);
     this.econ = {
       era: s.era,
       stock: Object.fromEntries(E.unlockedResources(s.era).map((r) => [r, Math.floor(s.stock[r] || 0)])),
@@ -801,27 +1042,41 @@ export class World {
       knowledge: Math.floor(s.knowledge),
       knowledgeNeed: this.knowledgeNeed(),
       knowledgeRate: Math.round((1 + E.knowledgeBoost(builds)) * 100) / 100,
-      wonder: w ? { id: w.id, item: w.item, progress: Math.round(E.wonderProgress(w) * 1000) / 1000, short: w.status === 'done' ? [] : this.wonderShort } : null,
+      wonder: w ? { id: w.id, item: w.item, progress: Math.round(E.wonderProgress(w) * 1000) / 1000, short: w.status === 'done' ? [] : this.wonderShort, helpers: helpers.get(w.id) || 0 } : null,
       stalled: out.stalled,
       needs,
+      projects: this.projects().map((b) => ({ id: b.id, item: b.item, status: b.status, progress: Math.round((b.progress / b.work) * 1000) / 1000, helpers: this.helpersAt(b.id), waitingFor: b.waitingFor || [], founder: this.nameOf(b.founderId) })),
+      maxProjects: this.limits.maxProjects,
+      plan: this.plan(needs, w, popCap),
+      explored: { n: explored, total: this.map.total },
     };
     if (dt > 0) {
       this.dirty = true;
+      // Projects grow every second; the page fills in between from their rate.
+      for (const b of this.projects()) if (b.status === 'building') this.emit({ type: 'build', build: b });
       this.emit({ type: 'economy', econ: this.econ });
       if (out.pops.length) this.emit({ type: 'produce', pops: out.pops });
       this.checkEra(now);
     }
   }
 
-  // What the village is short of right now, with the building that helps
-  // most. Shown on stream so chat knows what to do next.
+  // Is there a known, free spot for this building?
+  hasSite(item) {
+    return !!this.choosePlot(item, { quick: true });
+  }
+
+  // What the town is short of right now, with the building that helps
+  // most and whether there is a spot for it. Shown on stream.
   needs(cap, pw) {
     const s = this.state;
     const out = [];
     const add = (r, why) => {
       if (out.some((n) => n.res === r)) return;
-      const item = E.bestMaker(r, s.era);
-      if (item) out.push({ res: r, why, item });
+      // The best maker that has a known spot, else the best one (and a hint to explore).
+      const makers = E.makersOf(r, s.era);
+      if (!makers.length) return;
+      const item = makers.find((k) => this.hasSite(k)) || makers[0];
+      out.push({ res: r, why, item, site: this.hasSite(item), where: M.siteOf(item).why || null });
     };
     if (pw.demand > pw.supply * 1.02) add('power', 'power');
     const food = s.stock.food || 0;
@@ -830,6 +1085,37 @@ export class World {
     for (const b of this.builds) if (b.status === 'queued') for (const r of b.waitingFor || []) add(r, 'build');
     for (const r of E.unlockedResources(s.era)) if ((s.stock[r] || 0) < cap * 0.08 && RESOURCES[r].era >= s.era - 1) add(r, 'low');
     return out.slice(0, 3);
+  }
+
+  // The next steps for chat, most useful first: help what is being built,
+  // fetch what a project waits for, start what the town needs, explore.
+  plan(needs, w, popCap) {
+    const s = this.state;
+    const steps = [];
+    const add = (st) => { if (!steps.some((x) => x.cmd === st.cmd)) steps.push(st); };
+    const projects = this.projects();
+    const many = projects.length > 1;
+    for (const p of [...projects].sort((a, b) => b.progress / b.work - a.progress / a.work)) {
+      const name = ITEMS[p.item].label;
+      if (p.status === 'building') add({ kind: 'help', id: p.id, item: p.item, text: 'Help build the ' + name, cmd: many ? '!help #' + p.id : '!help' });
+      else if (p.waitingFor?.length) {
+        const r = p.waitingFor[0];
+        const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]);
+        if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: '!work ' + r });
+        else add({ kind: 'build', item: RESOURCES[r].from, res: r, text: 'Nobody makes ' + RESOURCES[r].label.toLowerCase() + ' yet', cmd: '!build ' + RESOURCES[r].from });
+      }
+    }
+    const room = projects.length < this.limits.maxProjects;
+    for (const n of needs) {
+      const what = n.res === 'power' ? 'power' : RESOURCES[n.res].label.toLowerCase();
+      if (!room) break;
+      if (n.site) add({ kind: 'build', item: n.item, res: n.res, text: 'The town needs ' + what, cmd: '!build ' + n.item });
+      else add({ kind: 'explore', item: n.item, res: n.res, text: 'Find ' + (n.where || 'more land') + ' for ' + what, cmd: '!explore' });
+    }
+    if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
+    if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
+    add({ kind: 'explore', text: 'Explore the fog, there is more to find', cmd: '!explore' });
+    return steps.slice(0, 4);
   }
 
   checkEra(now) {
@@ -864,24 +1150,7 @@ export class World {
     return w;
   }
 
-  // Ring 1 is for wonders; anything an old save left there moves out.
-  relocateWonderRing(now) {
-    for (const b of this.builds) {
-      if (b.wonder || hexDist(b.q, b.r) !== WONDER_RING) continue;
-      const plot = this.choosePlot(b.item, b.ownerId, b.id);
-      if (plot) { b.q = plot[0]; b.r = plot[1]; this.dirty = true; }
-    }
-    void now;
-  }
-
   // --- Helpers ------------------------------------------------------------------------------
-  pendingOf(userId) {
-    return this.builds.find((b) => b.ownerId === userId && b.status !== 'done') || null;
-  }
-  slotsOf(userId) {
-    const b = this.state.builders[userId];
-    return Math.min(this.limits.maxBuildsPerUser, buildSlots(levelFor(b ? b.xp || 0 : 0), this.state.era));
-  }
   nameOf(userId) {
     return (this.state.builders[userId] || {}).name || 'someone';
   }
@@ -896,7 +1165,7 @@ export class World {
     const r = Object.keys(cost).find((k) => cost[k] > cap);
     if (!r) return null;
     const storage = Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'storage' && ITEMS[k].era <= this.state.era).pop();
-    return 'That needs ' + cost[r] + ' ' + res(r) + ' but storage holds ' + cap + '. Build ' + withArticle(ITEMS[storage].label.toLowerCase()) + ' first!';
+    return 'That needs ' + cost[r] + ' ' + res(r) + ' but storage holds ' + cap + '. Build ' + withArticle(label(storage)) + ' first!';
   }
 
   touchBuilder(u, now) {
@@ -962,51 +1231,47 @@ export class World {
     return false;
   }
 
-  // Where should this go? Homes near parks and markets, producers out at
-  // the edge away from homes, lighthouses and harbors on the coast, and every
-  // viewer's builds next to each other so each viewer grows a neighborhood.
-  choosePlot(item, ownerId, salt, near) {
+  // Where should this go? Explored land only, on the right ground. Homes
+  // cluster near the middle, producers go where the forest, hills or ore are
+  // richest, parks and statues near homes.
+  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false } = {}) {
     const at = new Map(this.builds.map((b) => [hexKey(b.q, b.r), b]));
-    const taken = new Set([hexKey(0, 0), ...ringTiles(WONDER_RING).map(([q, r]) => hexKey(q, r)), ...at.keys()]);
-    let land = this.landRing();
-    let candidates = [];
-    for (;;) {
-      candidates = [];
-      for (let n = WONDER_RING + 1; n <= land; n++) for (const t of ringTiles(n)) if (!taken.has(hexKey(t[0], t[1]))) candidates.push(t);
-      if (candidates.length || land >= MAX_RING) break;
-      land++;
-    }
-    if (!candidates.length) return null;
     const it = ITEMS[item];
-    const zone = it.zone;
-    const kind = it.kind;
-    const edge = Math.max(WONDER_RING + 1, ...this.builds.filter((b) => !b.wonder).map((b) => hexDist(b.q, b.r)));
-    const outskirts = kind === 'producer' || kind === 'power' || kind === 'storage';
+    const site = M.siteOf(item);
+    const prod = isProducerLike(it) || !!site.near || !!site.ore;
     let best = null;
     let bestScore = Infinity;
-    for (const [q, r] of candidates) {
-      const ring = hexDist(q, r);
+    for (const t of this.map.tiles) {
+      if (t.d <= WONDER_RING || !this.known(t)) continue;
+      const key = hexKey(t.q, t.r);
+      if (at.has(key) || !M.siteOk(this.map, item, t, this.known)) continue;
+      if (quick) return t;
       let s;
-      if (zone === 'inner') s = ring * 3;
-      else if (zone === 'outer') s = Math.abs(edge - ring) * 2.5;
-      else if (zone === 'coast') s = Math.abs(edge - ring) * 6;
-      else s = ring * 1.5;
+      if (prod) s = t.d * 0.35 - M.richness(this.map, item, t) * 5;
+      else if (it.zone === 'inner') s = t.d * 1.6;
+      else s = t.d;
       for (const [dq, dr] of NEAR2) {
-        const o = at.get(hexKey(q + dq, r + dr));
+        const o = at.get(hexKey(t.q + dq, t.r + dr));
         if (!o) continue;
         const d = hexDist(dq, dr);
-        const ok = ITEMS[o.item];
-        if (o.ownerId && o.ownerId === ownerId) s -= d === 1 ? 2.5 : 0.8;
-        else if (d === 1) s -= 0.4;
-        if (kind === 'house' && ok.comfort) s -= 0.6;
-        if (ok.kind === 'house' && it.comfort) s -= 0.6;
-        if (outskirts && ok.kind === 'house' && d === 1) s += 0.5;
-        if (near && (o.item === near || (near === 'house' && ok.kind === 'house'))) s -= d === 1 ? 4 : 2;
+        const ot = ITEMS[o.item];
+        if (home && o.home) s -= d === 1 ? 1.2 : 0.4;
+        if ((home || it.kind === 'house') && ot.comfort) s -= 0.6;
+        if (ot.kind === 'house' && it.comfort) s -= 0.6;
+        if (prod && ot.kind === 'house' && d === 1) s += 0.8;
+        if (ownerId && o.ownerId === ownerId) s -= 0.5;
+        if (near && (o.item === near || (near === 'house' && ot.kind === 'house'))) s -= d === 1 ? 4 : 2;
       }
-      s += ((hashStr(salt + ':' + q + ',' + r) % 1000) / 1000) * 1.5;
-      if (s < bestScore) { bestScore = s; best = [q, r]; }
+      s += ((hashStr(salt + ':' + key) % 1000) / 1000) * 1.2;
+      if (s < bestScore) { bestScore = s; best = t; }
     }
     return best;
   }
 }
 
+function compass(a) {
+  const names = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];
+  const k = Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8;
+  return names[k];
+}
+void ringTiles;
