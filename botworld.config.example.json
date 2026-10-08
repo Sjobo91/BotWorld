@@ -1,0 +1,10 @@
+{
+  "channel": "your_twitch_channel",
+  "port": 3000,
+  "simulate": false,
+  "limits": {
+    "maxBuildsPerUser": 8,
+    "maxQueue": 30,
+    "maxConcurrentBuilds": 6
+  }
+}

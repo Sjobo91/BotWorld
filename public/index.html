@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BotWorld</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fredoka:wght@500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/three.module.js",
+    "three/addons/": "/vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="stage" role="img" aria-label="BotWorld: an island where chat decides what the bots build"></div>
+  <div id="overlay" aria-hidden="true"></div>
+
+  <header class="title" id="title">
+    <h1>BotWorld</h1>
+    <p class="pill" id="subtitle" data-live="0"><span class="dot"></span><span id="subtitleText">Connecting…</span></p>
+  </header>
+
+  <ul class="stats" id="stats" aria-label="World counters"></ul>
+
+  <section class="ticker" id="ticker" aria-live="polite" aria-label="What just happened"></section>
+
+  <section class="panel howto" id="howto" aria-label="How to build">
+    <h2>Build something!</h2>
+    <p class="big">Type in chat <code>!build house</code></p>
+    <ul class="items" id="items"></ul>
+    <p class="label">Add a color <code>!build blue tower</code></p>
+    <ul class="colors" id="colors"></ul>
+    <p class="more"><code>!upgrade</code> grow it &nbsp; <code>!hat tophat</code> dress up &nbsp; <code>!dance</code> party</p>
+  </section>
+
+  <section class="panel queue" id="queue" aria-label="Building now">
+    <h2>Building now</h2>
+    <ol class="rows" id="queueList"></ol>
+    <p class="empty" id="queueEmpty">Nobody is building. Type <code>!build house</code> to start!</p>
+  </section>
+
+  <div class="cta" id="emptyCta" hidden>
+    <strong>A brand new island</strong>
+    <span>Type <code>!build house</code> in chat and your bot lands to build the very first house.</span>
+  </div>
+
+  <form class="devbar" id="devbar" hidden autocomplete="off">
+    <div class="devrow">
+      <span class="devmode" id="devMode"></span>
+      <a href="/?stream=1" class="devlink">Stream view</a>
+      <button type="button" class="devbtn" id="soundBtn" aria-pressed="false">🔈 Sound off</button>
+    </div>
+    <div class="devrow">
+      <label class="sr" for="devUser">Name</label>
+      <input id="devUser" value="tester" maxlength="25" size="9" aria-label="Pretend to be">
+      <label class="sr" for="devText">Command</label>
+      <input id="devText" placeholder="!build red house" maxlength="200" aria-label="Chat message">
+      <label class="devcheck"><input type="checkbox" id="devMod"> mod</label>
+      <button class="devbtn primary" type="submit">Send</button>
+    </div>
+    <div class="devrow quick">
+      <button type="button" class="devbtn" data-cmd="!build house">!build house</button>
+      <button type="button" class="devbtn" data-cmd="!build red tower">!build red tower</button>
+      <button type="button" class="devbtn" data-cmd="!build windmill">!build windmill</button>
+      <button type="button" class="devbtn" data-cmd="!upgrade">!upgrade</button>
+      <button type="button" class="devbtn" data-cmd="!hat tophat">!hat tophat</button>
+      <button type="button" class="devbtn" data-cmd="!dance">!dance</button>
+    </div>
+    <p class="devresult" id="devResult" aria-live="polite"></p>
+  </form>
+</div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

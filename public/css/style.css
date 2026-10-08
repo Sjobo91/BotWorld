@@ -1,0 +1,296 @@
+/* Layout: the 3D island fills the screen. Over it: title and clock top left,
+   the event ticker under it, counters top right, the build queue down the
+   right side and the how-to-build card bottom left. In stream mode
+   (?stream=1) every size is in rem and 1rem = 1/120 of the screen width, so
+   the overlay looks the same at 1280x720 and 1920x1080. */
+:root {
+  --ink: #172130;
+  --ink-soft: #4d5a6a;
+  --panel: rgba(251, 252, 255, 0.9);
+  --panel-solid: #f7f9fc;
+  --line: rgba(23, 33, 48, 0.12);
+  --accent: #2350d0;
+  --accent-ink: #ffffff;
+  --ok: #20905a;
+  --warm: #d99500;
+  --code-bg: rgba(35, 80, 208, 0.1);
+  --font-display: "Fredoka", ui-rounded, "Arial Rounded MT Bold", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  --shadow: 0 0.4rem 1.4rem rgba(23, 33, 48, 0.16);
+  --edge: 1.5rem;
+  color-scheme: light;
+}
+html[data-stream="1"] { font-size: calc(100vw / 120); }
+html, body { height: 100%; margin: 0; }
+body {
+  background: #9fd3ee;
+  color: var(--ink);
+  font-family: var(--font-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+[hidden] { display: none !important; }
+code {
+  font: 500 0.95em/1 var(--font-mono);
+  background: var(--code-bg);
+  color: var(--accent);
+  padding: 0.15em 0.4em;
+  border-radius: 0.35em;
+  white-space: nowrap;
+}
+.em { font-family: var(--emoji); line-height: 1; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+#app { position: relative; height: 100%; overflow: hidden; }
+#stage { position: absolute; inset: 0; touch-action: none; }
+#stage canvas { display: block; width: 100%; height: 100%; outline: none; }
+#stage .no3d { position: absolute; inset: 40% 1rem auto; text-align: center; font: 500 1rem/1.5 var(--font-body); color: var(--ink-soft); }
+#overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+
+/* --- Labels in the world --------------------------------------------------- */
+.nametag, .blabel, .bubble { position: absolute; left: 0; top: 0; will-change: transform; }
+.nametag {
+  padding: 0.12rem 0.4rem;
+  border-radius: 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font: 700 0.68rem/1.2 var(--font-body);
+  white-space: nowrap;
+}
+.blabel {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.6rem 0.35rem 0.45rem;
+  border-radius: 0.8rem;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.blabel .em { font-size: 1.15rem; }
+.bl-main { display: grid; gap: 0.12rem; }
+.bl-main b { font: 600 0.82rem/1 var(--font-display); }
+.bl-main small { font: 500 0.66rem/1 var(--font-mono); color: var(--ink-soft); }
+.blabel .bar { width: 3.2rem; }
+.blabel.done { box-shadow: none; padding: 0.25rem 0.5rem 0.25rem 0.35rem; }
+.bubble {
+  max-width: 14rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.9rem;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  font: 700 0.8rem/1.35 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -0.38rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  background: var(--panel-solid);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: translateX(-50%) rotate(45deg);
+}
+.bubble.emoji { font: 1.2rem/1 var(--emoji); padding: 0.3rem 0.5rem; }
+
+/* --- Progress bars ----------------------------------------------------------- */
+.bar {
+  display: block;
+  height: 0.4rem;
+  border-radius: 1rem;
+  background: var(--line);
+  overflow: hidden;
+}
+.bar > span { display: block; height: 100%; width: 0; border-radius: 1rem; background: var(--ok); transition: width 0.5s linear; }
+
+/* --- Title, counters, ticker --------------------------------------------------- */
+.title { position: absolute; top: 1.1rem; left: var(--edge); display: grid; gap: 0.4rem; justify-items: start; pointer-events: none; }
+.title h1 { margin: 0; font: 600 2.75rem/1 var(--font-display); color: var(--title-ink, var(--ink)); text-shadow: 0 1px 0.8rem var(--title-glow, transparent); letter-spacing: -0.01em; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font: 500 0.8rem/1 var(--font-mono);
+  color: var(--ink);
+}
+.pill .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--warm); }
+.pill[data-live="1"] .dot { background: #e0473f; animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.stats { position: absolute; top: 1.1rem; right: var(--edge); margin: 0; padding: 0; list-style: none; display: flex; gap: 0.5rem; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem 0.45rem 0.6rem;
+  border-radius: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  font: 400 0.9rem/1 var(--font-body);
+  white-space: nowrap;
+}
+.chip .em { font-size: 1rem; }
+.chip b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.ticker { position: absolute; top: 6.4rem; left: var(--edge); width: 27rem; display: flex; flex-direction: column; align-items: flex-start; gap: 0.45rem; pointer-events: none; }
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 100%;
+  padding: 0.5rem 0.8rem 0.5rem 0.6rem;
+  border-radius: 0.9rem;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  font: 400 0.92rem/1.35 var(--font-body);
+  animation: toastIn 0.35s ease-out;
+}
+.toast .em { font-size: 1.15rem; flex: none; }
+.toast .msg { min-width: 0; overflow-wrap: anywhere; }
+.toast b { font-weight: 700; }
+.toast[data-kind="done"] { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.toast[data-kind="warn"] { font-size: 0.8rem; background: var(--panel); box-shadow: none; }
+.toast.out { opacity: 0; transform: translateY(-0.3rem); transition: opacity 0.6s, transform 0.6s; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-0.4rem); } }
+
+/* --- Panels -------------------------------------------------------------------- */
+.panel {
+  position: absolute;
+  padding: 1rem 1.1rem 1.05rem;
+  border-radius: 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.panel h2 { margin: 0 0 0.6rem; font: 600 1.25rem/1.1 var(--font-display); }
+
+.howto { left: var(--edge); bottom: var(--edge); width: 25rem; }
+.howto .big { margin: 0 0 0.75rem; font: 700 1.05rem/1.3 var(--font-body); }
+.howto .big code { font-size: 1.15rem; }
+.items { list-style: none; margin: 0 0 0.8rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.55rem 0.28rem 0.4rem;
+  border-radius: 0.7rem;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  font: 500 0.78rem/1 var(--font-mono);
+}
+.item .em { font-size: 0.95rem; }
+.howto .label { margin: 0 0 0.4rem; font: 700 0.85rem/1.3 var(--font-body); }
+.colors { list-style: none; margin: 0 0 0.75rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; }
+.colors li { display: inline-flex; align-items: center; gap: 0.25rem; font: 500 0.72rem/1 var(--font-mono); color: var(--ink-soft); }
+.colors i { width: 0.65rem; height: 0.65rem; border-radius: 50%; border: 1px solid var(--line); }
+.howto .more { margin: 0; font: 400 0.82rem/1.9 var(--font-body); color: var(--ink-soft); }
+
+.queue { right: var(--edge); top: 4.4rem; width: 21rem; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.row { display: grid; grid-template-columns: auto minmax(0, 1fr) 4.5rem; align-items: center; gap: 0.6rem; padding: 0.45rem 0.55rem; border-radius: 0.8rem; background: var(--panel-solid); border: 1px solid var(--line); }
+.row .em { font-size: 1.35rem; }
+.row-main { display: grid; gap: 0.18rem; min-width: 0; }
+.row-main b { font: 600 0.92rem/1.1 var(--font-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-main small { font: 500 0.7rem/1 var(--font-mono); color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .bar.wait { height: auto; background: none; font: 700 0.68rem/1 var(--font-body); color: var(--warm); text-align: right; text-transform: uppercase; letter-spacing: 0.06em; }
+.row.queued { background: transparent; }
+.rows .more { font: 500 0.75rem/1 var(--font-mono); color: var(--ink-soft); padding: 0.1rem 0.4rem; }
+.queue .empty { margin: 0; font: 400 0.9rem/1.45 var(--font-body); color: var(--ink-soft); }
+
+.cta {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 0.4rem;
+  justify-items: center;
+  max-width: min(30rem, calc(100% - 2rem));
+  padding: 1.1rem 1.4rem;
+  border-radius: 1.2rem;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  text-align: center;
+  pointer-events: none;
+}
+.cta strong { font: 600 1.6rem/1.1 var(--font-display); }
+.cta span { font: 400 1rem/1.45 var(--font-body); color: var(--ink-soft); }
+
+/* --- Test bar (not in stream mode) ------------------------------------------------ */
+.devbar {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 0.35rem;
+  width: min(40rem, calc(100% - 2rem));
+  padding: 0.55rem 0.7rem;
+  border-radius: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  font-size: 0.85rem;
+}
+.devrow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.devrow input:not([type]), .devrow input[type="text"] {
+  min-width: 0;
+  padding: 0.38rem 0.55rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  font: 500 0.85rem/1.2 var(--font-mono);
+  color: var(--ink);
+}
+#devText { flex: 1 1 12rem; }
+.devmode { flex: 1; font: 500 0.75rem/1.2 var(--font-mono); color: var(--ink-soft); }
+.devlink { font: 700 0.8rem/1 var(--font-body); color: var(--accent); }
+.devcheck { display: inline-flex; align-items: center; gap: 0.25rem; font: 500 0.75rem/1 var(--font-mono); color: var(--ink-soft); }
+.devbtn {
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  font: 500 0.78rem/1 var(--font-mono);
+  color: var(--ink);
+  cursor: pointer;
+}
+.devbtn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-family: var(--font-body); font-weight: 700; }
+.devbtn:focus-visible, .devrow input:focus-visible, .devlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.devresult { margin: 0; min-height: 1.1em; font: 400 0.8rem/1.3 var(--font-body); color: var(--ink-soft); }
+
+/* Browse mode on a normal screen: a bit more compact, and the queue sits
+   higher so the test bar has room. */
+html:not([data-stream="1"]) .howto { bottom: auto; top: 6.4rem; width: 20rem; }
+html:not([data-stream="1"]) .howto .colors, html:not([data-stream="1"]) .howto .label { display: none; }
+html:not([data-stream="1"]) .ticker { top: auto; bottom: 9.5rem; width: 22rem; flex-direction: column-reverse; }
+.quick .devbtn { font-size: 0.72rem; padding: 0.3rem 0.45rem; }
+@media (max-width: 900px) {
+  html:not([data-stream="1"]) .howto, html:not([data-stream="1"]) .queue, html:not([data-stream="1"]) .quick { display: none; }
+  html:not([data-stream="1"]) .title { left: 1rem; }
+  html:not([data-stream="1"]) .title h1 { font-size: 2rem; }
+  html:not([data-stream="1"]) .stats { top: 5.4rem; left: 1rem; right: 1rem; flex-wrap: wrap; }
+  html:not([data-stream="1"]) .ticker { left: 1rem; right: 1rem; width: auto; bottom: 8rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-stream="1"]) .pill .dot, html:not([data-stream="1"]) .toast { animation: none; }
+}
