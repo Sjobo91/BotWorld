@@ -218,7 +218,7 @@ export function createHud(state, now, opts) {
       const w = econ.wonder;
       if (w) {
         const it = ITEMS[w.item];
-        const short = w.short && w.short.length ? 'waiting for ' + w.short.map((r) => resEm(r) + ' ' + resLabel(r)).join(', ') : '!work wonder to help haul';
+        const short = w.short && w.short.length ? 'waiting for ' + w.short.map((r) => resEm(r) + ' ' + resLabel(r)).join(', ') : '!help wonder to help haul';
         goals.append(goal(it.emoji, it.label, Math.floor(w.progress * 100) + '%', w.progress, w.progress >= 1 ? '' : short, w.progress >= 1));
       }
       const k = econ.knowledge / econ.knowledgeNeed;

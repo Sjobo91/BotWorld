@@ -1,6 +1,27 @@
 # BotWorld game design
 
-BotWorld is one long game that chat plays together. It starts on an empty island with sticks and stones and, over about two months, grows into a glowing future city. Nobody controls it but chat: every building, every helping hand and every vote comes from a chat command.
+BotWorld is one long game that chat plays together. It starts with a landing pad in a clearing, a few huts and sticks and stones, in the middle of a big world nobody has seen yet. Over about two months chat explores that world and grows the town into a glowing future city. Nobody controls it but chat: every home, every project, every scouting trip and every vote comes from a chat command.
+
+![The world on day 1, in the Medieval Town and in the Electric City](world.jpg)
+
+## The world
+
+* **Big and made from a seed.** A hex map of 4,921 tiles (41 rings around the pad, about ten times the old island). The server and every page build the same map from the same seed, so the map itself is never sent around.
+* **Land types:** grassland, berry meadows, forests, rocky hills, mountains (bots walk around them), lakes, rivers (bots wade through) and a sea coast on one side. In the hills and mountains lie **coal and iron deposits**; far out there are **ancient ruins** and **old stone tablets**.
+* **Fog.** At the start only the land within 6 tiles of the pad is known. Everything else is fog, like in Age of Empires. Land is revealed by scouts (`!explore`), around every new building, and much further around towers and lighthouses. Explored land rises out of the fog on stream.
+* **What scouts find:** ore deposits (needed for mines from the Medieval Town on), ruins (a gift of the goods the town has least of) and tablets (two hours of knowledge). Every map guarantees wood, stone and berries near the start, and coal and iron within about 13 tiles.
+
+## Homes and town projects
+
+* **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` flies the camera to it. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
+* **Everything else is built together.** `!build farm` starts a town project, at most three at a time. It needs its goods first, then work: every bot that types `!help` adds one share of work per second, and the townsfolk always add a little, so a project also finishes when chat is asleep. A hut takes one bot about two minutes and four bots half a minute. Helpers earn XP for the time they put in, and the finished building is credited to its builders.
+* **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
+
+## What chat sees
+
+* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, fetch the goods a project waits for (`!work wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
+* **Being built:** every project with its progress and helpers, and the homes going up.
+* **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs.
 
 ## The arc
 
@@ -8,47 +29,48 @@ BotWorld is one long game that chat plays together. It starts on an empty island
 | --- | --- | --- | --- |
 | 🪨 Stone Age | Huts, woodcutters, quarries, berry gatherers, fishing huts | wood, stone, food | 🗿 Stone Circle |
 | 🌾 Village | Farms, windmills, kilns for bricks, markets | bricks | 🏛️ Great Hall |
-| 🏰 Medieval Town | Mines, townhouses, schools, harbors | coal, iron | ⛪ Cathedral |
+| 🏰 Medieval Town | Mines on coal and iron, townhouses, schools, harbors | coal, iron | ⛪ Cathedral |
 | 🏭 Industrial Age | Steel mills, factories, coal power plants, a train | steel, parts | 🕰️ Clock Tower |
 | ⚡ Electric City | Skyscrapers, wind turbines, solar farms, chip fabs, labs | chips | 🗼 Skyline Tower |
 | ✨ Future | Arcologies, fusion reactors, robot factories, a maglev | | 💠 Fusion Spire |
 
-Lighting the Fusion Spire is the finale. After that the island keeps going in the Future era, so chat can keep building.
+Lighting the Fusion Spire is the finale. After that the town keeps going in the Future era.
 
 ## How an era ends
 
 Three bars on screen, all three must be full:
 
-1. **People.** Homes give room (a hut 4, an arcology 120), people move in while there is food and the town is not miserable, and they eat food every minute.
-2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time, and always leaves a fifth of the storage room for normal builds, so building never stops. Bots sent with `!work wonder` carry crates to it and make it go faster.
-3. **Knowledge.** Grows with time: an era takes `eraDays` (default 9) days at base speed. Campfires, schools and labs make it up to 50% faster, a meteor shower adds 3 hours at once.
+1. **People.** Homes give room (your own home 3 to 5 people, a town hut 6, an arcology 140). People move in while there is food and the town is not miserable, and they eat food every minute.
+2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time and always leaves a fifth of the storage room for normal builds. Bots on `!help wonder` carry crates to it and make it go faster.
+3. **Knowledge.** Grows with time: an era takes `eraDays` (default 11) days at base speed. Campfires, schools and labs make it up to 50% faster, meteor showers and old tablets add hours at once.
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:
 
-| Chat | Finale |
-| --- | --- |
-| 2 regular viewers | day 66 |
-| 5 regular viewers | day 50 |
-| 30 regular viewers | day 46 |
+| Era starts | 2 viewers | 5 viewers |
+| --- | --- | --- |
+| 🌾 Village | day 9.6 | day 8.6 |
+| 🏰 Medieval Town | day 19.0 | day 17.4 |
+| 🏭 Industrial Age | day 28.0 | day 26.1 |
+| ⚡ Electric City | day 38.0 | day 35.2 |
+| ✨ Future | day 48.0 | day 44.6 |
+| Finale (Fusion Spire lit) | day 55.3 | day 50.9 |
 
-When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, a coal plant becomes a fusion reactor), homes can be upgraded with `!upgrade`, and the island looks different: the paths, street lights, boats, bots and even the air change with the era.
+When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 
 ## The economy
 
 Every 5 seconds the server runs one step:
 
-* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power. Helpers sent with `!work` add speed. Happy towns work faster.
+* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power, scaled by how good their spot is. Helpers sent with `!work` add speed. Happy towns work faster.
 * **Storage** limits every good (start 100, stockpiles, barns and warehouses add room). A full store stops its producers.
-* **Power** (from the Industrial Age) comes from coal plants (burn coal), wind turbines, solar farms (only by day, following the real sun) and fusion. Factories, skyscrapers and labs need it, and run slower when there is not enough.
+* **Power** (from the Industrial Age) comes from coal plants (burn coal), wind turbines, solar farms (only by day, following the real sun) and fusion. Factories, skyscrapers and labs need it.
 * **Happiness** comes from parks, gardens, fountains, statues, stadiums and other decor near homes, and drops when people are hungry or the power is out.
-* **Needs.** The server works out what the town is short of and the building that helps most, and shows it on screen ("The wonder needs stone: !build quarry"). The how-to card highlights those buildings.
 
 ## Viewers
 
-* The first `!build` gives a viewer their own bot, with a color and a hat.
-* **XP** for building, working, hauling, repairing, voting and coming back daily (streaks give more). Levels unlock hats and more building slots (3 at the start, more with level and era, up to 30).
-* `!me` shows a viewer card on stream. The top builders of the week are on screen too.
-* When the island is completely full, buildings of viewers who have been away for more than a week are the first to make room for new ones. A full island also tells a viewer which of their own old buildings to `!demolish`.
+* Any command gives a viewer their own bot, with a colour and a hat. Bots land from the rocket on the pad.
+* **XP** for building, helping, hauling, exploring, repairing, voting and coming back daily (streaks give more). Levels unlock hats.
+* `!me` shows a card on stream (level, home, buildings helped, trips into the fog, rank) and flies the camera to your home. The top builders of the week are on screen too.
 
 ## Votes and events
 
@@ -60,7 +82,7 @@ About once an hour (when at least two people chatted in the last half hour) chat
 | 🌾 Big Harvest, 🌲 Tall Trees, 💎 Rich Veins | double food, wood, or stone, coal and iron |
 | ⛵ Merchant Ship | a gift of the goods the town has least of |
 | ☄️ Meteor Shower | +3 hours of knowledge |
-| 🔨 Builder Rush | builds go twice as fast |
+| 🔨 Builder Rush | building goes twice as fast |
 | ⛈️ Storm | breaks 3 buildings until someone types `!repair` |
 | 🔌 Blackout | breaks a power plant (Industrial Age and later) |
 
@@ -68,7 +90,7 @@ Moderators can start a vote with `!vote start` or an event with `!event storm`.
 
 ## The Gazette
 
-Every half hour a newspaper headline about the island appears at the bottom of the stream. It is written from what happened since the last one (new era, finished wonder, storm, level ups, new viewers, a building boom, what the town is short of). Templates write it out of the box; with an Anthropic API key Claude writes it.
+Every half hour a newspaper headline about the town appears at the bottom of the stream. It is written from what happened since the last one: a new era, a finished wonder, storms, discoveries, level ups, new viewers, a building boom, what the town is short of. Templates write it out of the box; with an Anthropic API key Claude writes it.
 
 ## Every era and building
 
@@ -76,88 +98,88 @@ Every half hour a newspaper headline about the island appears at the bottom of t
 
 To move on: 25 people, the 🗿 Stone Circle (500 stone, 250 wood, 150 food) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🛖 `hut` | 8 wood, 4 stone | homes for 4 |
-| 🪓 `woodcutter` | 4 stone | makes 2 wood a minute, 2 workers |
-| ⛏️ `quarry` | 6 wood | makes 2 stone a minute, 2 workers |
-| 🫐 `gatherer` | 4 wood | makes 2 food a minute, 1 worker, becomes a farm later |
-| 🎣 `fisher` | 10 wood | makes 3 food a minute, 1 worker, becomes a harbor later |
-| 🔥 `campfire` | 5 wood | +6 happiness nearby, knowledge +5% |
-| 📦 `stockpile` | 12 wood | +60 storage, becomes a barn later |
-| 🗿 `totem` | 6 wood, 14 stone | +14 happiness nearby, becomes a statue later |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🛖 `hut` | 12 wood, 6 stone |  | homes for 6, becomes a cottage later |
+| 🪓 `woodcutter` | 4 stone | next to a forest | makes 2 wood a minute, 2 workers |
+| ⛏️ `quarry` | 6 wood | next to rocky hills | makes 2 stone a minute, 2 workers |
+| 🫐 `gatherer` | 4 wood | next to a berry meadow | makes 2 food a minute, 1 worker, becomes a farm later |
+| 🎣 `fisher` | 10 wood | next to water | makes 3 food a minute, 1 worker, becomes a harbor later |
+| 🔥 `campfire` | 5 wood |  | +6 happiness nearby, knowledge +5% |
+| 📦 `stockpile` | 12 wood |  | +60 storage, becomes a barn later |
+| 🗿 `totem` | 6 wood, 14 stone |  | +14 happiness nearby, becomes a statue later |
 
 ### 2. 🌾 Village: Farms and bricks
 
 To move on: 70 people, the 🏛️ Great Hall (1200 wood, 800 bricks, 500 food) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🏠 `cottage` | 12 wood, 8 bricks | homes for 7 |
-| 🌾 `farm` | 14 wood, 6 stone | makes 5 food a minute, 2 workers, becomes a greenhouse later |
-| 🌬️ `windmill` | 20 wood, 10 stone | farms nearby +50%, 1 worker |
-| 🧱 `kiln` | 14 stone, 8 wood | 2 stone, 1 wood → 2 bricks a minute, 2 workers |
-| 🪣 `well` | 15 stone | +10 happiness nearby, becomes a fountain later |
-| 🏪 `market` | 16 wood, 10 bricks | +20 happiness nearby, 2 workers |
-| 🌷 `garden` | 6 wood | +7 happiness nearby |
-| 🌳 `park` | 8 wood, 4 stone | +10 happiness nearby |
-| 🏚️ `barn` | 20 wood, 10 bricks | +150 storage, becomes a warehouse later |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🏠 `cottage` | 16 wood, 10 bricks |  | homes for 10, becomes a townhouse later |
+| 🌾 `farm` | 14 wood, 6 stone | next to grassland | makes 5 food a minute, 2 workers, becomes a greenhouse later |
+| 🌬️ `windmill` | 20 wood, 10 stone |  | farms nearby +50%, 1 worker |
+| 🧱 `kiln` | 14 stone, 8 wood |  | 2 stone, 1 wood → 2 bricks a minute, 2 workers |
+| 🪣 `well` | 15 stone |  | +10 happiness nearby, becomes a fountain later |
+| 🏪 `market` | 16 wood, 10 bricks |  | +20 happiness nearby, 2 workers |
+| 🌷 `garden` | 6 wood |  | +7 happiness nearby |
+| 🌳 `park` | 8 wood, 4 stone |  | +10 happiness nearby |
+| 🏚️ `barn` | 20 wood, 10 bricks |  | +150 storage, becomes a warehouse later |
 
 ### 3. 🏰 Medieval Town: Coal and iron
 
 To move on: 150 people, the ⛪ Cathedral (2500 stone, 1500 bricks, 500 iron) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🏘️ `townhouse` | 18 bricks, 12 stone, 2 iron | homes for 12 |
-| ⚒️ `mine` | 30 wood, 20 stone | makes 2 coal, 1 iron a minute, 3 workers |
-| 🏰 `tower` | 40 stone, 4 iron | +20 happiness nearby, upgrades to level 3 |
-| 🏫 `school` | 24 bricks, 12 wood | +5 happiness nearby, knowledge +10%, 2 workers, becomes a research lab later |
-| ⚓ `harbor` | 40 wood, 6 iron | makes 8 food a minute, 3 workers |
-| 🗼 `lighthouse` | 40 stone, 12 bricks | +15 happiness nearby |
-| ⛲ `fountain` | 30 stone, 2 iron | +18 happiness nearby |
-| 🗽 `statue` | 40 stone, 6 iron | +25 happiness nearby, becomes a holo park later |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🏘️ `townhouse` | 22 bricks, 14 stone, 3 iron |  | homes for 16, becomes a apartment block later |
+| ⚒️ `mine` | 30 wood, 20 stone | near a coal or iron deposit | makes 2 coal, 1 iron a minute, 3 workers |
+| 🏰 `tower` | 40 stone, 4 iron |  | +20 happiness nearby |
+| 🏫 `school` | 24 bricks, 12 wood |  | +5 happiness nearby, knowledge +10%, 2 workers, becomes a research lab later |
+| ⚓ `harbor` | 40 wood, 6 iron | next to the sea or a lake | makes 8 food a minute, 3 workers |
+| 🗼 `lighthouse` | 40 stone, 12 bricks | next to the sea | +15 happiness nearby |
+| ⛲ `fountain` | 30 stone, 2 iron |  | +18 happiness nearby |
+| 🗽 `statue` | 40 stone, 6 iron |  | +25 happiness nearby, becomes a holo park later |
 
 ### 4. 🏭 Industrial Age: Steam and steel
 
 To move on: 300 people, the 🕰️ Clock Tower (2500 bricks, 2000 steel, 600 parts) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🏢 `apartments` | 40 bricks, 8 steel | homes for 24 |
-| 🏭 `steelmill` | 50 bricks, 30 iron | 2 iron, 2 coal → 2 steel a minute, 4 workers |
-| 🔥 `coalplant` | 40 bricks, 10 steel | burns 2 coal a minute, +20 power, 3 workers, becomes a fusion reactor later |
-| ⚙️ `factory` | 60 bricks, 30 steel | 2 steel → 2 parts a minute, needs 8 power, 5 workers |
-| 🏬 `warehouse` | 40 bricks, 10 steel | +400 storage |
-| 🚉 `station` | 60 steel, 40 bricks | +30 happiness nearby, a train runs round the island |
-| 💧 `watertower` | 20 steel | +15 happiness nearby |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🏢 `apartments` | 45 bricks, 10 steel |  | homes for 32, becomes a skyscraper later |
+| 🏭 `steelmill` | 50 bricks, 30 iron |  | 2 iron, 2 coal → 2 steel a minute, 4 workers |
+| 🔥 `coalplant` | 40 bricks, 10 steel |  | burns 2 coal a minute, +20 power, 3 workers, becomes a fusion reactor later |
+| ⚙️ `factory` | 60 bricks, 30 steel |  | 2 steel → 2 parts a minute, needs 8 power, 5 workers |
+| 🏬 `warehouse` | 40 bricks, 10 steel |  | +400 storage |
+| 🚉 `station` | 60 steel, 40 bricks |  | +30 happiness nearby, a train runs round the town |
+| 💧 `watertower` | 20 steel |  | +15 happiness nearby |
 
 ### 5. ⚡ Electric City: Power for everyone
 
 To move on: 600 people, the 🗼 Skyline Tower (5000 steel, 2000 parts, 600 chips) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🏙️ `skyscraper` | 60 steel, 20 parts | homes for 50, needs 6 power |
-| 🌀 `turbine` | 30 steel, 10 parts | +15 power |
-| ☀️ `solar` | 20 steel, 16 parts | +20 power (by day) |
-| 💾 `chipfab` | 60 steel, 40 parts | 2 parts → 1 chips a minute, needs 15 power, 6 workers |
-| 🔬 `lab` | 40 steel, 10 chips | needs 6 power, knowledge +15%, 3 workers |
-| 🏟️ `stadium` | 120 steel, 40 parts | needs 5 power, +80 happiness nearby |
-| 🌱 `greenhouse` | 30 steel, 10 parts | makes 20 food a minute, needs 4 power, 2 workers, becomes a vertical farm later |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🏙️ `skyscraper` | 70 steel, 24 parts |  | homes for 64, needs 6 power, becomes a arcology later |
+| 🌀 `turbine` | 30 steel, 10 parts |  | +15 power |
+| ☀️ `solar` | 20 steel, 16 parts |  | +20 power (by day) |
+| 💾 `chipfab` | 60 steel, 40 parts |  | 2 parts → 1 chips a minute, needs 15 power, 6 workers |
+| 🔬 `lab` | 40 steel, 10 chips |  | needs 6 power, knowledge +15%, 3 workers |
+| 🏟️ `stadium` | 120 steel, 40 parts |  | needs 5 power, +80 happiness nearby |
+| 🌱 `greenhouse` | 30 steel, 10 parts |  | makes 20 food a minute, needs 4 power, 2 workers, becomes a vertical farm later |
 
 ### 6. ✨ Future: A bright tomorrow
 
 To move on: 1200 people, the 💠 Fusion Spire (9000 steel, 3000 parts, 3000 chips) and a full knowledge bar.
 
-| Build | Cost | What it does |
-| --- | --- | --- |
-| 🌐 `arcology` | 120 steel, 40 chips | homes for 120, needs 10 power |
-| ⚛️ `fusion` | 200 steel, 80 chips | +120 power, 4 workers |
-| 🤖 `robofactory` | 150 steel, 60 chips | needs 20 power, every producer +25%, 2 workers |
-| 🥬 `vertifarm` | 80 steel, 20 chips | makes 60 food a minute, needs 10 power, 2 workers |
-| 🚄 `maglev` | 300 steel, 100 chips | +60 happiness nearby, a train runs round the island |
-| 🌈 `holopark` | 20 steel, 20 chips | needs 4 power, +60 happiness nearby |
-| 🛸 `droneport` | 120 steel, 60 chips | needs 10 power, wonder goes faster, 2 workers |
+| Build | Cost | Needs | What it does |
+| --- | --- | --- | --- |
+| 🌐 `arcology` | 130 steel, 45 chips |  | homes for 140, needs 10 power |
+| ⚛️ `fusion` | 200 steel, 80 chips |  | +120 power, 4 workers |
+| 🤖 `robofactory` | 150 steel, 60 chips |  | needs 20 power, every producer +25%, 2 workers |
+| 🥬 `vertifarm` | 80 steel, 20 chips |  | makes 60 food a minute, needs 10 power, 2 workers |
+| 🚄 `maglev` | 300 steel, 100 chips |  | +60 happiness nearby, a train runs round the town |
+| 🌈 `holopark` | 20 steel, 20 chips |  | needs 4 power, +60 happiness nearby |
+| 🛸 `droneport` | 120 steel, 60 chips |  | needs 10 power, wonder goes faster, 2 workers |
 
-The full list, with build times and placement rules, is in `public/shared/catalog.js`. Changing numbers there and running `npm run balance` shows how the pacing changes.
+The full list, with build times, is in `public/shared/catalog.js`, the land rules in `public/shared/terrain.js`. Changing numbers there and running `npm run balance` shows how the pacing changes.

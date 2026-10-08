@@ -4,7 +4,7 @@ A 24/7 Twitch stream where chat builds a world together. Type `!home` in chat an
 
 The town sits in the middle of a big world (about ten times the old island), with forests, berry meadows, rocky hills, mountains with coal and iron, lakes, rivers and a sea coast. Everything beyond the first few fields is fog until a bot explores it with `!explore`, like in Age of Empires. It starts with sticks and stones and, over about two months, works its way through six eras up to a glowing future city with fusion reactors. Every era has a wonder that the whole chat builds together.
 
-![The island in each of the six eras](docs/eras.jpg)
+![The world on day 1, in the Medieval Town and in the Electric City](docs/world.jpg)
 
 ## Try it in two minutes
 
@@ -15,9 +15,9 @@ npm install
 npm run demo
 ```
 
-Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the island grow without being live. The bar at the bottom lets you type commands yourself as any name.
+Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the town grow without being live. The bar at the bottom lets you type commands yourself as any name.
 
-Want to see a later era right away? Grow an island in pretend time and open it:
+Want to see a later era right away? Grow a world in pretend time and open it:
 
 ```bash
 npm run balance -- --untilEra=3 --save=data-preview
@@ -45,7 +45,7 @@ The world is saved in `data/world.json` (with a dated copy in `data/backups/` ev
    * Tick **Control audio via OBS**
 3. Stream to Twitch as usual (Settings > Stream). Use a keyframe interval of 2 seconds.
 
-The `?stream=1` view hides the test bar and lets the camera direct itself: it flies to every new build, follows bots to work, watches storms and finished wonders, and tours the island when chat is quiet. The sky follows the real clock and the seasons (snow in winter), so nights are dark with lit windows and street lights. Every time a new era starts there is a big banner and a timelapse of how the island grew.
+The `?stream=1` view hides the test bar and lets the camera direct itself: it flies to every new build, follows bots to work, watches storms and finished wonders, and tours the town when chat is quiet. The sky follows the real clock and the seasons (snow in winter), so nights are dark with lit windows and street lights. Every time a new era starts there is a big banner and a timelapse of how the town grew.
 
 ![The stream view](docs/stream.jpg)
 
@@ -88,7 +88,7 @@ In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DES
 
 ## The Gazette
 
-Every 30 minutes a newspaper headline about the island appears at the bottom of the stream ("Storm batters the island, 3 buildings hit. Repair crews wanted"). It works out of the box with headline templates.
+Every 30 minutes a newspaper headline about the town appears at the bottom of the stream ("Storm batters the town, 3 buildings hit. Repair crews wanted"). It works out of the box with headline templates.
 
 To let Claude write the headlines, set an [Anthropic API key](https://console.anthropic.com) before starting:
 
@@ -103,7 +103,7 @@ It uses Claude Opus 5.5 with low effort, one short request every half hour, and 
 A chat that controls the screen will try to break it, and Twitch holds you responsible for what is on your stream. BotWorld is built so that is hard to do:
 
 * Chat can only pick from fixed lists of buildings, colors, goods and hats. No chat text is ever drawn on screen, except Twitch usernames (which Twitch already moderates).
-* One build at a time per viewer, a limited number of buildings per viewer, and a queue that keeps at most 6 builds going at once.
+* One home per viewer, at most one project per founder and 3 town projects at a time, and at most 8 helpers on one project.
 * Mistakes get one friendly on-screen hint per viewer per 20 seconds, so spam cannot flood the screen.
 * Mods can `!remove #id` anything.
 
@@ -123,7 +123,7 @@ Pick the machine that runs it all day:
    TWITCH_STREAM_KEY=live_xxxxx ./stream/stream.sh
    ```
 
-   Without a graphics card the 3D is drawn by the CPU, which gets slow once the island is a big city. Use `quality=low`, or better a machine with a GPU, or option 1. In this mode the stream is currently silent.
+   Without a graphics card the 3D is drawn by the CPU, which gets slow once the town is a big city. Use `quality=low`, or better a machine with a GPU, or option 1. In this mode the stream is currently silent.
 
 To survive reboots, run both with a service manager (systemd on Linux, or Task Scheduler on Windows). The page also reloads itself every night at 4:00, and after any graphics hiccup.
 
@@ -136,7 +136,7 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Data folder | `--data=folder`, `BOTWORLD_DATA` | `data` |
 | Pretend viewers | `--simulate`, `BOTWORLD_SIMULATE=1` | off |
 | Days per era | `--era-days=11`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 11 (about 2 months in all) |
-| Where the island is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
+| Where the world is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
 | Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `workMinutes`, `helpMinutes` and more | see `server/world.js` |
 
@@ -173,5 +173,5 @@ npm run balance -- --viewers=30 --eraDays=10
 * Sound in the headless server stream (a PulseAudio virtual sound card).
 * A chat bot account that answers in chat ("@name your house is #12"), which needs a Twitch token.
 * Channel points and bits (for example "start a festival" as a channel point reward), through Twitch EventSub with a token.
-* A new island (season 2) after the finale, with the old one kept as a timelapse.
+* A new world (season 2) after the finale, with the old one kept as a timelapse.
 * If Twitch ever retires anonymous chat reading, switch `server/twitch.js` to EventSub with a token.

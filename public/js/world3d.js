@@ -2318,6 +2318,7 @@ export async function createWorld(stage, overlay, opts) {
     return Math.max(3, Math.min(80, Math.max(dW, dH) * 0.95));
   }
   function frameCamera() {
+    focus = null;
     const d = fitDistance();
     const el = elevation();
     const az = 0.72;
@@ -2341,6 +2342,11 @@ export async function createWorld(stage, overlay, opts) {
   let focus = null;
   function flyTo(x, z, want, dur, track) {
     const offset = camera.position.clone().sub(controls.target);
+    // Never fly with a camera sitting on its target: look from the usual angle.
+    if (offset.length() < 1.5 || !Number.isFinite(offset.length())) {
+      const el = elevation();
+      offset.set(Math.sin(0.72) * Math.cos(el), Math.sin(el), Math.cos(0.72) * Math.cos(el)).multiplyScalar(Math.max(3, want || 8));
+    }
     focus = { from: controls.target.clone(), to: new T.Vector3(x, 0, z), offset, want, start: performance.now(), dur: still ? 0 : dur, track: track || null };
   }
   function stepFocus(dt) {
@@ -2716,6 +2722,7 @@ export async function createWorld(stage, overlay, opts) {
         bots: [...bots.values()].map((b) => ({ id: b.id, name: b.builder.name, mode: b.mode, act: b.act, carrying: b.carrying, x: +b.x.toFixed(2), z: +b.z.toFixed(2) })),
         porters: porters.size,
         builds: [...builds.values()].map((v) => ({ id: v.id, item: v.b.item, status: v.b.status, key: v.key, scaleY: v.body ? +v.body.scale.y.toFixed(2) : 0 })),
+        camera: { d: +camera.position.distanceTo(controls.target).toFixed(2), y: +camera.position.y.toFixed(2), tx: +controls.target.x.toFixed(2), tz: +controls.target.z.toFixed(2), fit: +fitDistance().toFixed(2), max: +controls.maxDistance.toFixed(2) },
         knownR: layout.knownR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
