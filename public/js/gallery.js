@@ -1,5 +1,6 @@
 // Every building of every era side by side, for checking the models.
-// Open /gallery.html (add ?era=3 to see one era up close).
+// Open /gallery.html (add ?era=3 to see one era up close, &zoom=2 closer
+// still, &level=3 to see upgraded buildings).
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ITEMS, ERAS } from '../shared/catalog.js';
@@ -44,8 +45,7 @@ eras.forEach((era, row) => {
   maxCols = Math.max(maxCols, items.length);
   items.forEach((key, col) => {
     const it = ITEMS[key];
-    const levels = it.maxLevel ? Array.from({ length: it.maxLevel }, (_, i) => i + 1) : [1];
-    const lv = levels[levels.length - 1];
+    const lv = it.kind === 'wonder' ? 1 : Number(params.get('level')) || 1;
     const { g } = buildingMesh({ id: row * 100 + col, item: key, level: lv, color: null }, lv);
     const x = col * spacing;
     const z = row * spacing * 1.6;
@@ -69,7 +69,8 @@ for (const t of tags) {
 const cx = ((maxCols - 1) * spacing) / 2;
 const cz = ((eras.length - 1) * spacing * 1.6) / 2;
 controls.target.set(cx, 0, cz);
-const dist = Math.max(maxCols * spacing * 0.9, eras.length * spacing * 2.2) + 2;
+const zoom = Number(params.get('zoom')) || 1;
+const dist = (Math.max(maxCols * spacing * 0.9, eras.length * spacing * 2.2) + 2) / zoom;
 camera.position.set(cx, dist * 0.75, cz + dist * 0.75);
 function resize() {
   renderer.setSize(stage.clientWidth, stage.clientHeight, false);

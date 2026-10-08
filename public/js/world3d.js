@@ -6,7 +6,7 @@ import { ITEMS, ERAS, RESOURCES, TOOLS, hashStr } from '../shared/catalog.js';
 import { DIRS, hexDist } from '../shared/hex.js';
 import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
-import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
+import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat, NATURE } from './meshes.js';
 import { buildingMesh } from './buildings.js';
 import { createAudio } from './audio.js';
 
@@ -43,11 +43,12 @@ const POI_DEFS = {
 const RES_COLORS = { wood: '#8a5a3b', stone: '#9aa1aa', food: '#e0a040', bricks: '#b5583b', coal: '#2b2b2e', iron: '#7d8794', steel: '#aab4c0', parts: '#c9a227', chips: '#2bb3b3' };
 const WATER_JOBS = new Set(['farm', 'gatherer', 'garden', 'greenhouse', 'vertifarm']);
 const FISH_JOBS = new Set(['fisher', 'harbor']);
+// leaf: broad trees, leaf2: birches and blossom, ever: firs (always green).
 const SEASON_LOOK = {
-  spring: { leaf: '#7ccf6a', leaf2: '#f2a7c3', grass: '#7fcf6a', tiles: ['#93d77c', '#a5df8f', '#7dc56a'] },
-  summer: { leaf: '#5fae5a', leaf2: '#4a9852', grass: '#6bb35d', tiles: ['#8ccd74', '#9fd889', '#74bb63'] },
-  autumn: { leaf: '#e08a2e', leaf2: '#c4532d', grass: '#9cb55a', tiles: ['#a9bd66', '#b9c977', '#93a854'] },
-  winter: { leaf: '#e9eef2', leaf2: '#cfd8de', grass: '#dfe8ec', tiles: ['#e4ecef', '#eef3f5', '#d6e0e4'] },
+  spring: { leaf: '#7ccf6a', leaf2: '#f2a7c3', ever: '#3f8a4c', grass: '#7fcf6a', tiles: ['#93d77c', '#a5df8f', '#7dc56a'] },
+  summer: { leaf: '#5fae5a', leaf2: '#8ccc66', ever: '#3f8a4c', grass: '#6bb35d', tiles: ['#8ccd74', '#9fd889', '#74bb63'] },
+  autumn: { leaf: '#e08a2e', leaf2: '#e8bf3f', ever: '#3c8047', grass: '#9cb55a', tiles: ['#a9bd66', '#b9c977', '#93a854'] },
+  winter: { leaf: '#e9eef2', leaf2: '#cfd8de', ever: '#a7c4ae', grass: '#dfe8ec', tiles: ['#e4ecef', '#eef3f5', '#d6e0e4'] },
 };
 
 export async function createWorld(stage, overlay, opts) {
@@ -71,6 +72,7 @@ export async function createWorld(stage, overlay, opts) {
   const data = { builders: new Map(), jobs: new Map(), queues: new Map(), econ: null, event: null };
   mats.path = std(0xdccfb2);
   mats.mountain = std(0x8c867f);
+  mats.hill = std(0xa59a7c);
   mats.snow = std(0xf3f6f8);
   mats.bush = std(0x4f8f45);
   mats.berry = std(0xd23a55);
@@ -394,59 +396,68 @@ export async function createWorld(stage, overlay, opts) {
     decor.meshes = [];
     decor.byTile.clear();
     const kinds = {
-      trunk: { g: () => new T.CylinderGeometry(0.025, 0.035, 0.16, 5).translate(0, 0.08, 0), m: mats.trunk, list: [] },
-      pine: { g: () => new T.ConeGeometry(0.15, 0.4, 7).translate(0, 0.34, 0), m: mats.leaf2, list: [] },
-      crown: { g: () => new T.DodecahedronGeometry(0.15, 0).translate(0, 0.28, 0), m: mats.leaf, list: [] },
-      rock: { g: () => new T.DodecahedronGeometry(0.1, 0), m: mats.rock, list: [] },
-      peak: { g: () => new T.ConeGeometry(R * 0.82, 0.8, 7).translate(0, 0.4, 0), m: mats.mountain, list: [] },
-      snow: { g: () => new T.ConeGeometry(R * 0.3, 0.3, 7).translate(0, 0.66, 0), m: mats.snow, list: [] },
-      bush: { g: () => new T.DodecahedronGeometry(0.075, 0).translate(0, 0.06, 0), m: mats.bush, list: [] },
+      trunk: { g: NATURE.trunk, m: mats.trunk, list: [] },
+      oak: { g: NATURE.oakTop, m: mats.leaf, list: [] },
+      fir: { g: NATURE.firTop, m: mats.evergreen, list: [] },
+      birchTrunk: { g: NATURE.birchTrunk, m: mats.birch, list: [] },
+      birch: { g: NATURE.birchTop, m: mats.leaf2, list: [] },
+      rock: { g: NATURE.boulder, m: mats.rock, list: [] },
+      mound: { g: NATURE.mound, m: mats.hill, list: [] },
+      massif: { g: NATURE.massif, m: mats.mountain, list: [] },
+      snow: { g: NATURE.snowCap, m: mats.snow, list: [] },
+      bush: { g: NATURE.bush, m: mats.bush, list: [] },
       berry: { g: () => new T.SphereGeometry(0.022, 5, 4), m: mats.berry, list: [] },
       coal: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.coalOre, list: [] },
       iron: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.ironOre, list: [] },
       column: { g: () => new T.CylinderGeometry(0.035, 0.04, 1, 6).translate(0, 0.5, 0), m: mats.ruin, list: [] },
       slab: { g: () => new T.BoxGeometry(0.13, 0.22, 0.045).translate(0, 0.11, 0), m: mats.ruin, list: [] },
-      reed: { g: () => new T.ConeGeometry(0.018, 0.16, 4).translate(0, 0.08, 0), m: mats.leaf2, list: [] },
+      reed: { g: NATURE.reed, m: mats.leaf2, list: [] },
     };
-    const add = (t, kind, x, y, z, s, sy, ry) => {
-      kinds[kind].list.push({ t, x, y, z, s, sy: sy || s, ry: ry || 0 });
+    const add = (t, kind, x, y, z, s, sy, ry, tint) => {
+      kinds[kind].list.push({ t, x, y, z, s, sy: sy || s, ry: ry || 0, tint });
+    };
+    // A tree of one of three kinds, each a little different in size and green.
+    const tree = (t, r, x, y, z, s, firs) => {
+      const pick = r();
+      const tint = 0.86 + r() * 0.24;
+      const ry = r() * 6;
+      if (pick < firs) { add(t, 'trunk', x, y, z, s * 0.8, s * 0.8, ry); add(t, 'fir', x, y, z, s, s, ry, tint); }
+      else if (pick < firs + 0.18) { add(t, 'birchTrunk', x, y, z, s, s, ry); add(t, 'birch', x, y, z, s, s, ry, tint); }
+      else { add(t, 'trunk', x, y, z, s, s, ry); add(t, 'oak', x, y, z, s, s, ry, tint); }
     };
     for (const t of layout.tiles) {
       const r = rng(hashStr('d' + layout.seed + ':' + t.i));
       const top = LAND[t.t].top;
       const jit = (a) => (r() - 0.5) * a;
       if (t.t === 'forest') {
-        for (let j = 0; j < 3; j++) {
-          const x = t.x + jit(0.62);
-          const z = t.z + jit(0.62);
-          const s = 0.8 + r() * 0.5;
-          add(t, 'trunk', x, top, z, s);
-          add(t, r() < 0.55 ? 'pine' : 'crown', x, top, z, s, s, r() * 6);
-        }
+        // Forests far out and up in the hills hold more firs.
+        const firs = Math.min(0.6, 0.25 + t.d * 0.01);
+        for (let j = 0; j < 4; j++) tree(t, r, t.x + jit(0.66), top, t.z + jit(0.66), 0.85 + r() * 0.45, firs);
       } else if (t.t === 'grass' && t.d > 3 && r() < 0.07) {
-        const x = t.x + jit(0.4);
-        const z = t.z + jit(0.4);
-        add(t, 'trunk', x, top, z, 0.9);
-        add(t, 'crown', x, top, z, 0.9, 0.9, r() * 6);
+        tree(t, r, t.x + jit(0.4), top, t.z + jit(0.4), 0.95, 0.2);
       } else if (t.t === 'hills') {
-        const n = 2 + Math.floor(r() * 2);
-        for (let j = 0; j < n; j++) add(t, 'rock', t.x + jit(0.6), top + 0.03, t.z + jit(0.6), 0.8 + r() * 0.9, 0.6 + r() * 0.5, r() * 6);
+        add(t, 'mound', t.x + jit(0.2), top, t.z + jit(0.2), 1 + r() * 0.3, 0.8 + r() * 0.5, r() * 6);
+        const n = 2 + Math.floor(r() * 3);
+        for (let j = 0; j < n; j++) add(t, 'rock', t.x + jit(0.7), top + 0.02, t.z + jit(0.7), 0.7 + r() * 0.9, 0.6 + r() * 0.6, r() * 6);
       } else if (t.t === 'mountain') {
-        const s = 0.85 + r() * 0.4;
-        add(t, 'peak', t.x + jit(0.1), top, t.z + jit(0.1), 1, s, r() * 6);
-        add(t, 'snow', t.x, top, t.z, 1, s, 0);
+        const s = 0.95 + r() * 0.25;
+        const sy = 0.85 + r() * 0.5;
+        const ry = r() * 6;
+        add(t, 'massif', t.x + jit(0.08), top, t.z + jit(0.08), s, sy, ry);
+        if (sy > 0.95) add(t, 'snow', t.x, top, t.z, s, sy, ry);
+        for (let j = 0; j < 2; j++) add(t, 'rock', t.x + jit(0.8), top, t.z + jit(0.8), 0.8 + r() * 0.6, 0.7, r() * 6);
       } else if (t.t === 'meadow') {
         for (let j = 0; j < 3; j++) {
           const x = t.x + jit(0.6);
           const z = t.z + jit(0.6);
-          add(t, 'bush', x, top, z, 0.9 + r() * 0.5);
-          add(t, 'berry', x + 0.03, top + 0.1, z + 0.02, 1);
-          add(t, 'berry', x - 0.04, top + 0.08, z - 0.01, 1);
+          add(t, 'bush', x, top, z, 0.9 + r() * 0.5, 0, r() * 6, 0.9 + r() * 0.2);
+          add(t, 'berry', x + 0.03, top + 0.09, z + 0.02, 1);
+          add(t, 'berry', x - 0.04, top + 0.07, z - 0.01, 1);
         }
       } else if (t.t === 'sand' && r() < 0.3) {
-        add(t, 'rock', t.x + jit(0.5), top + 0.02, t.z + jit(0.5), 0.6, 0.4, r() * 6);
+        add(t, 'rock', t.x + jit(0.5), top + 0.01, t.z + jit(0.5), 0.6, 0.45, r() * 6);
       } else if (t.t === 'river' && r() < 0.5) {
-        for (let j = 0; j < 3; j++) add(t, 'reed', t.x + jit(0.8), top, t.z + jit(0.8), 1);
+        for (let j = 0; j < 4; j++) add(t, 'reed', t.x + jit(0.8), top, t.z + jit(0.8), 1, 0.8 + r() * 0.5, r() * 6);
       }
       if (t.f === 'coal' || t.f === 'iron') {
         for (let j = 0; j < 3; j++) add(t, t.f, t.x + jit(0.5), top + 0.04, t.z + jit(0.5), 0.8 + r() * 0.6, 0.7, r() * 6);
@@ -461,10 +472,13 @@ export async function createWorld(stage, overlay, opts) {
       if (!kd.list.length) continue;
       const im = new T.InstancedMesh(geo('decor:' + name, kd.g), kd.m, kd.list.length);
       im.castShadow = name !== 'reed' && name !== 'berry';
-      im.receiveShadow = name === 'peak';
+      im.receiveShadow = name === 'massif' || name === 'mound';
+      const tinted = kd.list.some((e) => e.tint);
       kd.list.forEach((e, idx) => {
         e.mesh = im;
         e.idx = idx;
+        // Every tree and bush a slightly different green.
+        if (tinted) im.setColorAt(idx, tmpC.setRGB(e.tint || 1, e.tint ? Math.min(1.1, e.tint * 1.04) : 1, e.tint ? e.tint * 0.94 : 1));
         if (!decor.byTile.has(e.t.i)) decor.byTile.set(e.t.i, []);
         decor.byTile.get(e.t.i).push(e);
       });
@@ -1709,6 +1723,7 @@ export async function createWorld(stage, overlay, opts) {
     const L = SEASON_LOOK[s];
     mats.leaf.color.set(L.leaf);
     mats.leaf2.color.set(L.leaf2);
+    mats.evergreen.color.set(L.ever);
     mats.grass.color.set(L.grass);
     decorShown.clear();
     refreshTiles();

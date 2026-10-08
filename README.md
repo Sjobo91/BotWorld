@@ -57,15 +57,19 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | --- | --- |
 | `!home` | Your bot lands and builds your own home, with a flag and a rim in your colour |
 | `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
-| `!help` | Your bot helps build the project that needs it most. `!help #12` for a certain one |
+| `!help` | Your bot helps build the project that needs it most for 40 seconds. `!help #12` for a certain one |
 | `!help wonder` | Haul goods to the era's wonder |
-| `!wood` | Your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
-| `!stone` | Your bot breaks stone in the rocky hills (also `!mine`) |
-| `!food` | Your bot picks berries in a meadow, or `!fish` by the water |
+| `!wood` | One trip: your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
+| `!stone` | One trip to break stone in the rocky hills (also `!mine`) |
+| `!food` | One trip to pick berries in a meadow, or `!fish` by the water |
 | `!coal`, `!iron` | From the Medieval Town: dig ore at a deposit the scouts found |
+| `!wood 3` | Do it three times in a row (works for every job, up to 5) |
 | `!work bricks` | Help at a building that makes a good from other goods: `bricks`, `steel`, `parts`, `chips` |
 | `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
+| `!upgrade woodcutter` | Start a town project that takes a building up a level (also `!upgrade #12`). Three levels, each makes 50% more |
+| `!upgrade tools` | Better tools for your bot: a bigger load on every trip and faster building. Needs a level, the right era and a few goods |
 | `!upgrade` | Make your home bigger (three levels per era) |
+| `!stop` | Your bot stops and forgets the jobs lined up |
 | `!repair` | Fix a building broken by a storm or blackout |
 | `!vote 1` or `!1` | Vote in a chat vote |
 | `!me` | Show your card, put a beacon in your colour over your bot and fly the camera to it |
@@ -75,6 +79,8 @@ On screen: goods in storage along the top (with how fast they change), the era p
 
 Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
 
+Every job is short (about half a minute), so chat can keep typing and see what it did: the goods pop up over the bot when it comes back, and so does every bit of XP. Typed while the bot is busy, jobs wait in line (the number shows next to its name).
+
 On screen, the **What to do now** box always says the next step for chat, with the command to type, and the how-to card takes turns showing the commands, where every good comes from and this era's buildings.
 
 ## The game
@@ -82,7 +88,8 @@ On screen, the **What to do now** box always says the next step for chat, with t
 In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)):
 
 * **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
-* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot out to chop, mine or pick on the right land. It brings 2 goods to town every 2 minutes, so there is always something useful to do, even before the first woodcutter stands.
+* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot on a trip to chop, mine or pick on the right land, and it carries the load back to the nearest store: 2 goods with stone tools, up to 8 with laser tools. There is always something useful to do, even before the first woodcutter stands.
+* **Upgrades.** Every town building can go up to level 3 (`!upgrade woodcutter`), which makes 50% more per level and shows as pennants on the building. Bots get better tools with `!upgrade tools` as their viewer levels up.
 * **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge.
 * **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
 * **People** move into homes when there is food and the town is not miserable. Parks, fountains, statues and stadiums make them happier, and happy towns work faster.
@@ -143,7 +150,7 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Days per era | `--era-days=11`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 11 (about 2 months in all) |
 | Where the world is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
-| Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `workMinutes`, `helpMinutes` and more | see `server/world.js` |
+| Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `queueMax`, `shiftSec` and more | see `server/world.js` |
 
 Page options: `?stream=1` broadcast view (press Esc, or the button that shows when you move the mouse, to leave it), `&sound=1` start with sound, `&quality=low` no shadows, `&time=21:30` pretend it is that time of day.
 

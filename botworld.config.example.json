@@ -13,6 +13,6 @@
     "maxProjects": 3,
     "maxHelpers": 8,
     "voteEveryMin": 60,
-    "workMinutes": 10
+    "queueMax": 5
   }
 }

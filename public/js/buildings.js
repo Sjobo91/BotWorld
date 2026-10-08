@@ -2,15 +2,19 @@
 // shapes, stands on y = 0, faces +z (towards the middle of the island) and
 // fits inside one plot. buildingMesh returns { g, h, anim }: h is about how
 // tall it is (for scaffolding and labels), anim lists the parts that move.
-import { hashStr } from '../shared/catalog.js';
+import { ITEMS, hashStr } from '../shared/catalog.js';
 import { three, mats, geo, mesh, rng, trimMat, colorOf, stripeMat, oct, addWindows, treeMesh, benchMesh, flowerBed, crenellations } from './meshes.js';
 
 let T = null;
 const box = (w, h, d) => new T.BoxGeometry(w, h, d);
 const cyl = (rt, rb, h, n = 12) => new T.CylinderGeometry(rt, rb, h, n);
 const cone = (r, h, n = 12) => new T.ConeGeometry(r, h, n);
-const sph = (r, w = 12, h = 8) => new T.SphereGeometry(r, w, h);
+const sph = (r, w = 12, h = 8, ...rest) => new T.SphereGeometry(r, w, h, ...rest);
 const dome = (r) => new T.SphereGeometry(r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+// A round, soft lump (bushes, berry piles, flames).
+const blob = (r) => new T.IcosahedronGeometry(r, 1);
+// A thatched dome roof: half a sphere, a bit flattened, overhanging its walls.
+const roundRoof = (r, h) => new T.SphereGeometry(r, 16, 7, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, h / r, 1);
 // A gable roof: a triangular prism along x.
 const gable = (w, h, d) => {
   const g = new T.CylinderGeometry(1, 1, 1, 3);
@@ -26,96 +30,122 @@ function smokeAt(anim, x, y, z, every = 2.2, dark = false) {
 
 const BUILDERS = {
   // --- Stone Age -------------------------------------------------------------------
+  // A round mud hut under a thick dome of thatch.
   hut(k) {
-    k.part('hutWall', () => cyl(0.2, 0.22, 0.17, 10), mats.mud, 0, 0.085, 0);
-    k.part('hutRoof', () => cone(0.29, 0.28, 10), mats.straw, 0, 0.31, 0);
-    k.part('hutDoor', () => box(0.08, 0.12, 0.02), mats.timber, 0, 0.06, 0.205);
-    k.part('hutCurtain', () => box(0.07, 0.04, 0.022), k.trim, 0, 0.1, 0.207);
-    for (let i = 0; i < 3; i++) {
-      const s = k.part('hutStick' + i, () => cyl(0.006, 0.006, 0.14, 4), mats.woodDark, (i - 1) * 0.02, 0.48, 0);
-      s.rotation.z = (i - 1) * 0.4;
-    }
-    return 0.5;
-  },
-  woodcutter(k) {
-    for (let i = 0; i < 3; i++) {
-      const log = k.part('logBig', () => cyl(0.035, 0.035, 0.34, 7), mats.trunk, -0.1, 0.035 + i * 0.055 - (i === 2 ? 0 : 0), 0.12 - (i === 2 ? 0.035 : i * 0.07));
-      log.rotation.z = Math.PI / 2;
-      if (i === 2) log.position.y = 0.09;
-    }
-    k.part('stump', () => cyl(0.06, 0.07, 0.07, 8), mats.trunk, 0.15, 0.035, 0.12);
-    const axe = k.part('axeHandle', () => cyl(0.006, 0.006, 0.14, 4), mats.wood, 0.15, 0.12, 0.12);
-    axe.rotation.z = 0.5;
-    k.part('axeHead', () => box(0.04, 0.03, 0.01), mats.metal, 0.12, 0.18, 0.12);
-    for (const x of [-0.18, 0.06]) k.part('leanPost', () => cyl(0.012, 0.012, 0.26, 5), mats.woodDark, x, 0.13, -0.15);
-    const roof = k.part('leanRoof', () => box(0.32, 0.015, 0.2), mats.straw, -0.06, 0.25, -0.1);
-    roof.rotation.x = 0.45;
-    const t = treeMesh(true);
-    t.position.set(0.2, 0, -0.16);
-    t.scale.setScalar(0.9);
-    k.g.add(t);
-    return 0.45;
-  },
-  quarry(k) {
-    k.part('pit', () => cyl(0.3, 0.26, 0.03, 10), mats.stoneDark, 0, 0.015, 0);
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + k.r();
-      const blk = k.part('qBlock', () => box(0.08, 0.06, 0.07), mats.stone, Math.cos(a) * 0.17, 0.05, Math.sin(a) * 0.17);
-      blk.rotation.y = k.r() * 3;
-    }
-    k.part('qStack1', () => box(0.12, 0.08, 0.1), mats.stone, -0.05, 0.07, 0.02);
-    k.part('qStack2', () => box(0.09, 0.07, 0.08), mats.rock, -0.04, 0.145, 0.02);
-    for (const s of [-1, 1]) {
-      const leg = k.part('craneLeg', () => cyl(0.01, 0.01, 0.42, 5), mats.woodDark, s * 0.08, 0.2, -0.18);
-      leg.rotation.z = s * 0.35;
-    }
-    k.part('craneBeam', () => cyl(0.008, 0.008, 0.3, 5), mats.woodDark, 0, 0.39, -0.08).rotation.x = Math.PI / 2 - 0.3;
-    k.part('craneRope', () => cyl(0.003, 0.003, 0.2, 3), mats.black, 0, 0.3, 0.06);
-    return 0.42;
-  },
-  gatherer(k) {
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      const x = Math.cos(a) * 0.17;
-      const z = Math.sin(a) * 0.17;
-      const bush = k.part('bush', () => new T.DodecahedronGeometry(0.1, 0), mats.leaf2, x, 0.08, z);
-      bush.scale.set(1, 0.8, 1);
-      for (let j = 0; j < 5; j++) k.part('berry', () => sph(0.016, 6, 4), i % 2 ? mats.berryRed : mats.berryBlue, x + (k.r() - 0.5) * 0.14, 0.08 + k.r() * 0.08, z + (k.r() - 0.5) * 0.14);
-    }
-    k.part('basket', () => cyl(0.05, 0.04, 0.05, 8), mats.straw, 0.02, 0.025, 0.04);
-    k.part('basketFill', () => sph(0.04, 8, 5), mats.berryRed, 0.02, 0.05, 0.04).scale.set(1, 0.4, 1);
-    return 0.25;
-  },
-  fisher(k) {
-    for (const [x, z] of [[-0.12, -0.08], [0.12, -0.08], [-0.12, 0.08], [0.12, 0.08]]) k.part('stilt', () => cyl(0.012, 0.012, 0.12, 5), mats.woodDark, x, 0.06, z);
-    k.part('fishHut', () => box(0.28, 0.14, 0.2), mats.wood, 0, 0.19, 0);
-    k.part('fishRoof', () => gable(0.32, 0.12, 0.26), mats.straw, 0, 0.3, 0);
-    k.part('fishDoor', () => box(0.06, 0.09, 0.01), mats.timber, 0, 0.175, 0.101);
-    k.part('rackBar', () => cyl(0.006, 0.006, 0.26, 4), mats.woodDark, 0.25, 0.16, 0.05).rotation.x = Math.PI / 2;
-    for (const z of [-0.1, 0.2]) k.part('rackPost', () => cyl(0.008, 0.008, 0.16, 4), mats.woodDark, 0.25, 0.08, z);
-    for (let i = 0; i < 3; i++) k.part('driedFish', () => sph(0.02, 6, 4), mats.fish || trimMat('#ff8c42'), 0.25, 0.12, -0.04 + i * 0.07).scale.set(0.6, 1.6, 0.6);
-    const canoe = k.part('canoe', () => cyl(0.04, 0.04, 0.3, 8), mats.wood, -0.2, 0.03, 0.22);
-    canoe.rotation.z = Math.PI / 2;
-    canoe.scale.set(1, 1, 0.5);
+    k.part('hutWall', () => cyl(0.2, 0.22, 0.16, 14), mats.mud, 0, 0.08, 0);
+    k.part('hutThatch', () => roundRoof(0.28, 0.2), mats.straw, 0, 0.13, 0);
+    k.part('hutThatchRing', () => new T.TorusGeometry(0.255, 0.025, 6, 18).rotateX(Math.PI / 2), mats.hay, 0, 0.15, 0);
+    k.part('hutKnot', () => blob(0.045), mats.woodDark, 0, 0.34, 0).scale.set(1, 0.7, 1);
+    k.part('hutDoor', () => box(0.09, 0.12, 0.03), mats.black, 0, 0.06, 0.2);
+    k.part('hutCurtain', () => box(0.1, 0.035, 0.032), k.trim, 0, 0.115, 0.205);
+    k.part('hutPot', () => sph(0.04, 8, 6), mats.mud, 0.2, 0.035, 0.16).scale.set(1, 0.8, 1);
+    for (let i = 0; i < 3; i++) k.part('hutWood', () => cyl(0.015, 0.015, 0.12, 6), mats.trunk, -0.22, 0.016 + i * 0.03, 0.12 - i * 0.01).rotation.x = Math.PI / 2;
     return 0.38;
   },
+  // A log cabin with a big pile of fresh logs and a chopping block.
+  woodcutter(k) {
+    k.part('wcCabin', () => box(0.28, 0.17, 0.22), mats.wood, -0.08, 0.085, -0.1);
+    for (const x of [-0.22, 0.06]) for (const z of [-0.21, 0.01]) for (let i = 0; i < 3; i++) k.part('wcLogEnd', () => cyl(0.022, 0.022, 0.04, 7), mats.trunk, x, 0.03 + i * 0.055, z).rotation.x = Math.PI / 2;
+    k.part('wcRoof', () => gable(0.34, 0.14, 0.28), mats.woodDark, -0.08, 0.22, -0.1);
+    k.part('wcDoor', () => box(0.07, 0.11, 0.012), mats.timber, -0.08, 0.055, 0.012);
+    // The log pile: 3, 2, 1, the woodcutter's sign.
+    const pile = [[0, 0], [1, 0], [2, 0], [0.5, 1], [1.5, 1], [1, 2]];
+    for (const [i, row] of pile) {
+      const log = k.part('wcLog', () => cyl(0.036, 0.036, 0.3, 8), mats.trunk, 0.1 + i * 0.075, 0.036 + row * 0.064, 0.17);
+      log.rotation.x = Math.PI / 2;
+      k.part('wcLogFace', () => cyl(0.03, 0.03, 0.006, 8), mats.wood, 0.1 + i * 0.075, 0.036 + row * 0.064, 0.322).rotation.x = Math.PI / 2;
+    }
+    k.part('wcBlock', () => cyl(0.055, 0.06, 0.08, 9), mats.trunk, -0.2, 0.04, 0.18);
+    const axe = k.part('wcAxe', () => cyl(0.007, 0.007, 0.16, 4), mats.wood, -0.19, 0.14, 0.18);
+    axe.rotation.z = 0.35;
+    k.part('wcAxeHead', () => box(0.05, 0.035, 0.012), mats.metal, -0.215, 0.2, 0.18);
+    if (k.lv >= 2) {
+      // A saw bench for a bigger woodcutter.
+      k.part('wcSawTop', () => box(0.22, 0.02, 0.06), mats.wood, 0.22, 0.09, -0.16);
+      for (const x of [0.13, 0.31]) k.part('wcSawLeg', () => box(0.02, 0.09, 0.05), mats.woodDark, x, 0.045, -0.16);
+      k.part('wcSaw', () => box(0.12, 0.04, 0.004), mats.metal, 0.22, 0.12, -0.16);
+    }
+    const t = treeMesh(true);
+    t.position.set(0.28, 0, -0.26);
+    t.scale.setScalar(0.85);
+    k.g.add(t);
+    return 0.42;
+  },
+  // A stepped pit of pale stone, cut blocks and a hoist.
+  quarry(k) {
+    k.part('qRim', () => cyl(0.36, 0.38, 0.05, 6), mats.stone, 0, 0.025, 0);
+    k.part('qStep', () => cyl(0.27, 0.27, 0.052, 6), mats.stoneDark, 0, 0.03, 0);
+    k.part('qFloor', () => cyl(0.17, 0.17, 0.054, 6), mats.rock, 0, 0.032, 0);
+    const blocks = [[-0.2, 0.2, 0], [-0.08, 0.24, 0], [-0.14, 0.22, 1], [0.24, -0.16, 0], [0.26, -0.04, 0]];
+    for (const [x, z, up] of blocks) {
+      const b = k.part('qBlock', () => box(0.1, 0.07, 0.08), mats.stone, x, 0.085 + up * 0.07, z);
+      b.rotation.y = k.r() * 0.6 - 0.3;
+    }
+    // The hoist: two posts, a beam, a rope and a block on its way up.
+    for (const x of [-0.16, 0.1]) k.part('qPost', () => box(0.03, 0.36, 0.03), mats.woodDark, x, 0.18, -0.2);
+    k.part('qBeam', () => box(0.32, 0.03, 0.035), mats.woodDark, -0.03, 0.37, -0.2);
+    k.part('qArm', () => box(0.03, 0.03, 0.22), mats.woodDark, -0.03, 0.37, -0.1);
+    k.part('qRope', () => cyl(0.004, 0.004, 0.18, 3), mats.black, -0.03, 0.27, 0.0);
+    k.part('qLift', () => box(0.08, 0.06, 0.07), mats.stone, -0.03, 0.16, 0.0);
+    k.part('qPick', () => box(0.1, 0.012, 0.012), mats.metal, 0.2, 0.065, 0.16).rotation.z = 0.4;
+    return 0.4;
+  },
+  // A lean-to with drying racks, baskets full of berries and bushes around.
+  gatherer(k) {
+    // An open shelter: four posts under a straw roof, berries hung to dry.
+    for (const x of [-0.18, 0.18]) for (const z of [-0.26, -0.06]) k.part('gaPost', () => cyl(0.012, 0.012, 0.2, 5), mats.woodDark, x, 0.1, z);
+    k.part('gaRoof', () => gable(0.46, 0.13, 0.3), mats.straw, 0, 0.25, -0.16);
+    k.part('gaRack', () => box(0.36, 0.012, 0.012), mats.woodDark, 0, 0.17, -0.16);
+    for (let i = 0; i < 4; i++) k.part('gaHang', () => sph(0.025, 6, 4), i % 2 ? mats.berryBlue : mats.berryRed, -0.135 + i * 0.09, 0.14, -0.16).scale.set(1, 1.5, 1);
+    for (const [x, z, m] of [[-0.14, 0.12, mats.berryRed], [0, 0.17, mats.berryBlue], [0.14, 0.12, mats.berryRed]]) {
+      k.part('gaBasket', () => cyl(0.065, 0.05, 0.07, 10), mats.straw, x, 0.035, z);
+      k.part('gaFill' + (m === mats.berryRed ? 'R' : 'B'), () => blob(0.058), m, x, 0.075, z).scale.set(1, 0.45, 1);
+    }
+    for (const a of [0.2, 2.6, 4.4]) {
+      const x = Math.cos(a) * 0.33;
+      const z = Math.sin(a) * 0.3;
+      k.part('gaBush', () => blob(0.09), mats.leaf2, x, 0.07, z).scale.set(1, 0.8, 1);
+      for (let j = 0; j < 4; j++) k.part('berry', () => sph(0.016, 6, 4), j % 2 ? mats.berryRed : mats.berryBlue, x + (k.r() - 0.5) * 0.12, 0.08 + k.r() * 0.06, z + 0.05);
+    }
+    return 0.3;
+  },
+  // A fishing hut on stilts with a jetty, a rowing boat and fish drying.
+  fisher(k) {
+    for (const [x, z] of [[-0.16, -0.16], [0.08, -0.16], [-0.16, 0.04], [0.08, 0.04]]) k.part('stilt', () => cyl(0.014, 0.014, 0.12, 5), mats.woodDark, x, 0.06, z);
+    k.part('fiDeck', () => box(0.34, 0.025, 0.3), mats.wood, -0.04, 0.12, -0.06);
+    k.part('fiHut', () => box(0.24, 0.14, 0.18), mats.wood, -0.04, 0.2, -0.08);
+    k.part('fiRoof', () => gable(0.3, 0.12, 0.24), mats.straw, -0.04, 0.32, -0.08);
+    k.part('fiDoor', () => box(0.06, 0.09, 0.01), mats.timber, -0.04, 0.18, 0.012);
+    // A little inlet of water at the front, with a jetty and a boat on it.
+    k.part('fiPond', () => cyl(0.17, 0.17, 0.012, 7), mats.waterLight, 0.18, 0.008, 0.2).scale.set(1, 1, 0.8);
+    k.part('fiJetty', () => box(0.07, 0.02, 0.24), mats.wood, 0.1, 0.05, 0.16);
+    k.part('fiBoat', () => sph(0.07, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mats.wood, 0.25, 0.04, 0.22).scale.set(0.75, 0.7, 1.8);
+    k.part('fiOar', () => box(0.008, 0.008, 0.16), mats.woodDark, 0.25, 0.05, 0.22).rotation.y = 0.5;
+    for (const z of [-0.26, -0.02]) k.part('rackPost', () => cyl(0.008, 0.008, 0.2, 4), mats.woodDark, 0.24, 0.1, z);
+    k.part('rackBar', () => cyl(0.006, 0.006, 0.26, 4), mats.woodDark, 0.24, 0.2, -0.14).rotation.x = Math.PI / 2;
+    for (let i = 0; i < 4; i++) k.part('driedFish', () => sph(0.02, 6, 4), mats.fish || trimMat('#ff8c42'), 0.24, 0.16, -0.24 + i * 0.065).scale.set(0.6, 1.7, 0.6);
+    k.part('fiNet', () => sph(0.05, 8, 4), trimMat('#c9b98f'), -0.24, 0.03, 0.18).scale.set(1.4, 0.3, 1);
+    return 0.4;
+  },
+  // A ring of stones, crackling fire and logs to sit on.
   campfire(k) {
     for (let i = 0; i < 3; i++) {
       const log = k.part('log', () => cyl(0.025, 0.025, 0.26, 6), mats.woodDark, 0, 0.035, 0);
       log.rotation.z = Math.PI / 2;
       log.rotation.y = (i / 3) * Math.PI;
     }
-    for (let i = 0; i < 9; i++) {
-      const sa = (i / 9) * Math.PI * 2;
-      k.part('stone', () => new T.DodecahedronGeometry(0.04, 0), mats.rock, Math.cos(sa) * 0.19, 0.025, Math.sin(sa) * 0.19);
+    for (let i = 0; i < 10; i++) {
+      const sa = (i / 10) * Math.PI * 2;
+      k.part('stone', () => new T.DodecahedronGeometry(0.045, 0), mats.rock, Math.cos(sa) * 0.19, 0.03, Math.sin(sa) * 0.19);
     }
     for (const sa of [0.6, 2.7, 4.6]) {
-      const seat = k.part('seatLog', () => cyl(0.04, 0.04, 0.2, 7), mats.wood, Math.cos(sa) * 0.36, 0.04, Math.sin(sa) * 0.36);
+      const seat = k.part('seatLog', () => cyl(0.045, 0.045, 0.22, 8), mats.wood, Math.cos(sa) * 0.36, 0.045, Math.sin(sa) * 0.36);
       seat.rotation.z = Math.PI / 2;
       seat.rotation.y = -sa + Math.PI / 2;
     }
-    const f1 = k.part('flame1', () => cone(0.08, 0.22, 7), mats.flame, 0, 0.13, 0);
-    const f2 = k.part('flame2', () => cone(0.045, 0.15, 7), mats.flame2, 0, 0.11, 0);
+    // Flames as soft drops, not spikes.
+    const f1 = k.part('flame1', () => blob(0.075).scale(1, 1.9, 1).translate(0, 0.02, 0), mats.flame, 0, 0.12, 0);
+    const f2 = k.part('flame2', () => blob(0.045).scale(1, 1.9, 1), mats.flame2, 0, 0.12, 0);
     const glow = new T.Sprite(mats.fireGlow);
     glow.position.set(0, 0.16, 0);
     glow.scale.set(0.9, 0.9, 1);
@@ -123,18 +153,31 @@ const BUILDERS = {
     k.anim.push({ kind: 'fire', f1, f2 });
     return 0.3;
   },
+  // A fenced yard full of crates, sacks, logs and stone.
   stockpile(k) {
-    const spots = [[-0.12, -0.08], [0.02, -0.12], [0.14, -0.04], [-0.04, 0.06], [0.12, 0.12]];
+    k.part('spYard', () => cyl(0.4, 0.4, 0.015, 6), mats.soil, 0, 0.008, 0);
+    for (let i = 0; i < 6; i++) {
+      if (i === 1) continue;
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const b = ((i + 1) / 6) * Math.PI * 2 + Math.PI / 6;
+      const mx = (Math.cos(a) + Math.cos(b)) * 0.19;
+      const mz = (Math.sin(a) + Math.sin(b)) * 0.19;
+      const rail = k.part('spRail', () => box(0.36, 0.02, 0.015), mats.woodDark, mx, 0.08, mz);
+      rail.rotation.y = -Math.atan2(mz, mx) + Math.PI / 2;
+      k.part('spPost', () => box(0.025, 0.11, 0.025), mats.woodDark, Math.cos(a) * 0.38, 0.055, Math.sin(a) * 0.38);
+    }
+    const spots = [[-0.14, -0.1], [0.0, -0.16], [0.14, -0.08], [-0.06, 0.04]];
     spots.forEach(([x, z], i) => {
-      const s = 0.09 + k.r() * 0.04;
-      const c = k.part('crate', () => box(1, 1, 1), i % 2 ? mats.wood : mats.crate2 || mats.wood, x, s / 2, z);
-      c.scale.setScalar(s);
-      c.rotation.y = k.r();
+      const c = k.part('crate', () => box(1, 1, 1), i % 2 ? mats.wood : mats.crate2 || mats.wood, x, 0.055, z);
+      c.scale.setScalar(0.11);
+      c.rotation.y = k.r() * 0.5;
     });
-    k.part('crateTop', () => box(0.08, 0.08, 0.08), mats.wood, -0.1, 0.15, -0.08);
-    k.part('sack', () => sph(0.06, 8, 6), mats.straw, -0.18, 0.05, 0.12).scale.set(1, 0.8, 1);
-    for (let i = 0; i < 2; i++) k.part('pileLog', () => cyl(0.03, 0.03, 0.28, 6), mats.trunk, 0.05, 0.03 + i * 0.05, 0.25 - i * 0.02).rotation.z = Math.PI / 2;
-    return 0.25;
+    k.part('crateTop', () => box(0.09, 0.09, 0.09), mats.wood, -0.12, 0.155, -0.1);
+    k.part('sack', () => sph(0.06, 8, 6), mats.straw, 0.16, 0.05, 0.12).scale.set(1, 0.8, 1);
+    k.part('sack', () => sph(0.06, 8, 6), mats.straw, 0.08, 0.05, 0.18).scale.set(1, 0.8, 1);
+    for (let i = 0; i < 2; i++) k.part('pileLog', () => cyl(0.03, 0.03, 0.26, 6), mats.trunk, -0.16, 0.03 + i * 0.055, 0.16).rotation.z = Math.PI / 2;
+    for (let i = 0; i < 3; i++) k.part('pileStone', () => new T.DodecahedronGeometry(0.045, 0), mats.stone, 0.24 - i * 0.05, 0.04, -0.2 + i * 0.03);
+    return 0.26;
   },
   totem(k) {
     const segs = [mats.trunk, k.trim, mats.woodDark, k.trim, mats.trunk];
@@ -177,7 +220,7 @@ const BUILDERS = {
   },
   windmill(k) {
     k.part('millBody', () => oct(0.12, 0.2, 0.5), mats.wall, 0, 0.25, 0);
-    k.part('millCap', () => cone(0.15, 0.16, 8), k.trim, 0, 0.58, 0);
+    k.part('millCap', () => roundRoof(0.15, 0.12), k.trim, 0, 0.5, 0);
     k.part('door', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.19);
     addWindows(k.g, 0.15, 0.32, 2, true);
     const blades = new T.Group();
@@ -300,7 +343,7 @@ const BUILDERS = {
     for (const s of [-1, 1]) k.part('mineRail', () => box(0.008, 0.008, 0.26), mats.darkMetal, s * 0.035, 0.005, 0.3);
     k.part('cart', () => box(0.08, 0.05, 0.1), mats.darkMetal, 0, 0.04, 0.3);
     k.part('cartCoal', () => sph(0.04, 8, 5), mats.coal, 0, 0.07, 0.3).scale.set(1, 0.5, 1.2);
-    k.part('coalPile', () => cone(0.07, 0.07, 7), mats.coal, 0.2, 0.035, 0.2);
+    k.part('coalPile', () => blob(0.07).scale(1, 0.6, 1), mats.coal, 0.2, 0.03, 0.2);
     return 0.36;
   },
   tower(k) {
@@ -313,12 +356,6 @@ const BUILDERS = {
     }
     const top = floors * fh;
     k.part('door', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.195);
-    if (k.lv >= 3) {
-      k.part('towerRoof', () => cone(0.2, 0.3, 8), k.trim, 0, top + 0.15, 0);
-      k.part('flagPole', () => cyl(0.006, 0.006, 0.18, 4), mats.metal, 0, top + 0.38, 0);
-      k.anim.push({ kind: 'flag', o: k.part('flag', () => box(0.1, 0.06, 0.005), k.trim, 0.05, top + 0.43, 0) });
-      return top + 0.45;
-    }
     k.part('towerTop', () => oct(0.21, 0.19, 0.04), mats.stoneDark, 0, top + 0.02, 0);
     crenellations(k.g, 0.18, top + 0.065, mats.stone);
     k.part('flagPole', () => cyl(0.006, 0.006, 0.22, 4), mats.metal, 0, top + 0.11, 0);
@@ -424,7 +461,7 @@ const BUILDERS = {
     k.part('coolTower', lathe, mats.concrete, 0.16, 0, -0.08);
     k.part('plantStack', () => cyl(0.03, 0.04, 0.8, 8), mats.concreteDark, -0.2, 0.4, -0.16);
     k.part('stackStripe', () => cyl(0.034, 0.034, 0.05, 8), mats.shipRed, -0.2, 0.74, -0.16);
-    k.part('plantCoal', () => cone(0.1, 0.08, 8), mats.coal, 0.18, 0.04, 0.24);
+    k.part('plantCoal', () => blob(0.1).scale(1, 0.55, 1), mats.coal, 0.18, 0.04, 0.24);
     k.part('plantWin', () => box(0.2, 0.06, 0.012), mats.window, -0.12, 0.15, 0.212);
     smokeAt(k.anim, 0.16, 0.52, -0.08, 1.6, false);
     smokeAt(k.anim, -0.2, 0.82, -0.16, 1.2, true);
@@ -594,7 +631,7 @@ const BUILDERS = {
     k.part('arcDomeBase', () => cyl(0.34, 0.36, 0.06, 24), mats.whiteGloss, 0, 0.03, 0);
     k.part('arcDome', () => dome(0.3), mats.glassBlue, 0, 0.06, 0);
     k.part('arcDomeRing', () => new T.TorusGeometry(0.3, 0.014, 6, 32), neon, 0, 0.065, 0).rotation.x = Math.PI / 2;
-    k.part('arcTree', () => cone(0.11, 0.22, 8), mats.leaf, 0, 0.17, 0);
+    k.part('arcTree', () => blob(0.1).scale(1, 1.2, 1), mats.leaf, 0, 0.17, 0);
     k.part('arcTreeTop', () => sph(0.07, 8, 6), mats.leaf, 0.07, 0.13, 0.05);
     const mast = 0.2 + k.r() * 0.25;
     k.part('arcMast' + Math.round(mast * 20), () => cyl(0.012, 0.016, mast, 6), mats.metal, 0, 0.36 + mast / 2, 0);
@@ -659,7 +696,7 @@ const BUILDERS = {
     k.anim.push({ kind: 'hover', o: shape, y: 0.36 });
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 0.4;
-      k.part('holoTree', () => cone(0.06, 0.22, 6), mats.holo, Math.cos(a) * 0.26, 0.14, Math.sin(a) * 0.26);
+      k.part('holoTree', () => blob(0.06).scale(1, 1.8, 1), mats.holo, Math.cos(a) * 0.26, 0.14, Math.sin(a) * 0.26);
     }
     return 0.5;
   },
@@ -773,23 +810,34 @@ const BUILDERS = {
   },
 };
 
+// Buildings fill most of their plot (wonders are sized for their ring), and
+// grow a little with every level.
+const KIND_SCALE = { wonder: 1, house: 1.25, decor: 1.2 };
 export function buildingMesh(b, level) {
   T = three();
   const g = new T.Group();
+  const body = new T.Group();
+  g.add(body);
   const anim = [];
   const color = colorOf(b);
+  const lv = level || b.level || 1;
+  const kind = ITEMS[b.item]?.kind;
+  const scale = (KIND_SCALE[kind] || 1.3) * (kind === 'wonder' || b.home ? 1 : 1 + 0.05 * (lv - 1));
+  body.scale.setScalar(scale);
   const k = {
-    g,
+    g: body,
     b,
     anim,
     color,
     trim: trimMat(color),
     r: rng(hashStr('b' + b.id)),
-    lv: level || b.level || 1,
-    part: (name, make, m, x, y, z) => mesh(geo(name, make), m, x, y, z, g),
+    lv,
+    part: (name, make, m, x, y, z) => mesh(geo(name, make), m, x, y, z, body),
   };
-  const make = BUILDERS[b.item] || ((kk) => { kk.part('crate', () => box(0.2, 0.2, 0.2), mats.wood, 0, 0.1, 0); return 0.25; });
-  const h = make(k);
+  const make = BUILDERS[b.item] || ((kk) => { kk.part('crate', () => box(1, 1, 1), mats.wood, 0, 0.1, 0).scale.setScalar(0.2); return 0.25; });
+  const h = make(k) * scale;
+  // Upgraded town buildings fly pennants: silver at level 2, gold at level 3.
+  if (lv > 1 && !b.home && kind !== 'wonder') levelPennants(k, lv);
   g.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = o.material !== mats.beam && o.material !== mats.holo;
@@ -801,3 +849,17 @@ export function buildingMesh(b, level) {
 }
 
 export const hasModel = (item) => !!BUILDERS[item];
+
+const pennantMats = {};
+function levelPennants(k, lv) {
+  const color = lv >= 3 ? '#f2c230' : '#d9dee6';
+  const m = pennantMats[color] || (pennantMats[color] = new T.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3, side: T.DoubleSide, flatShading: true }));
+  for (let i = 0; i < lv - 1; i++) {
+    const x = -0.3 + i * 0.07;
+    const z = -0.28 + i * 0.04;
+    k.part('lvPole', () => cyl(0.006, 0.006, 0.34, 4), mats.woodDark, x, 0.17, z);
+    const flag = k.part('lvFlag', () => { const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute([0, 0, 0, 0, -0.07, 0, 0.11, -0.035, 0], 3)); g.computeVertexNormals(); return g; }, m, x, 0.34, z);
+    flag.material = m;
+    k.anim.push({ kind: 'flag', o: flag });
+  }
+}

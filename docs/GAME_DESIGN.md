@@ -15,7 +15,20 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 
 * **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` puts an arrow and a column of light in your colour over your bot for 20 seconds and flies the camera to it. Everyone on a stream sees the same picture, so this is how a viewer finds their own bot. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
 * **Everything else is built together.** `!build farm` starts a town project, at most three at a time. It needs its goods first, then work: every bot that types `!help` adds one share of work per second, and the townsfolk always add a little, so a project also finishes when chat is asleep. A hut takes one bot about two minutes and four bots half a minute. Helpers earn XP for the time they put in, and the finished building is credited to its builders.
-* **Gathering by hand.** `!wood`, `!stone` and `!food` (and `!coal` and `!iron` from the Medieval Town) send your bot out to the nearest known land of the right kind: a forest, rocky hills, a berry meadow (or the water with `!fish`), a coal or iron deposit. It chops, mines or picks there and carries a crate back to the nearest store, which adds 2 of that good to the town every 2 minutes (the first load after 1 minute) for 10 minutes. That is as much as one helper adds at a building, so chat always has something useful to do, even before the first woodcutter stands. Buildings make more and keep going while chat sleeps. Goods made from other goods (bricks, steel, parts, chips) come only from their building; `!work bricks` sends your bot to help at a kiln.
+* **Short jobs.** Every command keeps a bot busy for about half a minute and then shows what it did, so chat keeps typing and sees progress. `!help` is a 40 second shift on a project (one share of work per second), `!work bricks` 60 seconds at a building, `!explore` a trip into the fog. Typed while the bot is busy, jobs wait in line, up to 5 (`!wood 3` lines up three, `!stop` clears the line). Every job pays a little XP, which pops up over the bot.
+* **Gathering by hand.** `!wood`, `!stone` and `!food` (and `!coal` and `!iron` from the Medieval Town) send your bot on one trip to the nearest known land of the right kind: a forest, rocky hills, a berry meadow (or the water with `!fish`), a coal or iron deposit. It walks out, works there 8 seconds and carries the crate back to the nearest store; the trip takes about half a minute near town and longer far out. Chat always has something useful to do, even before the first woodcutter stands. Buildings make more and keep going while chat sleeps. Goods made from other goods (bricks, steel, parts, chips) come only from their building; `!work bricks` sends your bot to help at a kiln.
+* **Tools.** A bot starts with stone tools and carries 2 goods per trip. `!upgrade tools` buys the next set from the town storage once the viewer is high enough and the era has the material:
+
+| Tools | Level | Era | Costs | Per trip | Building speed |
+| --- | --- | --- | --- | --- | --- |
+| Stone | 1 | Stone Age | | 2 | 1x |
+| Copper | 3 | Village | 6 bricks, 6 wood | 3 | 1.25x |
+| Iron | 6 | Medieval Town | 8 iron | 4 | 1.5x |
+| Steel | 10 | Industrial Age | 8 steel | 5 | 1.75x |
+| Power | 15 | Electric City | 8 parts | 6 | 2x |
+| Laser | 20 | Future | 6 chips | 8 | 2.5x |
+
+* **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings fly a silver (level 2) or gold (level 3) pennant.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
 
 ## What chat sees
@@ -47,16 +60,16 @@ Three bars on screen, all three must be full:
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:
 
-| Era starts | 2 viewers | 5 viewers | 30 viewers |
-| --- | --- | --- | --- |
-| 🌾 Village | day 9.0 | day 8.7 | day 6.0 |
-| 🏰 Medieval Town | day 18.3 | day 17.2 | day 12.3 |
-| 🏭 Industrial Age | day 27.3 | day 25.8 | day 18.9 |
-| ⚡ Electric City | day 37.4 | day 34.7 | day 25.2 |
-| ✨ Future | day 47.1 | day 43.7 | day 31.9 |
-| Finale (Fusion Spire lit) | day 53.8 | day 50.5 | day 37.9 |
+| Era starts | 2 viewers | 5 viewers |
+| --- | --- | --- |
+| 🌾 Village | day 9.2 | day 9.2 |
+| 🏰 Medieval Town | day 18.5 | day 18.3 |
+| 🏭 Industrial Age | day 28.2 | day 27.4 |
+| ⚡ Electric City | day 37.7 | day 37.0 |
+| ✨ Future | day 48.3 | day 47.2 |
+| Finale (Fusion Spire lit) | day 55.0 | day 56.1 |
 
-Each pretend viewer is online an hour and a half a day and types a command every few minutes. A busy chat of 30 fills the knowledge bar faster (schools, labs, tablets) and gets there in about five weeks; a small, loyal chat takes about two months.
+Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands at about two months whether two or five regulars play; a busy chat builds a much bigger town on the way.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 
