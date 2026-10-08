@@ -1,0 +1,18 @@
+{
+  "channel": "your_twitch_channel",
+  "port": 3000,
+  "simulate": false,
+  "pace": {
+    "eraDays": 9
+  },
+  "geo": {
+    "lat": 52.2,
+    "lon": 5.1
+  },
+  "limits": {
+    "maxQueue": 30,
+    "maxConcurrentBuilds": 6,
+    "voteEveryMin": 60,
+    "workMinutes": 10
+  }
+}

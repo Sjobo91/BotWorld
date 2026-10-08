@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BotWorld Gallery</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fredoka:wght@600&display=swap">
+<style>
+  :root { --ink: #172130; --panel: rgba(251, 252, 255, 0.92); --line: rgba(23, 33, 48, 0.12); color-scheme: light; }
+  html, body { height: 100%; margin: 0; background: #9fd3ee; color: var(--ink); font-family: "Atkinson Hyperlegible", system-ui, sans-serif; overflow: hidden; }
+  #stage { position: absolute; inset: 0; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .tag { position: absolute; transform: translate(-50%, 0); padding: 2px 6px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); font: 700 11px/1.2 system-ui, sans-serif; white-space: nowrap; }
+  .era { position: absolute; transform: translate(0, -50%); font: 600 15px/1 Fredoka, system-ui, sans-serif; color: #172130; background: var(--panel); padding: 4px 8px; border-radius: 8px; }
+  h1 { position: absolute; top: 12px; left: 16px; margin: 0; font: 600 26px/1 Fredoka, system-ui, sans-serif; }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/three/addons/" } }</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+<h1>BotWorld: every building</h1>
+<script type="module" src="/js/gallery.js"></script>
+</body>
+</html>

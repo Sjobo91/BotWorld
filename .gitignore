@@ -1,0 +1,6 @@
+node_modules/
+data/
+botworld.config.json
+*.log
+.DS_Store
+data-*/
