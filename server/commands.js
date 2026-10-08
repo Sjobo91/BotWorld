@@ -1,8 +1,9 @@
 // Turns a chat line into a command. Anything that isn't one of ours returns
 // null, so normal chatting is never answered or punished.
-import { resolveColor, resolveHat, resolveItem } from '../public/shared/catalog.js';
+import { resolveColor, resolveHat, resolveItem, resolveResource, EVENTS } from '../public/shared/catalog.js';
 
-const FILLER = new Set(['a', 'an', 'the', 'some', 'me', 'my', 'please', 'pls', 'plz', 'new', 'big', 'small', 'little', 'tiny', 'huge', 'nice', 'cute', 'of', 'with', 'and']);
+const FILLER = new Set(['a', 'an', 'the', 'some', 'me', 'my', 'please', 'pls', 'plz', 'new', 'big', 'small', 'little', 'tiny', 'huge', 'nice', 'cute', 'of', 'with', 'and', 'to', 'at', 'on', 'for']);
+const NEAR = new Set(['near', 'next', 'by', 'beside', 'besides', 'around']);
 
 function words(text) {
   return text
@@ -11,6 +12,10 @@ function words(text) {
     .split(/\s+/)
     .filter(Boolean);
 }
+const idArg = (w) => {
+  const id = Number(String(w || '').replace(/^#/, ''));
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
 
 export function parseCommand(text) {
   if (typeof text !== 'string') return null;
@@ -26,18 +31,46 @@ export function parseCommand(text) {
     case 'upgrade':
     case 'up':
       return { type: 'upgrade' };
+    case 'work':
+    case 'gather':
+    case 'help-out':
+    case 'job':
+      return { type: 'work', target: args.length ? resolveResource(args[0]) : null, raw: args[0] || '' };
+    case 'repair':
+    case 'fix':
+      return { type: 'repair' };
+    case 'vote':
+    case 'v': {
+      if (args[0] === 'start' || args[0] === 'now') return { type: 'vote', option: null, start: true };
+      const n = Number(args[0]);
+      return { type: 'vote', option: Number.isInteger(n) && n >= 1 && n <= 3 ? n : null };
+    }
+    case '1':
+    case '2':
+    case '3':
+      return { type: 'vote', option: Number(cmd) };
     case 'hat':
       return { type: 'hat', hat: resolveHat(args[0]), raw: args[0] || '' };
     case 'dance':
     case 'party':
       return { type: 'dance' };
+    case 'me':
+    case 'stats':
+    case 'level':
+    case 'profile':
+      return { type: 'me' };
     case 'help':
     case 'commands':
     case 'botworld':
       return { type: 'help' };
-    case 'remove': {
-      const id = Number(String(args[0] || '').replace(/^#/, ''));
-      return { type: 'remove', id: Number.isInteger(id) && id > 0 ? id : null };
+    case 'demolish':
+    case 'destroy':
+      return { type: 'demolish', id: idArg(args[0]) };
+    case 'remove':
+      return { type: 'remove', id: idArg(args[0]) };
+    case 'event': {
+      const key = Object.keys(EVENTS).find((k) => k.toLowerCase() === String(args[0] || '').replace(/[^a-z]/g, ''));
+      return { type: 'event', key: key || null };
     }
     default:
       return null;
@@ -47,8 +80,17 @@ export function parseCommand(text) {
 function parseBuild(args) {
   let item = null;
   let color = null;
+  let near = null;
   const unknown = [];
-  for (const w of args) {
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if (NEAR.has(w)) {
+      // "near the fountain", "next to a farm"
+      let j = i + 1;
+      while (j < args.length && FILLER.has(args[j])) j++;
+      const target = resolveItem(args[j]);
+      if (target) { near = target; i = j; continue; }
+    }
     if (FILLER.has(w)) continue;
     const asItem = !item && resolveItem(w);
     if (asItem) { item = asItem; continue; }
@@ -56,5 +98,5 @@ function parseBuild(args) {
     if (asColor) { color = asColor; continue; }
     unknown.push(w);
   }
-  return { type: 'build', item, color, raw: unknown.join(' ') };
+  return { type: 'build', item, color, near, raw: unknown.join(' ') };
 }

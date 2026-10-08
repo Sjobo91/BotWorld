@@ -10,6 +10,7 @@ import { Store } from './store.js';
 import { World } from './world.js';
 import { TwitchChat } from './twitch.js';
 import { startSimulator } from './simulator.js';
+import { Gazette } from './gazette.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -19,7 +20,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 const cfg = loadConfig(process.argv.slice(2), process.env, ROOT);
 const store = new Store(cfg.dataDir);
-const world = new World(store.load(Date.now()), { limits: cfg.limits });
+const world = new World(store.load(Date.now()), { limits: cfg.limits, pace: cfg.pace, geo: cfg.geo });
 const clients = new Set();
 let twitch = null;
 const startedAt = Date.now();
@@ -29,6 +30,7 @@ function broadcast(event) {
   for (const res of clients) res.write(data);
 }
 world.on(broadcast);
+const gazette = new Gazette(world, broadcast, { config: cfg.gazette });
 
 function onChat(user, text) {
   try {
@@ -42,7 +44,7 @@ function onChat(user, text) {
 }
 
 function mode() {
-  return { channel: cfg.channel, simulate: cfg.simulate, twitch: twitch ? twitch.status : 'off' };
+  return { channel: cfg.channel, simulate: cfg.simulate, twitch: twitch ? twitch.status : 'off', geo: cfg.geo, eraDays: cfg.pace.eraDays };
 }
 
 function sendJson(res, code, body) {
@@ -93,13 +95,13 @@ const server = http.createServer(async (req, res) => {
   if (p === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
     res.write('retry: 2000\n');
-    res.write('data: ' + JSON.stringify({ type: 'snapshot', ...world.snapshot(Date.now()), mode: mode() }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'snapshot', ...world.snapshot(Date.now()), mode: mode(), gazette: gazette.latest }) + '\n\n');
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
   }
   if (p === '/api/state') return sendJson(res, 200, { ...world.snapshot(Date.now()), mode: mode() });
-  if (p === '/health') return sendJson(res, 200, { ok: true, uptimeSec: Math.round((Date.now() - startedAt) / 1000), viewers: clients.size, builds: world.builds.length, ...mode() });
+  if (p === '/health') return sendJson(res, 200, { ok: true, uptimeSec: Math.round((Date.now() - startedAt) / 1000), viewers: clients.size, builds: world.builds.length, era: world.era, ...mode() });
   if (p === '/api/chat' && req.method === 'POST') {
     // Test chat from the page's dev box. Only from this computer, so nobody
     // on the internet can type into your world.
@@ -149,12 +151,13 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 const listenArgs = cfg.host ? [cfg.port, cfg.host] : [cfg.port];
 server.listen(...listenArgs, () => {
   console.log('BotWorld is running: http://localhost:' + cfg.port + '  (stream view: http://localhost:' + cfg.port + '/?stream=1)');
-  console.log('World: ' + world.builds.length + ' builds, ' + Object.keys(world.state.builders).length + ' builders. Saved in ' + store.file);
+  console.log('World: ' + world.builds.length + ' builds, ' + Object.keys(world.state.builders).length + ' builders, era ' + (world.era + 1) + ' of 6 (' + cfg.pace.eraDays + ' days per era). Saved in ' + store.file);
   if (cfg.channel) {
     twitch = new TwitchChat(cfg.channel, onChat);
     twitch.start();
   } else {
     console.log('No Twitch channel set. Use --channel=yourname or botworld.config.json to read real chat.');
   }
-  if (cfg.simulate) startSimulator(onChat);
+  if (cfg.simulate) startSimulator(onChat, world);
+  gazette.start();
 });

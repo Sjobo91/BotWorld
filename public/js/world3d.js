@@ -1,9 +1,12 @@
 // The island in 3D: land that grows ring by ring, the buildings chat ordered,
-// and one bot per viewer that walks to its plot, hammers, chats and sleeps.
+// and one bot per viewer that walks to its plot, hammers, hauls goods to the
+// wonder, chats and sleeps. Each era changes how the island itself looks.
 // The server decides everything; this file only makes it look alive.
-import { ITEMS, hashStr } from '../shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, hashStr } from '../shared/catalog.js';
 import { landRingFor, hexDist, ringTiles } from '../shared/hex.js';
-import { initMeshes, mats, geo, mesh, std, rng, glowTexture, buildingMesh, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, lampMesh } from './meshes.js';
+import { sunAt, seasonAt } from '../shared/sun.js';
+import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
+import { buildingMesh } from './buildings.js';
 import { createAudio } from './audio.js';
 
 const R = 0.62;
@@ -19,21 +22,25 @@ const CHAT_EMOJI = ['☕', '💬', '😄', '🔨', '🎉', '🤔', '👍', '🍕
 const LINES = {
   hello: ['Hi! I am {name}.', 'Hello there!', 'Nice island, right?', 'I build what {name} asks for.'],
   work: ['Tap, tap, tap!', 'Almost there!', 'This is going to look great.', 'Hammer time!'],
+  job: ['Hard work!', 'Every bit helps.', 'For the village!', 'Heave ho!'],
   done: ['Done!', 'Ta-da!', 'Looks good!', 'Another one!'],
   sleep: ['Zzz…', 'Five more minutes…', 'Dreaming of bricks.'],
   poke: ['Hey, I am busy!', 'That tickles!', 'I am getting dizzy…'],
 };
 const POI_DEFS = {
-  shop: ['drink', 'drink'],
-  park: ['sit', 'sit'],
-  campfire: ['sit', 'sit', 'sit'],
-  garden: ['water'],
-  farm: ['water'],
-  fountain: ['look', 'look'],
-  statue: ['look'],
-  lighthouse: ['look'],
-  tower: ['look'],
-  windmill: ['look'],
+  market: ['drink', 'drink'], park: ['sit', 'sit'], campfire: ['sit', 'sit', 'sit'], garden: ['water'], farm: ['water'],
+  greenhouse: ['water'], fountain: ['look', 'look'], well: ['look'], statue: ['look'], totem: ['look'], lighthouse: ['look'],
+  tower: ['look'], windmill: ['look'], stadium: ['sit', 'sit'], holopark: ['look', 'look'], school: ['look'],
+  stonecircle: ['look', 'look'], greathall: ['sit'], cathedral: ['look'], clocktower: ['look'], skyline: ['look'], spire: ['look', 'look'],
+};
+const RES_COLORS = { wood: '#8a5a3b', stone: '#9aa1aa', food: '#e0a040', bricks: '#b5583b', coal: '#2b2b2e', iron: '#7d8794', steel: '#aab4c0', parts: '#c9a227', chips: '#2bb3b3' };
+const WATER_JOBS = new Set(['farm', 'gatherer', 'garden', 'greenhouse', 'vertifarm']);
+const FISH_JOBS = new Set(['fisher', 'harbor']);
+const SEASON_LOOK = {
+  spring: { leaf: '#7ccf6a', leaf2: '#f2a7c3', grass: '#7fcf6a', tiles: ['#93d77c', '#a5df8f', '#7dc56a'] },
+  summer: { leaf: '#5fae5a', leaf2: '#4a9852', grass: '#6bb35d', tiles: ['#8ccd74', '#9fd889', '#74bb63'] },
+  autumn: { leaf: '#e08a2e', leaf2: '#c4532d', grass: '#9cb55a', tiles: ['#a9bd66', '#b9c977', '#93a854'] },
+  winter: { leaf: '#e9eef2', leaf2: '#cfd8de', grass: '#dfe8ec', tiles: ['#e4ecef', '#eef3f5', '#d6e0e4'] },
 };
 
 export async function createWorld(stage, overlay, opts) {
@@ -48,13 +55,16 @@ export async function createWorld(stage, overlay, opts) {
   }
   initMeshes(T);
   const now = opts.now;
+  const clockNow = () => (opts.clock ? opts.clock() : Date.now());
   const rand = Math.random;
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   const still = !opts.stream && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const low = opts.quality === 'low';
   const audio = createAudio();
-  const data = { builders: new Map() };
+  const data = { builders: new Map(), jobs: new Map(), econ: null, event: null };
   mats.path = std(0xdccfb2);
+  mats.neonGlow = new T.SpriteMaterial({ map: glowTexture(), color: 0x5ef2ff, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending });
+  const crateMats = Object.fromEntries(Object.entries(RES_COLORS).map(([r, c]) => [r, std(c)]));
 
   let renderer;
   try {
@@ -100,7 +110,8 @@ export async function createWorld(stage, overlay, opts) {
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = 0.02;
-  scene.add(hemi, sun, sun.target);
+  const flash = new T.AmbientLight(0xdfe8ff, 0);
+  scene.add(hemi, sun, sun.target, flash);
   const water = new T.Mesh(new T.CircleGeometry(220, 48), mats.water);
   water.rotation.x = -Math.PI / 2;
   water.position.y = -0.55;
@@ -116,7 +127,9 @@ export async function createWorld(stage, overlay, opts) {
   const critterGroup = new T.Group();
   scene.add(buildGroup, botGroup, fxGroup, critterGroup);
 
-  const TILE_COLORS = { empty: new T.Color('#8ccd74'), edge: new T.Color('#9fd889'), done: new T.Color('#74bb63'), dirt: new T.Color('#b48d5f') };
+  const TILE_COLORS = { empty: new T.Color('#8ccd74'), edge: new T.Color('#9fd889'), done: new T.Color('#74bb63'), dirt: new T.Color('#b48d5f'), plaza: new T.Color('#cfd6df') };
+  let era = 0;
+  const look = () => ERAS[era].look;
 
   // --- Hex helpers -------------------------------------------------------------
   const hexToWorld = (q, r) => ({ x: R * SQ3 * (q + r / 2), z: R * 1.5 * r });
@@ -143,8 +156,9 @@ export async function createWorld(stage, overlay, opts) {
   let pathMesh = null;
   let tileMesh = null;
   let ship = null;
+  let lampGroup = null;
   let framedR = 0;
-  const layout = { landRing: 0, tiles: [], index: new Map(), landR: 0, beachR: 0, islandR: 0, pierEnd: null };
+  const layout = { landRing: 0, tiles: [], index: new Map(), landR: 0, beachR: 0, islandR: 0, pierEnd: null, railR: 0 };
   const nav = { nodes: [], adj: [], ring: [], keys: new Map(), door: -1 };
   let beachPois = [];
   let buildPois = [];
@@ -172,6 +186,7 @@ export async function createWorld(stage, overlay, opts) {
     layout.landR = landRing * SQ3 * R + R;
     layout.beachR = layout.landR + 0.35;
     layout.islandR = layout.landR + 1.7;
+    layout.railR = layout.islandR - 0.42;
     const island = mesh(new T.CylinderGeometry(layout.islandR, layout.islandR + 0.6, 0.6, 72), mats.sand, 0, -0.3, 0, world);
     island.receiveShadow = true;
     const n = layout.tiles.length;
@@ -197,6 +212,9 @@ export async function createWorld(stage, overlay, opts) {
     buildNav();
     buildBeach();
     decorate();
+    lampGroup = new T.Group();
+    world.add(lampGroup);
+    rebuildLamps();
     refreshTiles();
     refreshPois();
     const span = layout.islandR + 2;
@@ -213,7 +231,10 @@ export async function createWorld(stage, overlay, opts) {
       framedR = layout.islandR;
     }
     for (const b of bots.values()) resnap(b);
+    for (const p of [...porters]) removePorter(p);
+    train = null;
     makeCritters();
+    syncTrain();
     updateSky();
   }
 
@@ -231,7 +252,8 @@ export async function createWorld(stage, overlay, opts) {
     for (const t of layout.tiles) {
       const b = at.get(t.q + ',' + t.r);
       let c = t.ring === layout.landRing ? TILE_COLORS.edge : TILE_COLORS.empty;
-      if (b && (b.status === 'done' || b.upgradeTo)) c = TILE_COLORS.done;
+      if (t.ring === 1) c = TILE_COLORS.plaza;
+      else if (b && b.built) c = TILE_COLORS.done;
       else if (b && b.status === 'building') c = TILE_COLORS.dirt;
       tileMesh.setColorAt(t.i, c);
     }
@@ -317,6 +339,7 @@ export async function createWorld(stage, overlay, opts) {
   function astar(start, goal) {
     if (start === goal) return [start];
     const N = nav.nodes.length;
+    if (start < 0 || goal < 0 || start >= N || goal >= N) return null;
     const g = new Float64Array(N).fill(Infinity);
     const f = new Float64Array(N).fill(Infinity);
     const from = new Int32Array(N).fill(-1);
@@ -347,7 +370,7 @@ export async function createWorld(stage, overlay, opts) {
     return null;
   }
 
-  // --- The beach: lamps, benches and a pier, so bots have somewhere to go --------------
+  // --- The beach: benches and a pier, so bots have somewhere to go --------------------
   function ringNodeAt(angle) {
     const n = nav.ring.length;
     let i = Math.round((angle / (Math.PI * 2)) * n) % n;
@@ -393,16 +416,10 @@ export async function createWorld(stage, overlay, opts) {
       poi('pier2', e2.x, e2.z, 0.06, faceOut(a), 'fish', n0);
       layout.pierEnd = at(a, start + len + 0.4);
     }
-    for (let i = 0; i < 10; i++) {
-      const p = at((i / 10) * Math.PI * 2 + 0.2, bR + 0.3);
-      const l = lampMesh();
-      l.position.set(p.x, 0, p.z);
-      world.add(l);
-    }
     for (const k of [0, 2, 3, 5]) {
       const node = cornerNode(layout.tiles[0], k);
       const nd = nav.nodes[node];
-      beachPois.push({ id: 'plaza' + k, node, x: nd.x, z: nd.z, y: PATH_TOP, yaw: Math.atan2(nd.x, nd.z), pose: 'look', night: false });
+      beachPois.push({ id: 'plaza' + k, node, x: nd.x, z: nd.z, y: PATH_TOP, yaw: Math.atan2(nd.x, nd.z), pose: 'look', night: false, plaza: true });
     }
   }
   function decorate() {
@@ -412,7 +429,7 @@ export async function createWorld(stage, overlay, opts) {
     let placed = 0;
     for (let i = 0; i < want * 4 && placed < want; i++) {
       const a = r() * Math.PI * 2;
-      const d = layout.beachR + 0.45 + r() * (layout.islandR - layout.beachR - 0.6);
+      const d = layout.beachR + 0.45 + r() * (layout.railR - layout.beachR - 0.6);
       const x = Math.cos(a) * d;
       const z = Math.sin(a) * d;
       if (avoid.some(([px, pz]) => Math.hypot(px - x, pz - z) < 0.7)) continue;
@@ -428,6 +445,114 @@ export async function createWorld(stage, overlay, opts) {
         rock.scale.set(1 + r(), 0.6 + r() * 0.5, 1 + r() * 0.6);
         rock.rotation.y = r() * Math.PI;
         rock.castShadow = true;
+      }
+    }
+  }
+
+  // --- Street lights change with the era: torches, lanterns, gas, electric, neon -----
+  function lampFor(style) {
+    const g = new T.Group();
+    const glow = (y, m = mats.glow, s = 0.7) => {
+      const sp = new T.Sprite(m);
+      sp.position.set(0, y, 0);
+      sp.scale.set(s, s, 1);
+      g.add(sp);
+    };
+    if (style === 'torch') {
+      mesh(geo('torchPole', () => new T.CylinderGeometry(0.012, 0.016, 0.42, 5)), mats.woodDark, 0, 0.21, 0, g);
+      mesh(geo('torchCup', () => new T.CylinderGeometry(0.03, 0.02, 0.05, 6)), mats.wood, 0, 0.43, 0, g);
+      mesh(geo('torchFlame', () => new T.ConeGeometry(0.025, 0.08, 6)), mats.flame, 0, 0.49, 0, g);
+      glow(0.49, mats.fireGlow, 0.6);
+    } else if (style === 'lantern') {
+      mesh(geo('lanternPost', () => new T.CylinderGeometry(0.014, 0.018, 0.5, 6)), mats.woodDark, 0, 0.25, 0, g);
+      mesh(geo('lanternBox', () => new T.BoxGeometry(0.06, 0.07, 0.06)), mats.lamp, 0, 0.53, 0, g);
+      mesh(geo('lanternCap', () => new T.ConeGeometry(0.05, 0.04, 4)), mats.black, 0, 0.585, 0, g).rotation.y = Math.PI / 4;
+      glow(0.53);
+    } else if (style === 'gas') {
+      mesh(geo('gasPost', () => new T.CylinderGeometry(0.01, 0.018, 0.6, 6)), mats.darkMetal, 0, 0.3, 0, g);
+      mesh(geo('gasHead', () => new T.CylinderGeometry(0.04, 0.025, 0.07, 6)), mats.lamp, 0, 0.63, 0, g);
+      mesh(geo('gasCap', () => new T.ConeGeometry(0.05, 0.04, 6)), mats.darkMetal, 0, 0.685, 0, g);
+      glow(0.63);
+    } else if (style === 'electric') {
+      mesh(geo('elecPost', () => new T.CylinderGeometry(0.01, 0.014, 0.78, 6)), mats.metal, 0, 0.39, 0, g);
+      mesh(geo('elecArm', () => new T.BoxGeometry(0.16, 0.012, 0.012)), mats.metal, 0.07, 0.77, 0, g);
+      mesh(geo('elecHead', () => new T.BoxGeometry(0.07, 0.02, 0.04)), mats.lamp, 0.14, 0.76, 0, g);
+      const sp = new T.Sprite(mats.glow);
+      sp.position.set(0.14, 0.74, 0);
+      sp.scale.set(0.8, 0.8, 1);
+      g.add(sp);
+    } else {
+      mesh(geo('neonPost', () => new T.CylinderGeometry(0.01, 0.014, 0.66, 8)), mats.whiteGloss, 0, 0.33, 0, g);
+      mesh(geo('neonRing', () => new T.TorusGeometry(0.05, 0.01, 6, 16)), mats.neonCyan, 0, 0.68, 0, g);
+      glow(0.68, mats.neonGlow, 0.8);
+    }
+    return g;
+  }
+  function rebuildLamps() {
+    if (!lampGroup) return;
+    lampGroup.clear();
+    const bR = layout.beachR;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + 0.2;
+      const l = lampFor(look().lamp);
+      l.position.set(Math.cos(a) * (bR + 0.3), 0, Math.sin(a) * (bR + 0.3));
+      lampGroup.add(l);
+    }
+    renderer.shadowMap.needsUpdate = true;
+  }
+
+  // --- The train: a ring of rails along the beach once a station is built -------------
+  let train = null;
+  function syncTrain() {
+    if (!world) return;
+    const built = [...builds.values()].filter((v) => v.b.built && ITEMS[v.b.item]?.train);
+    const style = built.some((v) => v.b.item === 'maglev') ? 'maglev' : built.length ? 'steam' : null;
+    if (train && train.style === style) return;
+    if (train) world.remove(train.g);
+    train = null;
+    if (!style) return;
+    const g = new T.Group();
+    const rr = layout.railR;
+    for (const off of [-0.035, 0.035]) {
+      const rail = mesh(new T.TorusGeometry(rr + off, style === 'maglev' ? 0.012 : 0.007, 4, 180), style === 'maglev' ? mats.neonCyan : mats.rail, 0, 0.012, 0, g);
+      rail.rotation.x = Math.PI / 2;
+    }
+    const cars = [];
+    for (let i = 0; i < 4; i++) {
+      const c = new T.Group();
+      if (style === 'steam') {
+        if (i === 0) {
+          mesh(geo('locoBoiler', () => new T.CylinderGeometry(0.045, 0.045, 0.2, 10)), mats.black, 0, 0.08, 0.02, c).rotation.x = Math.PI / 2;
+          mesh(geo('locoCab', () => new T.BoxGeometry(0.1, 0.1, 0.08)), mats.shipRed, 0, 0.09, -0.1, c);
+          mesh(geo('locoStack', () => new T.CylinderGeometry(0.018, 0.012, 0.06, 8)), mats.black, 0, 0.15, 0.08, c);
+        } else mesh(geo('wagon', () => new T.BoxGeometry(0.1, 0.08, 0.22)), [mats.wood, mats.brick, mats.darkMetal][i % 3], 0, 0.07, 0, c);
+        mesh(geo('chassis', () => new T.BoxGeometry(0.1, 0.02, 0.24)), mats.black, 0, 0.025, 0, c);
+      } else {
+        mesh(geo('magCar', () => new T.CapsuleGeometry(0.05, 0.2, 4, 10)), mats.whiteGloss, 0, 0.07, 0, c).rotation.x = Math.PI / 2;
+        mesh(geo('magStripe', () => new T.BoxGeometry(0.102, 0.012, 0.2)), mats.neonCyan, 0, 0.07, 0, c);
+      }
+      g.add(c);
+      cars.push(c);
+    }
+    world.add(g);
+    train = { g, cars, style, a: rand() * Math.PI * 2, puff: 0 };
+  }
+  function stepTrain(dt) {
+    if (!train) return;
+    const rr = layout.railR;
+    const speed = train.style === 'maglev' ? 0.22 : 0.09;
+    train.a += (dt * speed * 4) / rr;
+    train.cars.forEach((c, i) => {
+      const a = train.a - (i * 0.27) / rr;
+      c.position.set(Math.cos(a) * rr, train.style === 'maglev' ? 0.03 + Math.sin(performance.now() / 300 + i) * 0.005 : 0, Math.sin(a) * rr);
+      c.rotation.y = -a;
+    });
+    if (train.style === 'steam' && !still) {
+      train.puff -= dt;
+      if (train.puff <= 0) {
+        train.puff = 0.5;
+        const c = train.cars[0].position;
+        burst({ x: c.x, y: 0.2, z: c.z, count: 8, colors: ['#f1f1f1', '#d6d6d6'], speed: 0.1, life: 1.8, size: 0.08, gravity: -0.3, up: 1, grow: 0.06 });
       }
     }
   }
@@ -456,22 +581,32 @@ export async function createWorld(stage, overlay, opts) {
     const z = nd.z + (t.z - nd.z) * inward;
     return { node, x, z, y: TILE_TOP, yaw: Math.atan2(t.x - x, t.z - z) };
   }
-  function workSpot(b) {
+  function workSpot(b, salt = 0) {
     const t = tileOf(b);
     if (!t) return null;
+    if (t.ring === 1) {
+      // Wonders: helpers spread around the outer side.
+      const k = (hashStr('w' + b.id) + salt) % 6;
+      return spotAt(t, k, 0.18);
+    }
     const fr = frontCorners(t);
-    return spotAt(t, fr[hashStr('w' + b.id) % 2], 0.22);
+    return spotAt(t, fr[(hashStr('w' + b.id) + salt) % 2], 0.22);
+  }
+  // Goods are kept at the landing pad: haulers fetch them there.
+  function padSpot(salt) {
+    const ks = [0, 2, 3, 5];
+    return spotAt(layout.tiles[0], ks[salt % ks.length], 0.2);
   }
   function refreshPois() {
     buildPois = [];
     for (const v of builds.values()) {
-      if (v.b.status !== 'done' && !v.b.upgradeTo) continue;
+      if (!v.b.built || v.b.damaged) continue;
       const t = tileOf(v.b);
       const defs = POI_DEFS[v.b.item];
       if (!t || !defs) continue;
       const fr = frontCorners(t);
       defs.forEach((pose, i) => {
-        const k = v.b.item === 'shop' ? fr[i % 2] : (hashStr('p' + v.b.id) + i * 2) % 6;
+        const k = v.b.item === 'market' ? fr[i % 2] : (hashStr('p' + v.b.id) + i * 2) % 6;
         const s = spotAt(t, k, 0.2);
         if (s) buildPois.push({ id: v.b.id + ':' + i, node: s.node, x: s.x, z: s.z, y: s.y, yaw: s.yaw, pose, night: v.b.item === 'campfire' });
       });
@@ -480,27 +615,29 @@ export async function createWorld(stage, overlay, opts) {
     for (const id of [...poiUser.keys()]) if (!live.has(id)) poiUser.delete(id);
   }
 
-  function setBody(v, level, celebrate) {
-    if (v.body && v.level === level) return;
+  function setBody(v, item, level, celebrate) {
+    const key = item + ':' + level;
+    if (v.body && v.key === key) return;
     if (v.body) v.root.remove(v.body);
-    const made = buildingMesh(v.b, level);
+    const made = buildingMesh({ ...v.b, item, level }, level);
     v.body = made.g;
     v.h = made.h;
     v.anim = made.anim;
-    v.level = level;
+    v.key = key;
     v.root.add(v.body);
     if (celebrate) v.grow = 0.25;
+    if (v.damaged) v.body.rotation.z = 0.07;
     renderer.shadowMap.needsUpdate = true;
   }
   function clearBody(v) {
     if (v.body) v.root.remove(v.body);
     v.body = null;
-    v.level = 0;
+    v.key = '';
     v.anim = [];
   }
   function setScaffold(v, on) {
     if (on && !v.scaffold) {
-      v.scaffold = scaffoldMesh(Math.min(0.8, v.h));
+      v.scaffold = scaffoldMesh(Math.min(0.9, v.h));
       v.root.add(v.scaffold);
     } else if (!on && v.scaffold) {
       v.root.remove(v.scaffold);
@@ -519,6 +656,11 @@ export async function createWorld(stage, overlay, opts) {
     }
   }
   function progressOf(b) {
+    if (b.wonder) {
+      const w = data.econ?.wonder;
+      if (w && w.id === b.id) return w.progress;
+      return b.status === 'done' ? 1 : 0;
+    }
     if (b.status === 'done') return 1;
     if (b.status !== 'building') return 0;
     return Math.max(0, Math.min(1, (now() - b.startedAt - b.walkSec * 1000) / (b.buildSec * 1000)));
@@ -528,7 +670,7 @@ export async function createWorld(stage, overlay, opts) {
     const prev = v ? v.b : null;
     if (!v) {
       const p = hexToWorld(b.q, b.r);
-      v = { id: b.id, b, root: new T.Group(), body: null, level: 0, h: 0.4, anim: [], scaffold: null, stake: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0 };
+      v = { id: b.id, b, root: new T.Group(), body: null, key: '', h: 0.4, anim: [], scaffold: null, stake: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0, damaged: false, smoke: 0, shown: 0.05 };
       v.root.position.set(p.x, TILE_TOP, p.z);
       v.root.rotation.y = Math.atan2(-p.x, -p.z);
       buildGroup.add(v.root);
@@ -536,18 +678,19 @@ export async function createWorld(stage, overlay, opts) {
     }
     v.b = b;
     const finished = live && prev && prev.status !== 'done' && b.status === 'done';
-    if (b.status === 'done') setBody(v, b.level, finished && !!prev.upgradeTo);
-    else if (b.upgradeTo) setBody(v, b.level, false);
-    else if (b.status === 'building') setBody(v, 1, false);
+    // Houses being upgraded keep standing as they are until the new one is done.
+    if (b.wonder || b.built || b.status === 'building') setBody(v, b.item, b.level || 1, finished && !!prev.upgrade);
     else clearBody(v);
-    if (b.status === 'done' && v.body) v.body.scale.y = v.grow < 1 ? v.grow : 1;
+    if (v.body && b.built && !b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
     setScaffold(v, b.status === 'building');
-    setStake(v, b.status === 'queued');
+    setStake(v, b.status === 'queued' && !b.built);
+    v.damaged = !!b.damaged;
+    if (v.body) v.body.rotation.z = v.damaged ? 0.07 : 0;
     if (finished) {
       v.doneAt = performance.now();
       const p = v.root.position;
       confetti(p.x, p.y + v.h + 0.2, p.z);
-      if (sky.night > 0.5) fireworks(p.x, p.z);
+      if (sky.night > 0.5 || b.wonder) fireworks(p.x, p.z, b.wonder ? 6 : 2);
       audio.sfx('party', distVol(p));
     }
     return { v, prev, finished };
@@ -563,6 +706,8 @@ export async function createWorld(stage, overlay, opts) {
 
   // --- Bots ----------------------------------------------------------------------------
   const bots = new Map();
+  const porters = new Set();
+  let porterSeq = 0;
   function jobOf(id) {
     let job = null;
     for (const v of builds.values()) if (v.b.ownerId === id && v.b.status !== 'done') job = v;
@@ -570,13 +715,18 @@ export async function createWorld(stage, overlay, opts) {
   }
   function homeSpot(id) {
     let first = null;
-    for (const v of builds.values()) if (v.b.ownerId === id && v.b.status === 'done' && (!first || v.b.id < first.b.id)) first = v;
-    return first ? workSpot(first.b) : null;
+    for (const v of builds.values()) {
+      if (v.b.ownerId !== id || !v.b.built) continue;
+      const house = ITEMS[v.b.item]?.kind === 'house';
+      if (!first || (house && !first.house) || (house === first.house && v.b.id < first.v.b.id)) first = { v, house };
+    }
+    return first ? workSpot(first.v.b) : null;
   }
   function wantedBots() {
     const t = now();
     const busy = new Set();
     for (const v of builds.values()) if (v.b.status !== 'done') busy.add(v.b.ownerId);
+    for (const id of data.jobs.keys()) busy.add(id);
     return [...data.builders.values()]
       .filter((bd) => busy.has(bd.id) || t - bd.lastSeen < GONE_AFTER)
       .sort((a, b) => b.lastSeen - a.lastSeen)
@@ -592,17 +742,23 @@ export async function createWorld(stage, overlay, opts) {
       else addBot(bd, bd.id === arrivingId);
     }
   }
+  function newWalker(id, builder, parts, spot) {
+    const node = spot ? spot.node : pick(nav.nodes.map((n, i) => (n.kind === 'corner' || n.kind === 'ring' ? i : -1)).filter((i) => i >= 0));
+    const n = nav.nodes[node];
+    const crate = mesh(geo('carryCrate', () => new T.BoxGeometry(0.09, 0.07, 0.07)), crateMats.wood, 0, 0.2, 0.09, parts.inner);
+    crate.visible = false;
+    parts.crate = crate;
+    return {
+      id, builder, parts, x: spot ? spot.x : n.x, y: spot ? spot.y : n.y, z: spot ? spot.z : n.z,
+      yaw: rand() * Math.PI * 2, yawTarget: null, node, path: null, pi: 0, tail: null, then: null, speed: WALK,
+      mode: 'idle', act: null, after: null, timer: 0.5 + rand() * 3, phase: (hashStr(String(id)) % 1000) / 160,
+      react: null, partner: null, poi: null, claim: null, bubble: null, tag: null, wave: 0, taps: 0, lastTap: 0, hat: null, struck: false,
+      carrying: false, jobPose: null, haulSalt: hashStr(String(id)) % 4,
+    };
+  }
   function addBot(builder, arrive) {
     const parts = botMesh(builder.color);
-    const start = homeSpot(builder.id);
-    const node = start ? start.node : pick(nav.nodes.map((n, i) => (n.kind === 'corner' || n.kind === 'ring' ? i : -1)).filter((i) => i >= 0));
-    const n = nav.nodes[node];
-    const b = {
-      id: builder.id, builder, parts, x: start ? start.x : n.x, y: start ? start.y : n.y, z: start ? start.z : n.z,
-      yaw: rand() * Math.PI * 2, yawTarget: null, node, path: null, pi: 0, tail: null, then: null, speed: WALK,
-      mode: 'idle', act: null, after: null, timer: 0.5 + rand() * 3, phase: (hashStr(builder.id) % 1000) / 160,
-      react: null, partner: null, poi: null, claim: null, bubble: null, tag: null, wave: 0, taps: 0, lastTap: 0, hat: null, struck: false,
-    };
+    const b = newWalker(builder.id, builder, parts, homeSpot(builder.id));
     botGroup.add(parts.g);
     b.tag = addLabel('tag', builder.name);
     b.tag.bot = b;
@@ -619,6 +775,39 @@ export async function createWorld(stage, overlay, opts) {
     botGroup.remove(b.parts.g);
     bots.delete(b.id);
     if (tour.track === b) tour.track = null;
+  }
+  function carry(b, res) {
+    b.carrying = !!res;
+    b.parts.crate.visible = !!res;
+    if (res) b.parts.crate.material = crateMats[res] || crateMats.wood;
+  }
+  // Porters: little helper bots that carry fresh goods to the nearest store.
+  function spawnPorter(v, res) {
+    if (porters.size >= (low ? 3 : 6) || !nav.nodes.length || lapse) return;
+    const from = workSpot(v.b, 1);
+    if (!from) return;
+    let dest = null;
+    let best = Infinity;
+    for (const o of builds.values()) {
+      if (!o.b.built || ITEMS[o.b.item]?.kind !== 'storage') continue;
+      const d = Math.hypot(o.root.position.x - v.root.position.x, o.root.position.z - v.root.position.z);
+      if (d < best) { best = d; dest = o; }
+    }
+    const to = dest ? workSpot(dest.b, 1) : padSpot(porterSeq);
+    if (!to) return;
+    const parts = botMesh('#9aa3ad');
+    parts.g.scale.setScalar(0.7);
+    const p = newWalker('porter' + porterSeq++, { name: '', lastSeen: now(), hat: 'none', color: '#9aa3ad' }, parts, from);
+    p.porter = true;
+    parts.antenna.visible = false;
+    carry(p, res);
+    botGroup.add(parts.g);
+    porters.add(p);
+    if (!walkTo(p, to.node, () => removePorter(p), WALK * 1.15, to)) removePorter(p);
+  }
+  function removePorter(p) {
+    botGroup.remove(p.parts.g);
+    porters.delete(p);
   }
   function refreshLook(b) {
     const p = b.parts;
@@ -676,13 +865,14 @@ export async function createWorld(stage, overlay, opts) {
     if (b.tail) len += Math.hypot(b.tail.x - px, b.tail.z - pz);
     return len;
   }
-  function goSpot(b, s, then, deadline) {
-    if (Math.hypot(b.x - s.x, b.z - s.z) < 0.03) { then(b); return; }
-    if (!walkTo(b, s.node, then, WALK, s)) return;
+  function goSpot(b, s, then, deadline, speed) {
+    if (Math.hypot(b.x - s.x, b.z - s.z) < 0.03) { then(b); return true; }
+    if (!walkTo(b, s.node, then, speed || WALK, s)) return false;
     if (deadline) {
       const left = (deadline - now()) / 1000;
       b.speed = Math.max(WALK, Math.min(2.4, pathLength(b) / Math.max(1.2, left)));
     }
+    return true;
   }
   function startAct(b, kind, dur, yaw) {
     b.mode = 'act';
@@ -690,19 +880,28 @@ export async function createWorld(stage, overlay, opts) {
     b.timer = dur;
     if (yaw != null) b.yawTarget = yaw;
   }
-  // What should this bot do now? Its own build comes first, then rest.
+  // What should this bot do now? Its own build first, then its job, then rest.
   function decide(b) {
+    if (b.porter) { removePorter(b); return; }
     if (b.mode === 'arrive') return;
     b.act = null;
     b.after = null;
-    const job = jobOf(b.id);
-    if (job) {
-      const s = workSpot(job.b);
+    const own = jobOf(b.id);
+    if (own && own.b.status === 'building') {
+      const s = workSpot(own.b);
       if (s) {
-        const working = job.b.status === 'building';
-        const deadline = working ? job.b.startedAt + job.b.walkSec * 1000 : 0;
-        goSpot(b, s, (x) => { x.mode = working ? 'work' : 'wait'; x.yawTarget = s.yaw; x.wave = 0; }, deadline);
-        if (!working && b.mode === 'walk') b.speed = WALK * 1.4;
+        carry(b, null);
+        goSpot(b, s, (x) => { x.mode = 'work'; x.yawTarget = s.yaw; }, own.b.startedAt + own.b.walkSec * 1000);
+        return;
+      }
+    }
+    const job = data.jobs.get(b.id);
+    if (job && doJob(b, job)) return;
+    carry(b, null);
+    if (own) {
+      const s = workSpot(own.b);
+      if (s) {
+        goSpot(b, s, (x) => { x.mode = 'wait'; x.yawTarget = s.yaw; x.wave = 0; }, 0, WALK * 1.4);
         return;
       }
     }
@@ -710,7 +909,34 @@ export async function createWorld(stage, overlay, opts) {
       const h = homeSpot(b.id);
       if (h) { goSpot(b, h, (x) => { x.mode = 'sleep'; x.yawTarget = h.yaw + Math.PI / 2; }); return; }
     }
+    if (data.event?.key === 'festival' && rand() < 0.7) {
+      const plaza = freePois().filter((p) => p.plaza);
+      if (plaza.length) {
+        const p = pick(plaza);
+        walkTo(b, p.node, (x) => { startAct(x, 'party', 6); x.after = () => decide(x); }, WALK * 1.2, { x: p.x, z: p.z, y: p.y });
+        return;
+      }
+    }
     leisure(b);
+  }
+  function doJob(b, job) {
+    const v = builds.get(job.buildId);
+    if (!v) return false;
+    if (job.kind === 'wonder') {
+      // Haul: fetch goods at the pad, carry them to the wonder, repeat.
+      const needs = ITEMS[v.b.item]?.needs || {};
+      const res = pick(Object.keys(needs)) || 'stone';
+      if (b.carrying) {
+        const site = workSpot(v.b, b.haulSalt);
+        return site ? goSpot(b, site, (x) => { carry(x, null); dust(x.x, x.y, x.z, 0.3); startAct(x, 'look', 0.8, site.yaw); }) : false;
+      }
+      const pad = padSpot(b.haulSalt);
+      return pad ? goSpot(b, pad, (x) => { carry(x, res); startAct(x, 'look', 0.6, pad.yaw); }) : false;
+    }
+    const s = workSpot(v.b, 1);
+    if (!s) return false;
+    const pose = job.kind === 'repair' ? 'hammer' : WATER_JOBS.has(v.b.item) ? 'water' : FISH_JOBS.has(v.b.item) ? 'fish' : 'hammer';
+    return goSpot(b, s, (x) => { x.mode = 'job'; x.jobPose = pose; x.yawTarget = s.yaw; });
   }
   function freePois() {
     return beachPois.concat(buildPois).filter((p) => !poiUser.has(p.id) && (!p.night || sky.night > 0.5));
@@ -728,7 +954,7 @@ export async function createWorld(stage, overlay, opts) {
     }
     if (r < 0.45 && free.length) return visitPoi(b, pick(free));
     if (r < 0.62) {
-      const partner = [...bots.values()].find((o) => o !== b && !o.partner && !jobOf(o.id) && (o.mode === 'idle' || (o.mode === 'act' && o.act === 'look')) && Math.hypot(o.x - b.x, o.z - b.z) < 6);
+      const partner = [...bots.values()].find((o) => o !== b && !o.partner && !jobOf(o.id) && !data.jobs.has(o.id) && (o.mode === 'idle' || (o.mode === 'act' && o.act === 'look')) && Math.hypot(o.x - b.x, o.z - b.z) < 6);
       if (partner) return startChat(b, partner);
     }
     if (r < 0.92) {
@@ -867,13 +1093,17 @@ export async function createWorld(stage, overlay, opts) {
         if (rand() < dt * 0.05) showBubble(b, pick(LINES.work), 2600);
         break;
       }
+      case 'job':
+        if (!data.jobs.has(b.id) || jobOf(b.id)?.b.status === 'building') { decide(b); break; }
+        if (rand() < dt * 0.03) showBubble(b, pick(LINES.job), 2200);
+        break;
       case 'wait': {
         const job = jobOf(b.id);
-        if (!job || job.b.status !== 'queued') decide(b);
+        if (!job || job.b.status !== 'queued' || data.jobs.has(b.id)) decide(b);
         break;
       }
       case 'sleep':
-        if (now() - b.builder.lastSeen < SLEEP_AFTER || jobOf(b.id)) decide(b);
+        if (now() - b.builder.lastSeen < SLEEP_AFTER || jobOf(b.id) || data.jobs.has(b.id)) decide(b);
         break;
       case 'arrive': {
         b.timer += dt;
@@ -899,6 +1129,21 @@ export async function createWorld(stage, overlay, opts) {
     }
     poseBot(b, t, dt);
   }
+  function hammerPose(b, p, t, speed = 1.5) {
+    let lift = 0;
+    if (!still) {
+      const c = (t * speed + b.phase) % 1;
+      const up = c < 0.72 ? c / 0.72 : 1 - (c - 0.72) / 0.28;
+      p.armR.rotation.x = -0.5 - up * 2.0;
+      p.inner.rotation.x = 0.06 + (1 - up) * 0.06;
+      if (c > 0.72 && c < 0.8) {
+        lift = 0.008;
+        if (!b.struck) { b.struck = true; if (!b.porter && distVol(b) > 0.3) audio.sfx('hammer', distVol(b)); }
+      } else b.struck = false;
+    } else p.armR.rotation.x = -1.4;
+    p.armL.rotation.x = -0.4;
+    return lift;
+  }
   function poseBot(b, t, dt) {
     const p = b.parts;
     p.inner.rotation.set(0, 0, 0);
@@ -908,10 +1153,11 @@ export async function createWorld(stage, overlay, opts) {
     p.armR.rotation.set(0, 0, -0.08);
     p.legL.rotation.set(0, 0, 0);
     p.legR.rotation.set(0, 0, 0);
-    p.hammer.visible = b.mode === 'work';
+    const jobPose = b.mode === 'job' ? b.jobPose : null;
+    p.hammer.visible = b.mode === 'work' || jobPose === 'hammer';
     p.cup.visible = b.act === 'drink';
-    p.rod.visible = b.act === 'fish';
-    p.can.visible = b.act === 'water';
+    p.rod.visible = b.act === 'fish' || jobPose === 'fish';
+    p.can.visible = b.act === 'water' || jobPose === 'water';
     p.dizzy.visible = false;
     let lift = 0;
     if (b.mode === 'walk' && !b.react) {
@@ -922,18 +1168,15 @@ export async function createWorld(stage, overlay, opts) {
       p.armR.rotation.x = w * 0.5;
       lift = Math.abs(w) * 0.012;
       if (b.speed > WALK * 1.6) p.inner.rotation.x = 0.15;
-    } else if (b.mode === 'work') {
-      if (!still) {
-        const c = (t * 1.5 + b.phase) % 1;
-        const up = c < 0.72 ? c / 0.72 : 1 - (c - 0.72) / 0.28;
-        p.armR.rotation.x = -0.5 - up * 2.0;
-        p.inner.rotation.x = 0.06 + (1 - up) * 0.06;
-        if (c > 0.72 && c < 0.8) {
-          lift = 0.008;
-          if (!b.struck) { b.struck = true; if (distVol(b) > 0.3) audio.sfx('hammer', distVol(b)); }
-        } else b.struck = false;
-      } else p.armR.rotation.x = -1.4;
-      p.armL.rotation.x = -0.4;
+    } else if (b.mode === 'work' || jobPose === 'hammer') {
+      lift = hammerPose(b, p, t, data.event?.key === 'builderRush' ? 2.6 : 1.5);
+    } else if (jobPose === 'water') {
+      p.armR.rotation.x = -1.1;
+      p.can.rotation.x = still ? 0.6 : 0.4 + Math.sin(t * 3) * 0.3;
+      p.inner.rotation.x = 0.15;
+    } else if (jobPose === 'fish') {
+      p.armR.rotation.x = -1.0;
+      p.armL.rotation.x = -0.9;
     } else if (b.mode === 'wait') {
       b.yawTarget = Math.atan2(camera.position.x - b.x, camera.position.z - b.z);
       b.wave = (b.wave || 0) + dt;
@@ -980,6 +1223,11 @@ export async function createWorld(stage, overlay, opts) {
         if (!still) p.head.rotation.y = Math.sin(t * 0.9 + b.phase) * 0.6;
       }
     }
+    if (b.carrying) {
+      p.armL.rotation.x = -1.3;
+      p.armR.rotation.x = -1.3;
+      p.hammer.visible = false;
+    }
     if (b.react) {
       const r = b.react;
       const k = r.t / r.dur;
@@ -996,19 +1244,27 @@ export async function createWorld(stage, overlay, opts) {
     if (b.yawTarget != null) turnTo(b, b.yawTarget, dt);
     p.g.position.set(b.x, b.y + lift, b.z);
     p.g.rotation.y = b.yaw;
-    p.umbrella.visible = weather.rain > 0.3 && (b.mode === 'walk' || b.mode === 'idle' || (b.mode === 'act' && b.act !== 'drink'));
+    p.umbrella.visible = !b.porter && weather.rain > 0.3 && (b.mode === 'walk' || b.mode === 'idle' || (b.mode === 'act' && b.act !== 'drink'));
     if (p.hat && p.hat.userData.prop && !still) p.hat.userData.prop.rotation.y += dt * (b.mode === 'walk' ? 18 : 6);
   }
 
   // --- Builds every frame: growing, scaffolding dust, moving parts ------------------------
   function stepBuilds(t, dt) {
     const night = sky.night;
+    const minutes = new Date(clockNow());
     for (const v of builds.values()) {
       const b = v.b;
-      if (b.status === 'building' && !b.upgradeTo && v.body) {
+      if (b.wonder && v.body && b.status !== 'done') {
+        const want = 0.05 + 0.95 * progressOf(b);
+        v.shown += (want - v.shown) * Math.min(1, dt * 0.8);
+        v.body.scale.y = v.shown;
+        v.puff -= dt;
+        if (v.puff <= 0 && !lapse) { v.puff = 3 + rand() * 2; dust(v.root.position.x, TILE_TOP, v.root.position.z, 0.6); }
+      } else if (b.wonder && v.body) {
+        v.body.scale.y = v.grow < 1 ? v.grow : 1;
+      } else if (b.status === 'building' && !b.built && v.body) {
         const pr = progressOf(b);
-        const e = 1 - Math.pow(1 - pr, 2);
-        v.body.scale.y = Math.max(0.04, e);
+        v.body.scale.y = Math.max(0.04, 1 - Math.pow(1 - pr, 2));
         v.puff -= dt;
         if (pr > 0 && pr < 1 && v.puff <= 0) {
           v.puff = 2 + rand() * 1.5;
@@ -1018,15 +1274,50 @@ export async function createWorld(stage, overlay, opts) {
         v.grow = Math.min(1, v.grow + dt / 1.6);
         v.body.scale.y = 1 - Math.pow(1 - v.grow, 3);
       }
+      if (v.damaged && !still) {
+        v.smoke -= dt;
+        if (v.smoke <= 0) { v.smoke = 1.2 + rand(); smoke(v.root.position.x, v.root.position.y + v.h * 0.6, v.root.position.z, true); }
+      }
+      if (!v.body || still) continue;
+      const lit = !v.damaged && !blackout();
       for (const a of v.anim) {
-        if (a.kind === 'spin') { if (!still) a.o.rotation.z += dt * a.speed * (1 + weather.rain); }
-        else if (a.kind === 'beam') { a.o.visible = night > 0.2; if (!still) a.o.rotation.y += dt * 0.9; }
-        else if (a.kind === 'flag') { if (!still) a.o.rotation.y = Math.sin(t * 2 + v.id) * 0.3; }
-        else if (a.kind === 'fire' && !still) {
+        if (a.kind === 'spin') { if (lit) a.o.rotation.z += dt * a.speed * (1 + weather.rain); }
+        else if (a.kind === 'spinZ') { if (lit) a.o.rotation.z += dt * a.speed; }
+        else if (a.kind === 'spinY') a.o.rotation.y += dt * a.speed;
+        else if (a.kind === 'beam') { a.o.visible = night > 0.2 && lit; a.o.rotation.y += dt * 0.9; }
+        else if (a.kind === 'beamUp') a.o.visible = night > 0.2 || data.finale;
+        else if (a.kind === 'flag') a.o.rotation.y = Math.sin(t * 2 + v.id) * 0.3;
+        else if (a.kind === 'bob') { a.o.position.y = 0.02 + Math.sin(t * 1.3 + v.id) * 0.012; a.o.rotation.z = Math.sin(t * 1.1 + v.id) * 0.05; }
+        else if (a.kind === 'blink') a.o.visible = Math.sin(t * 3 + v.id) > 0;
+        else if (a.kind === 'pulse') a.o.scale.setScalar(1 + Math.sin(t * 2.5 + v.id) * 0.06);
+        else if (a.kind === 'hover') a.o.position.y = a.y + Math.sin(t * 1.4 + v.id) * 0.04;
+        else if (a.kind === 'drone') {
+          const k = t * 0.8 + a.ph;
+          a.o.position.set(a.x + Math.cos(k) * 0.12, 0.25 + Math.sin(k * 1.7) * 0.06, a.z + Math.sin(k) * 0.12);
+        } else if (a.kind === 'arm') {
+          a.o.rotation.y = Math.sin(t * 0.8 + v.id) * 1.2;
+          a.upper.rotation.z = -0.4 + Math.sin(t * 1.3 + v.id) * 0.35;
+          a.fore.rotation.z = 0.9 + Math.sin(t * 1.7 + v.id) * 0.4;
+        } else if (a.kind === 'clock') {
+          const h = minutes.getHours() % 12;
+          const m = minutes.getMinutes();
+          for (const hd of a.hands) {
+            hd.hour.rotation.z = -((h + m / 60) / 12) * Math.PI * 2;
+            hd.min.rotation.z = -(m / 60) * Math.PI * 2;
+          }
+        } else if (a.kind === 'fire') {
           const flick = 1 + Math.sin(t * 13 + v.id) * 0.12 + Math.sin(t * 7.3) * 0.08;
           a.f1.scale.set(1, flick, 1);
           a.f2.scale.set(1, 2 - flick, 1);
-        } else if (a.kind === 'fountain' && !low && !still) {
+        } else if (a.kind === 'smoke') {
+          if (!lit || lapse) continue;
+          a.t -= dt;
+          if (a.t <= 0 && camera.position.distanceTo(v.root.position) < 14) {
+            a.t = a.every * (0.7 + rand() * 0.6);
+            const p = new T.Vector3(a.x, a.y, a.z).applyMatrix4(v.body.matrixWorld);
+            smoke(p.x, p.y, p.z, a.dark);
+          }
+        } else if (a.kind === 'fountain' && !low) {
           v.drop -= dt;
           if (v.drop <= 0 && camera.position.distanceTo(v.root.position) < 9) {
             v.drop = 0.35;
@@ -1038,42 +1329,55 @@ export async function createWorld(stage, overlay, opts) {
     }
   }
 
-  // --- Sky: the sun and moon follow the real clock -------------------------------------------
-  const DEG = Math.PI / 180;
-  const LAT = Number(opts.lat) || 52.2;
-  const LON = Number(opts.lon) || 5.1;
-  function sunAt(ms) {
-    const d = new Date(ms);
-    const doy = (ms - Date.UTC(d.getUTCFullYear(), 0, 0)) / DAY;
-    const decl = -23.44 * Math.cos(((2 * Math.PI) / 365) * (doy + 10)) * DEG;
-    const lat = LAT * DEG;
-    const utcHours = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
-    const H = (utcHours + LON / 15 - 12) * 15 * DEG;
-    const sinAlt = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(H);
-    const alt = Math.asin(sinAlt);
-    const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(lat) - Math.tan(decl) * Math.cos(lat));
-    return { alt, az, sinAlt };
+  // --- Sky: the sun and moon follow the real clock, the air follows the era ---------------
+  // The server says where the island is (page ?lat= and ?lon= win, for testing).
+  let LAT = Number(opts.lat) || 52.2;
+  let LON = Number(opts.lon) || 5.1;
+  function setGeo(g) {
+    if (!g) return;
+    if (!opts.lat && Number.isFinite(Number(g.lat))) LAT = Number(g.lat);
+    if (!opts.lon && Number.isFinite(Number(g.lon))) LON = Number(g.lon);
   }
   const C = (hex) => new T.Color(hex);
   const SKY = {
     nightTop: C('#081127'), nightBottom: C('#1c2b52'), duskTop: C('#3d4f8f'), duskBottom: C('#f2a46c'),
     dayTop: C('#8fcdee'), dayBottom: C('#fbe6c6'), rainTop: C('#7d8a99'), rainBottom: C('#b9c2cc'),
+    smogTop: C('#a39a8c'), smogBottom: C('#d2c4a8'),
     waterNight: C('#12294a'), waterDay: C('#7bc4da'), hemiNight: C('#3b5082'), hemiDay: C('#c4e6f6'),
     groundNight: C('#3a3226'), groundDay: C('#c7a676'), sunLow: C('#ffc98a'), sunHigh: C('#fff4e0'),
   };
   const mixC = (a, b, t) => a.clone().lerp(b, Math.max(0, Math.min(1, t)));
   const sky = { day: 1, night: 0, dusk: 0 };
+  let season = '';
+  const blackout = () => data.event?.key === 'blackout';
+  function applySeason(s) {
+    season = s;
+    const L = SEASON_LOOK[s];
+    mats.leaf.color.set(L.leaf);
+    mats.leaf2.color.set(L.leaf2);
+    mats.grass.color.set(L.grass);
+    TILE_COLORS.empty.set(L.tiles[0]);
+    TILE_COLORS.edge.set(L.tiles[1]);
+    TILE_COLORS.done.set(L.tiles[2]);
+    refreshTiles();
+  }
   function updateSky() {
-    const s = sunAt(opts.clock ? opts.clock() : Date.now());
+    const ms = clockNow();
+    const s = sunAt(ms, LAT, LON);
+    const sea = seasonAt(ms, LAT);
+    if (sea !== season) applySeason(sea);
     const day = Math.max(0, Math.min(1, (s.sinAlt + 0.1) / 0.35));
     const dusk = Math.max(0, 1 - Math.abs(s.sinAlt - 0.02) / 0.16);
     const rain = weather.rain;
+    const haze = look().haze;
     let top = mixC(SKY.nightTop, SKY.dayTop, day);
     let bottom = mixC(SKY.nightBottom, SKY.dayBottom, day);
     top = mixC(top, SKY.duskTop, dusk * 0.6);
     bottom = mixC(bottom, SKY.duskBottom, dusk * 0.85);
     top = mixC(top, SKY.rainTop, rain * 0.55 * day);
     bottom = mixC(bottom, SKY.rainBottom, rain * 0.5 * day);
+    top = mixC(top, SKY.smogTop, haze * day);
+    bottom = mixC(bottom, SKY.smogBottom, haze * day);
     Object.assign(sky, { day, night: 1 - day, dusk });
     const topCss = '#' + top.getHexString();
     stage.style.background = 'linear-gradient(180deg, ' + topCss + ' 0%, #' + bottom.getHexString() + ' 70%)';
@@ -1091,25 +1395,28 @@ export async function createWorld(stage, overlay, opts) {
       const dir = new T.Vector3(-Math.sin(s.az) * Math.cos(s.alt), Math.max(0.12, Math.sin(s.alt)), Math.cos(s.az) * Math.cos(s.alt)).normalize();
       sun.position.copy(dir.multiplyScalar(span * 1.6));
       sun.color.copy(mixC(SKY.sunLow, SKY.sunHigh, Math.min(1, s.sinAlt / 0.45)));
-      sun.intensity = 2.7 * day * (1 - rain * 0.55);
+      sun.intensity = 2.7 * day * (1 - rain * 0.55) * (1 - haze * 0.3);
     } else {
       sun.position.set(-span * 0.6, span * 1.2, -span * 0.8);
       sun.color.set('#a9bfff');
       sun.intensity = 0.95;
     }
-    const night = 1 - day;
-    mats.window.emissiveIntensity = night * 1.7 + dusk * 0.3;
+    const night = blackout() ? 0 : 1 - day;
+    const glowNight = 1 - day;
+    mats.window.emissiveIntensity = night * 1.7 + (blackout() ? 0 : dusk * 0.3);
+    mats.towerGlass.emissiveIntensity = night * 1.2;
     mats.lamp.emissiveIntensity = night * 1.6;
     mats.glow.opacity = night * 0.85;
+    mats.neonGlow.opacity = night * 0.9;
     mats.glass.emissiveIntensity = 0.15 + night * 0.8;
     mats.beam.opacity = night * 0.16;
-    mats.fireGlow.opacity = 0.2 + night * 0.6;
-    stars.material.opacity = Math.pow(night, 2) * (1 - rain);
-    moon.visible = night > 0.3;
+    mats.fireGlow.opacity = 0.2 + glowNight * 0.6;
+    stars.material.opacity = Math.pow(glowNight, 2) * (1 - rain) * (1 - haze);
+    moon.visible = glowNight > 0.3;
     renderer.shadowMap.needsUpdate = true;
   }
 
-  // --- Weather -----------------------------------------------------------------------------
+  // --- Weather (snow in winter) --------------------------------------------------------------
   const weather = { rain: 0, target: 0, next: 0 };
   function makeRain() {
     const n = low ? 300 : 700;
@@ -1129,7 +1436,8 @@ export async function createWorld(stage, overlay, opts) {
   }
   function updateWeather(dt) {
     const t = Date.now();
-    if (t > weather.next) {
+    if (data.event?.key === 'storm') weather.target = 1;
+    else if (t > weather.next) {
       weather.next = t + 150e3;
       if (weather.target > 0) { if (rand() < 0.55) weather.target = 0; }
       else if (rand() < 0.12) weather.target = 0.55 + rand() * 0.45;
@@ -1138,14 +1446,17 @@ export async function createWorld(stage, overlay, opts) {
     const on = weather.rain > 0.03;
     rainLines.visible = on;
     if (!on) return;
-    rainLines.material.opacity = weather.rain * 0.55;
+    const snow = season === 'winter';
+    rainLines.material.color.set(snow ? '#ffffff' : '#cfe3f5');
+    rainLines.material.opacity = weather.rain * (snow ? 0.8 : 0.55);
     rainLines.position.set(controls.target.x, 0, controls.target.z);
     const pos = rainLines.geometry.attributes.position;
     const arr = pos.array;
-    const fall = dt * 7;
+    const fall = dt * (snow ? 1.4 : 7);
     for (let i = 0; i < arr.length; i += 6) {
       arr[i + 1] -= fall;
       arr[i + 4] -= fall;
+      if (snow) { const w = Math.sin((arr[i + 1] + i) * 2) * dt * 0.2; arr[i] += w; arr[i + 3] = arr[i] + 0.02; arr[i + 4] = arr[i + 1] - 0.04; }
       if (arr[i + 4] < -0.2) { arr[i + 1] += 10; arr[i + 4] += 10; }
     }
     pos.needsUpdate = true;
@@ -1170,6 +1481,7 @@ export async function createWorld(stage, overlay, opts) {
   const particles = [];
   const dotTex = glowTexture();
   function burst(o) {
+    if (particles.length > (low ? 30 : 90)) return;
     const n = low ? Math.ceil(o.count / 3) : o.count;
     const pos = new Float32Array(n * 3);
     const col = new Float32Array(n * 3);
@@ -1221,18 +1533,26 @@ export async function createWorld(stage, overlay, opts) {
     if (still) return;
     burst({ x, y, z, count: 140, colors: ['#f2c230', '#e5608a', '#3b7ddd', '#47ad6b', '#ff8c42', '#ffffff'], speed: 1.4, life: 2.6, size: 0.04, gravity: 2.2, drag: 0.8 });
   }
-  function fireworks(x, z) {
+  function fireworks(x, z, n = 2) {
     if (still) return;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < n; i++) {
       setTimeout(() => {
-        burst({ x: x + (rand() - 0.5) * 2, y: 3 + rand(), z: z + (rand() - 0.5) * 2, count: 160, colors: [pick(['#ff5a5a', '#ffd23f', '#5ad1ff', '#b07cff', '#7dffb0'])], speed: 1.5, life: 1.8, size: 0.07, gravity: 0.7, sphere: true, additive: true, drag: 0.9 });
+        burst({ x: x + (rand() - 0.5) * 2.5, y: 3 + rand() * 1.5, z: z + (rand() - 0.5) * 2.5, count: 160, colors: [pick(['#ff5a5a', '#ffd23f', '#5ad1ff', '#b07cff', '#7dffb0'])], speed: 1.5, life: 1.8, size: 0.07, gravity: 0.7, sphere: true, additive: true, drag: 0.9 });
         audio.sfx('pop');
-      }, i * 500);
+      }, i * 450);
     }
   }
   function dust(x, y, z, k = 1) {
     if (still) return;
     burst({ x, y: y + 0.05, z, count: Math.round(40 * k), colors: ['#d8cbb0', '#c2b59a', '#efe6d2'], speed: 0.6, life: 1.4, size: 0.07, gravity: -0.2, drag: 1.5, spread: 0.4, up: 0.4, grow: 0.04 });
+  }
+  function smoke(x, y, z, dark) {
+    if (still) return;
+    burst({ x, y, z, count: 10, colors: dark ? ['#5d636e', '#7a808a', '#454a52'] : ['#e9ecef', '#d6dbe0', '#f6f7f8'], speed: 0.1, life: 3, size: 0.12, gravity: -0.3, spread: 0.06, up: 1, grow: 0.1 });
+  }
+  function sparkle(x, y, z) {
+    if (still) return;
+    burst({ x, y, z, count: 18, colors: ['#fff3a3', '#ffd23f', '#ffffff'], speed: 0.4, life: 1.1, size: 0.05, gravity: -0.4, additive: true, spread: 0.3, up: 0.8 });
   }
   function shipHop(power) {
     if (!ship) return;
@@ -1241,8 +1561,144 @@ export async function createWorld(stage, overlay, opts) {
     if (!still) burst({ x: 0, y: TILE_TOP + 0.1, z: 0, count: 60, colors: ['#ffb347', '#ff7a3c', '#cfcfcf'], speed: 0.8, life: 1.1, size: 0.06, gravity: -0.3, spread: 0.3, up: -0.2, drag: 1.2 });
   }
 
-  // --- Critters: birds, a sailing boat, a cat and fireflies ------------------------------------
+  // --- Events: storms, festivals, meteors, the merchant ship ---------------------------------
+  const ev = { flashT: 0, flash: 0, festT: 0, meteorT: 0, sparkT: 0, streaks: [], merchant: null };
+  const BOOSTED = { harvest: ['food'], tallTrees: ['wood'], richVeins: ['stone', 'coal', 'iron'] };
+  function makeMerchant() {
+    const g = new T.Group();
+    mesh(geo('mHull', () => new T.BoxGeometry(0.42, 0.14, 1.1)), mats.woodDark, 0, 0.02, 0, g);
+    mesh(geo('mDeck', () => new T.BoxGeometry(0.38, 0.02, 1.0)), mats.wood, 0, 0.1, 0, g);
+    for (const [z, h] of [[-0.25, 0.9], [0.25, 0.75]]) {
+      mesh(geo('mMast' + h, () => new T.CylinderGeometry(0.012, 0.016, h, 5)), mats.woodDark, 0, 0.1 + h / 2, z, g);
+      mesh(geo('mSail' + h, () => new T.BoxGeometry(0.008, h * 0.6, 0.34)), mats.sail, 0, 0.1 + h * 0.55, z + 0.02, g);
+    }
+    mesh(geo('mFlag', () => new T.BoxGeometry(0.004, 0.06, 0.12)), trimMat('#e0473f'), 0, 1.06, -0.2, g);
+    for (let i = 0; i < 3; i++) mesh(geo('mCrate', () => new T.BoxGeometry(0.1, 0.08, 0.1)), mats.wood, 0.08 - i * 0.07, 0.15, 0.35 - i * 0.12, g);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  function stepEvents(t, dt) {
+    const key = data.event?.key;
+    // Lightning during storms.
+    if (key === 'storm' && !still) {
+      ev.flashT -= dt;
+      if (ev.flashT <= 0) {
+        ev.flashT = 3 + rand() * 6;
+        ev.flash = 0.18;
+        audio.sfx('pop', 0.6);
+      }
+    }
+    if (ev.flash > 0) { ev.flash -= dt; flash.intensity = ev.flash > 0 ? 5 * (ev.flash / 0.18) : 0; }
+    if (key === 'festival' && !still) {
+      ev.festT -= dt;
+      if (ev.festT <= 0) {
+        ev.festT = 1.5;
+        const tile = pick(layout.tiles);
+        confetti(tile.x, 0.6, tile.z);
+        if (sky.night > 0.5 && rand() < 0.4) fireworks(tile.x, tile.z, 1);
+      }
+    }
+    if (key === 'meteor' && !still) {
+      ev.meteorT -= dt;
+      if (ev.meteorT <= 0) {
+        ev.meteorT = 0.3 + rand() * 0.4;
+        const a = rand() * Math.PI * 2;
+        const start = new T.Vector3(Math.cos(a) * 8, 16 + rand() * 4, Math.sin(a) * 8 - 10);
+        const dir = new T.Vector3(-0.6 + rand() * 1.2, -1, 0.5).normalize();
+        const geom = new T.BufferGeometry().setFromPoints([start, start.clone().addScaledVector(dir, -1.6)]);
+        const line = new T.Line(geom, new T.LineBasicMaterial({ color: 0xfff6c8, transparent: true, opacity: 1, fog: false }));
+        fxGroup.add(line);
+        ev.streaks.push({ line, dir, age: 0 });
+      }
+    }
+    for (let i = ev.streaks.length - 1; i >= 0; i--) {
+      const s = ev.streaks[i];
+      s.age += dt;
+      s.line.position.addScaledVector(s.dir, dt * 14);
+      s.line.material.opacity = Math.max(0, 1 - s.age / 1.2);
+      if (s.age > 1.2) { fxGroup.remove(s.line); s.line.geometry.dispose(); s.line.material.dispose(); ev.streaks.splice(i, 1); }
+    }
+    if (BOOSTED[key] && !still) {
+      ev.sparkT -= dt;
+      if (ev.sparkT <= 0) {
+        ev.sparkT = 0.8;
+        const makers = [...builds.values()].filter((v) => v.b.built && Object.keys(ITEMS[v.b.item]?.recipe?.out || {}).some((r) => BOOSTED[key].includes(r)));
+        if (makers.length) { const v = pick(makers); sparkle(v.root.position.x, v.h + 0.2, v.root.position.z); }
+      }
+    }
+    // The merchant ship sails in to the pier, waits, and sails away again.
+    const m = ev.merchant;
+    if (m && layout.pierEnd) {
+      const far = { x: layout.pierEnd.x * 4, z: layout.pierEnd.z * 4 };
+      m.t += dt;
+      let k = 1;
+      if (m.state === 'arrive') { k = Math.min(1, m.t / 18); if (k >= 1) m.state = 'stay'; }
+      if (m.state === 'leave') { k = 1 - Math.min(1, m.t / 18); if (k <= 0) { scene.remove(m.g); ev.merchant = null; return; } }
+      const e = k * k * (3 - 2 * k);
+      m.g.position.set(far.x + (layout.pierEnd.x * 1.15 - far.x) * e, -0.48 + Math.sin(t * 1.2) * 0.02, far.z + (layout.pierEnd.z * 1.15 - far.z) * e);
+      m.g.rotation.y = Math.atan2(layout.pierEnd.x - far.x, layout.pierEnd.z - far.z) + Math.PI / 2;
+      m.g.rotation.z = Math.sin(t * 0.9) * 0.03;
+    }
+    if (data.finale && !still) {
+      ev.festT -= dt;
+      if (ev.festT <= 0) {
+        ev.festT = 1.2;
+        const s = [...builds.values()].find((v) => v.b.item === 'spire');
+        fireworks(s ? s.root.position.x : 0, s ? s.root.position.z : 0, 1);
+      }
+    }
+  }
+  function setEvent(e) {
+    const before = data.event?.key;
+    data.event = e;
+    const key = e?.key;
+    if (key === 'merchant' && !ev.merchant) {
+      ev.merchant = { g: makeMerchant(), state: 'arrive', t: 0 };
+      scene.add(ev.merchant.g);
+    } else if (key !== 'merchant' && ev.merchant && ev.merchant.state !== 'leave') {
+      ev.merchant.state = 'leave';
+      ev.merchant.t = 0;
+    }
+    if (before === 'storm' && key !== 'storm') weather.target = 0;
+    updateSky();
+    if (key === 'festival') for (const b of bots.values()) if (b.mode === 'idle' || b.mode === 'act') decide(b);
+  }
+
+  // --- Critters: birds, a boat that changes with the era, a cat and fireflies ---------------
   const critters = { birds: [], boat: null, cat: null, flies: null };
+  function boatFor(style) {
+    const g = new T.Group();
+    if (style === 'canoe') {
+      const hull = mesh(geo('canoeHull', () => new T.CylinderGeometry(0.06, 0.06, 0.5, 8)), mats.wood, 0, 0.02, 0, g);
+      hull.rotation.x = Math.PI / 2;
+      hull.scale.set(1, 1, 0.45);
+      mesh(geo('paddle', () => new T.BoxGeometry(0.01, 0.01, 0.3)), mats.woodDark, 0.06, 0.06, 0.05, g).rotation.x = 0.6;
+    } else if (style === 'steam') {
+      mesh(geo('steamHull', () => new T.BoxGeometry(0.24, 0.1, 0.62)), mats.black, 0, 0.03, 0, g);
+      mesh(geo('steamCabin', () => new T.BoxGeometry(0.18, 0.1, 0.22)), mats.white, 0, 0.13, -0.05, g);
+      mesh(geo('steamFunnel', () => new T.CylinderGeometry(0.03, 0.035, 0.16, 8)), mats.shipRed, 0, 0.24, 0.05, g);
+      g.userData.smoke = true;
+    } else if (style === 'motor') {
+      mesh(geo('motorHull', () => new T.BoxGeometry(0.18, 0.07, 0.48)), mats.white, 0, 0.02, 0, g);
+      mesh(geo('motorCabin', () => new T.BoxGeometry(0.14, 0.07, 0.14)), mats.glassBlue, 0, 0.09, -0.04, g);
+      mesh(geo('motorStripe', () => new T.BoxGeometry(0.182, 0.015, 0.482)), mats.shipRed, 0, 0.04, 0, g);
+    } else if (style === 'hover') {
+      mesh(geo('hoverBody', () => new T.CylinderGeometry(0.16, 0.2, 0.06, 20)), mats.whiteGloss, 0, 0.08, 0, g);
+      mesh(geo('hoverRing', () => new T.TorusGeometry(0.19, 0.012, 6, 24)), mats.neonCyan, 0, 0.05, 0, g).rotation.x = Math.PI / 2;
+      mesh(geo('hoverDome', () => new T.SphereGeometry(0.08, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2)), mats.glassBlue, 0, 0.11, 0, g);
+    } else {
+      mesh(geo('hull', () => new T.BoxGeometry(0.22, 0.08, 0.5)), mats.wood, 0, 0.02, 0, g);
+      mesh(geo('boatMast', () => new T.CylinderGeometry(0.008, 0.008, 0.5, 5)), mats.woodDark, 0, 0.3, 0, g);
+      const sailGeo = geo('sailTri', () => {
+        const sg = new T.BufferGeometry();
+        sg.setAttribute('position', new T.BufferAttribute(new Float32Array([0, 0.1, 0.02, 0, 0.52, 0.02, 0, 0.1, 0.24]), 3));
+        sg.computeVertexNormals();
+        return sg;
+      });
+      mesh(sailGeo, mats.sail, 0, 0, 0, g);
+    }
+    return g;
+  }
   function makeCritters() {
     critterGroup.clear();
     critters.birds = [];
@@ -1255,15 +1711,7 @@ export async function createWorld(stage, overlay, opts) {
       critterGroup.add(g);
       critters.birds.push({ g, wl, wr, r: 2 + rand() * layout.landR, h: 2.4 + rand() * 2, sp: (0.25 + rand() * 0.25) * (rand() < 0.5 ? -1 : 1), a: rand() * Math.PI * 2, ph: rand() * 10 });
     }
-    const boat = new T.Group();
-    mesh(geo('hull', () => new T.BoxGeometry(0.22, 0.08, 0.5)), mats.wood, 0, 0.02, 0, boat);
-    mesh(geo('boatMast', () => new T.CylinderGeometry(0.008, 0.008, 0.5, 5)), mats.woodDark, 0, 0.3, 0, boat);
-    const sailGeo = new T.BufferGeometry();
-    sailGeo.setAttribute('position', new T.BufferAttribute(new Float32Array([0, 0.1, 0.02, 0, 0.52, 0.02, 0, 0.1, 0.24]), 3));
-    sailGeo.computeVertexNormals();
-    mesh(sailGeo, mats.sail, 0, 0, 0, boat);
-    critterGroup.add(boat);
-    critters.boat = { g: boat, a: rand() * Math.PI * 2 };
+    makeBoat();
     const cat = new T.Group();
     const body = mesh(geo('catBody', () => new T.BoxGeometry(0.06, 0.06, 0.14)), mats.cat, 0, 0.06, 0, cat);
     mesh(geo('catHead', () => new T.BoxGeometry(0.065, 0.06, 0.06)), mats.cat, 0, 0.1, 0.085, cat);
@@ -1283,6 +1731,13 @@ export async function createWorld(stage, overlay, opts) {
     critterGroup.add(flies);
     critters.flies = { p: flies, seeds: Array.from({ length: 24 }, () => [rand() * 10, rand() * 10, rand() * 10]) };
   }
+  function makeBoat() {
+    const a = critters.boat ? critters.boat.a : rand() * Math.PI * 2;
+    if (critters.boat) critterGroup.remove(critters.boat.g);
+    const g = boatFor(look().boat);
+    critterGroup.add(g);
+    critters.boat = { g, a, puff: 0 };
+  }
   function stepCritters(t, dt) {
     for (const b of critters.birds) {
       b.g.visible = sky.day > 0.3 && weather.rain < 0.5;
@@ -1296,11 +1751,16 @@ export async function createWorld(stage, overlay, opts) {
     }
     const bt = critters.boat;
     if (bt) {
-      bt.a += dt * 0.03;
+      bt.a += dt * (look().boat === 'motor' || look().boat === 'hover' ? 0.07 : 0.03);
       const r = layout.islandR + 2.8;
-      bt.g.position.set(Math.cos(bt.a) * r, -0.5 + Math.sin(t * 1.3) * 0.03, Math.sin(bt.a) * r);
+      const hover = look().boat === 'hover';
+      bt.g.position.set(Math.cos(bt.a) * r, (hover ? -0.38 : -0.5) + Math.sin(t * 1.3) * 0.03, Math.sin(bt.a) * r);
       bt.g.rotation.y = Math.atan2(-Math.sin(bt.a), Math.cos(bt.a));
-      bt.g.rotation.z = Math.sin(t * 1.1) * 0.06;
+      bt.g.rotation.z = hover ? 0 : Math.sin(t * 1.1) * 0.06;
+      if (bt.g.userData.smoke && !still) {
+        bt.puff -= dt;
+        if (bt.puff <= 0) { bt.puff = 0.7; burst({ x: bt.g.position.x, y: bt.g.position.y + 0.35, z: bt.g.position.z, count: 6, colors: ['#5d636e', '#7a808a'], speed: 0.08, life: 2, size: 0.09, gravity: -0.3, up: 1, grow: 0.06 }); }
+      }
     }
     const c = critters.cat;
     if (c) {
@@ -1324,9 +1784,9 @@ export async function createWorld(stage, overlay, opts) {
     }
     const fl = critters.flies;
     if (fl) {
-      fl.p.material.opacity = sky.night > 0.5 ? (sky.night - 0.5) * 1.8 : 0;
+      fl.p.material.opacity = sky.night > 0.5 && season !== 'winter' ? (sky.night - 0.5) * 1.8 : 0;
       if (fl.p.material.opacity > 0) {
-        const spots = [...builds.values()].filter((v) => v.b.status === 'done' && (v.b.item === 'park' || v.b.item === 'garden'));
+        const spots = [...builds.values()].filter((v) => v.b.built && (v.b.item === 'park' || v.b.item === 'garden'));
         const arr = fl.p.geometry.attributes.position.array;
         fl.seeds.forEach((s, i) => {
           const home = spots.length ? spots[i % spots.length].root.position : { x: Math.cos(i) * layout.beachR, z: Math.sin(i) * layout.beachR };
@@ -1344,7 +1804,7 @@ export async function createWorld(stage, overlay, opts) {
     }
   }
 
-  // --- Labels, nametags and speech bubbles (HTML on top of the canvas) -------------------------
+  // --- Labels, nametags, speech bubbles and "+2 wood" pops (HTML over the canvas) ---------
   function addLabel(kind, text) {
     const e = document.createElement('div');
     e.className = kind === 'tag' ? 'nametag' : 'blabel';
@@ -1363,6 +1823,7 @@ export async function createWorld(stage, overlay, opts) {
     L.h = L.el.offsetHeight;
     L.el.hidden = !L.shown;
   }
+  const resName = (r) => (RESOURCES[r] ? RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase() : r);
   function buildLabel(v) {
     if (!v.label) {
       v.label = addLabel('build');
@@ -1378,15 +1839,33 @@ export async function createWorld(stage, overlay, opts) {
     const b = v.b;
     const item = ITEMS[b.item] || { label: b.item, emoji: '📦' };
     const bd = data.builders.get(b.ownerId);
-    const title = item.label + (b.upgradeTo ? ' → level ' + b.upgradeTo : '') + ' #' + b.id;
-    const sub = (bd ? bd.name : '') + (b.status === 'queued' ? ' · waiting for a builder' : '');
+    let title;
+    let sub;
+    let bar = null;
+    if (b.wonder) {
+      const pr = progressOf(b);
+      title = item.label + (b.status === 'done' ? '' : ' ' + Math.floor(pr * 100) + '%');
+      const short = data.econ?.wonder?.id === b.id ? data.econ.wonder.short : [];
+      sub = b.status === 'done' ? 'Wonder of the ' + ERAS[item.era].name : short.length ? 'needs ' + short.map(resName).join(', ') : 'wonder · !work wonder to help';
+      if (b.status !== 'done') bar = pr;
+    } else if (v.damaged) {
+      title = '🔧 ' + item.label + ' is broken';
+      sub = '!repair to fix it';
+    } else {
+      const to = b.upgrade ? ITEMS[b.upgrade.item] : null;
+      title = (to && to !== item ? item.label + ' → ' + to.label : item.label + (b.upgrade ? ' → level ' + b.upgrade.level : '')) + ' #' + b.id;
+      sub = b.evolving ? 'the ' + ERAS[era].name + ' is here' : bd ? bd.name : '';
+      if (b.status === 'queued') sub += b.waitingFor?.length ? ' · waiting for ' + b.waitingFor.map(resName).join(', ') : ' · waiting for a builder';
+      if (b.status === 'building') bar = progressOf(b);
+    }
     if (L.parts.title.textContent !== title) { L.parts.title.textContent = title; L.w = 0; }
     if (L.parts.sub.textContent !== sub) { L.parts.sub.textContent = sub; L.w = 0; }
     if (L.parts.em.textContent !== item.emoji) L.parts.em.textContent = item.emoji;
-    const showBar = b.status === 'building';
-    L.parts.bar.hidden = !showBar;
-    if (showBar) L.parts.fill.style.width = Math.round(progressOf(b) * 100) + '%';
-    L.el.classList.toggle('done', b.status === 'done');
+    L.parts.bar.hidden = bar == null;
+    if (bar != null) L.parts.fill.style.width = Math.round(bar * 100) + '%';
+    L.el.classList.toggle('done', b.status === 'done' && !v.damaged);
+    L.el.classList.toggle('wonder', !!b.wonder);
+    L.el.classList.toggle('broken', v.damaged);
     return L;
   }
   function showBubble(host, text, ms, emoji) {
@@ -1411,6 +1890,15 @@ export async function createWorld(stage, overlay, opts) {
     showBubble(host, text, ms);
     ghostBubbles.push(host);
   }
+  const pops = [];
+  function addPop(v, out) {
+    if (pops.length >= (low ? 4 : 8)) return;
+    const e = document.createElement('div');
+    e.className = 'pop';
+    e.textContent = Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  ');
+    overlay.append(e);
+    pops.push({ el: e, x: v.root.position.x, y: v.root.position.y + v.h + 0.1, z: v.root.position.z, t0: performance.now() });
+  }
   const v3 = new T.Vector3();
   function project(x, y, z) {
     v3.set(x, y, z).project(camera);
@@ -1421,30 +1909,41 @@ export async function createWorld(stage, overlay, opts) {
     const camDist = camera.position.distanceTo(controls.target);
     const t = performance.now();
     const fits = (r) => !placed.some((p) => r.l < p.r && r.r > p.l && r.t < p.b && r.b > p.t);
+    for (let i = pops.length - 1; i >= 0; i--) {
+      const p = pops[i];
+      const k = (t - p.t0) / 1600;
+      if (k >= 1) { p.el.remove(); pops.splice(i, 1); continue; }
+      const s = project(p.x, p.y + k * 0.35, p.z);
+      p.el.hidden = !s.vis;
+      p.el.style.opacity = String(1 - k * k);
+      p.el.style.transform = 'translate(' + s.x.toFixed(1) + 'px,' + s.y.toFixed(1) + 'px) translate(-50%,-100%)';
+    }
     const hosts = [...bots.values()].filter((b) => b.bubble).concat(ghostBubbles.filter((h) => h.bubble));
     if (critters.cat && critters.cat.host.bubble) hosts.push(critters.cat.host);
     for (const h of hosts) {
       const bb = h.bubble;
       if (t > bb.until) { removeBubble(h); continue; }
       const p = project(h.x, (h.y || 0) + (h.parts ? 0.62 : 0.35), h.z);
-      bb.el.hidden = !p.vis;
+      bb.el.hidden = !p.vis || !!lapse;
       if (!p.vis) continue;
       if (!bb.w) { bb.w = bb.el.offsetWidth; bb.h = bb.el.offsetHeight; }
       bb.el.style.transform = 'translate(' + p.x.toFixed(1) + 'px,' + p.y.toFixed(1) + 'px) translate(-50%,-100%)';
       placed.push({ l: p.x - bb.w / 2, r: p.x + bb.w / 2, t: p.y - bb.h, b: p.y });
     }
     for (let i = ghostBubbles.length - 1; i >= 0; i--) if (!ghostBubbles[i].bubble) ghostBubbles.splice(i, 1);
-    // Build labels: always for work in progress, up close for finished ones.
+    // Build labels: wonders and work in progress first, then finished ones up close.
     const target = controls.target;
     const order = [...builds.values()].map((v) => {
-      const active = v.b.status !== 'done' || t - v.doneAt < 7000;
+      const active = v.b.status !== 'done' || v.damaged || (v.doneAt > 0 && t - v.doneAt < 7000);
+      const rank = v.b.wonder ? 2 : active ? 1 : 0;
       const d = Math.hypot(v.root.position.x - target.x, v.root.position.z - target.z);
-      return { v, active, d };
-    }).sort((a, b) => (b.active - a.active) || a.d - b.d);
+      return { v, active, rank, d };
+    }).sort((a, b) => b.rank - a.rank || a.d - b.d);
     let doneShown = 0;
     for (const { v, active, d } of order) {
       const wantDone = !active && camDist < 5.5 && d < 3.2 && doneShown < 10;
-      if (!active && !wantDone) { if (v.label) setShown(v.label, false); continue; }
+      const wonderDone = v.b.wonder && v.b.status === 'done' && camDist > 5.5;
+      if (lapse || wonderDone || (!active && !wantDone && !v.b.wonder)) { if (v.label) setShown(v.label, false); continue; }
       if (!active) doneShown++;
       const L = buildLabel(v);
       const top = v.root.position.y + (v.body ? v.h * v.body.scale.y : 0.1) + 0.12;
@@ -1462,7 +1961,7 @@ export async function createWorld(stage, overlay, opts) {
       setShown(L, vis);
     }
     // Nametags under the bots.
-    const showTags = camDist < 8.5;
+    const showTags = camDist < 8.5 && !lapse;
     const near = [...bots.values()].sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
     near.forEach((b, i) => {
       const L = b.tag;
@@ -1533,7 +2032,6 @@ export async function createWorld(stage, overlay, opts) {
     const max = layout.islandR;
     if (len > max) { t.x *= max / len; t.z *= max / len; }
   }
-  // focus: a smooth flight of the camera to a point (or a bot it then follows).
   let focus = null;
   function flyTo(x, z, want, dur, track) {
     const offset = camera.position.clone().sub(controls.target);
@@ -1564,7 +2062,7 @@ export async function createWorld(stage, overlay, opts) {
   // did, and otherwise slowly tours the island.
   const tour = { next: 0, i: 0, track: null, lastEvent: 0, prio: 0 };
   function interest(prio, x, z, want, track, hold) {
-    if (!opts.stream) return;
+    if (!opts.stream || lapse) return;
     const t = performance.now();
     if (t - tour.lastEvent < 6000 && prio < tour.prio) return;
     tour.lastEvent = t;
@@ -1574,7 +2072,7 @@ export async function createWorld(stage, overlay, opts) {
     flyTo(x, z, want, 1400, track);
   }
   function stepTour() {
-    if (!opts.stream || still) return;
+    if (!opts.stream || still || lapse) return;
     const t = performance.now();
     controls.autoRotate = !tour.track;
     if (t < tour.next) return;
@@ -1582,15 +2080,49 @@ export async function createWorld(stage, overlay, opts) {
     tour.prio = 0;
     tour.track = null;
     tour.i++;
-    const busy = [...builds.values()].filter((v) => v.b.status === 'building');
-    const done = [...builds.values()].filter((v) => v.b.status === 'done');
-    const walkers = [...bots.values()].filter((b) => b.mode === 'walk' || b.mode === 'work' || b.mode === 'act');
-    const step = tour.i % 4;
+    const all = [...builds.values()];
+    const busy = all.filter((v) => v.b.status === 'building' && !v.b.wonder);
+    const done = all.filter((v) => v.b.built && !v.b.wonder);
+    const walkers = [...bots.values()].filter((b) => b.mode === 'walk' || b.mode === 'work' || b.mode === 'job' || b.mode === 'act');
+    const wonder = all.find((v) => v.b.wonder && v.b.item === ERAS[era].wonder);
+    const step = tour.i % 5;
     if (step === 0 || (!busy.length && !done.length && !walkers.length)) flyTo(0, 0, fitDistance(), 2600);
     else if (step === 1 && busy.length) { const v = pick(busy); flyTo(v.root.position.x, v.root.position.z, 6.5, 2400); }
     else if (step === 2 && walkers.length) { const b = pick(walkers); flyTo(b.x, b.z, 5.5, 2400, b); }
-    else if (done.length) { const v = pick(done.slice(-12)); flyTo(v.root.position.x, v.root.position.z, 6, 2400); }
+    else if (step === 3 && wonder) flyTo(wonder.root.position.x * 0.6, wonder.root.position.z * 0.6, 5.5, 2400);
+    else if (done.length) { const v = pick(done.slice(-15)); flyTo(v.root.position.x, v.root.position.z, 6, 2400); }
     else flyTo(0, 0, fitDistance() * 0.8, 2600);
+  }
+
+  // --- Timelapse: the island growing from its first hut to now -------------------------------
+  let lapse = null;
+  function startTimelapse(info) {
+    if (lapse || !builds.size) return;
+    lapse = { from: info.createdAt, to: now(), start: performance.now(), dur: (info.seconds || 36) * 1000, rotate: controls.autoRotateSpeed };
+    focus = null;
+    tour.track = null;
+    flyTo(0, 0, fitDistance() * 1.02, 1500);
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.6;
+  }
+  function stepTimelapse() {
+    if (!lapse) return;
+    const k = Math.min(1, (performance.now() - lapse.start) / lapse.dur);
+    const at = lapse.from + (lapse.to - lapse.from) * Math.min(1, k * 1.08);
+    for (const v of builds.values()) {
+      const when = v.b.wonder ? v.b.requestedAt : v.b.doneAt || v.b.startedAt || v.b.requestedAt || 0;
+      v.root.visible = when <= at;
+    }
+    for (const b of bots.values()) b.parts.g.visible = false;
+    if (opts.onTimelapse) opts.onTimelapse({ at, k, from: lapse.from });
+    if (k >= 1) {
+      for (const v of builds.values()) v.root.visible = true;
+      for (const b of bots.values()) b.parts.g.visible = true;
+      controls.autoRotateSpeed = lapse.rotate;
+      lapse = null;
+      tour.next = performance.now() + 4000;
+      if (opts.onTimelapse) opts.onTimelapse(null);
+    }
   }
 
   // --- Pointer: tap bots, buildings, the cat and the ship (not in stream mode) -------------------
@@ -1659,6 +2191,16 @@ export async function createWorld(stage, overlay, opts) {
     return Math.max(0.08, Math.min(1, 1 - (d - 2) / 12));
   }
 
+  // --- Eras -----------------------------------------------------------------------------------
+  function applyEra(e) {
+    era = Math.max(0, Math.min(ERAS.length - 1, e || 0));
+    mats.path.color.set(look().path);
+    mats.bot.color.set(look().bot);
+    rebuildLamps();
+    if (world) makeBoat();
+    updateSky();
+  }
+
   // --- Main loop --------------------------------------------------------------------------------
   let skyTimer = 0;
   let frame = 0;
@@ -1668,6 +2210,7 @@ export async function createWorld(stage, overlay, opts) {
     const dt = Math.min(clock.getDelta(), 0.1);
     const t = clock.elapsedTime;
     frame++;
+    stepTimelapse();
     stepTour();
     stepFocus(dt);
     controls.update();
@@ -1675,7 +2218,10 @@ export async function createWorld(stage, overlay, opts) {
     if (skyTimer <= 0) { skyTimer = 4; updateSky(); }
     updateWeather(dt);
     for (const b of [...bots.values()]) stepBot(b, t, dt);
+    for (const p of [...porters]) stepBot(p, t, dt);
     stepBuilds(t, dt);
+    stepTrain(dt);
+    stepEvents(t, dt);
     stepCritters(t, dt);
     stepParticles(dt);
     if (frame % 3 === 0) renderer.shadowMap.needsUpdate = true;
@@ -1688,19 +2234,26 @@ export async function createWorld(stage, overlay, opts) {
   resize();
   new ResizeObserver(resize).observe(stage);
   if (!opts.stream) bindPointer();
-  buildIsland(2);
+  buildIsland(3);
   requestAnimationFrame(loop);
 
   function afterBuildsChanged() {
     ensureLand();
     refreshTiles();
     refreshPois();
+    syncTrain();
   }
 
   return {
     // The whole world at once (first connect, or after a reconnect).
-    load(list, builderList) {
+    load(list, builderList, extra = {}) {
+      setGeo(extra.geo);
       data.builders = new Map(builderList.map((b) => [b.id, b]));
+      data.jobs = new Map(Object.entries(extra.jobs || {}));
+      data.econ = extra.econ || data.econ;
+      if (extra.era != null && extra.era !== era) applyEra(extra.era);
+      data.finale = !!extra.finished;
+      setEvent(extra.event || null);
       const ids = new Set(list.map((b) => b.id));
       for (const id of [...builds.keys()]) if (!ids.has(id)) removeBuild(id, false);
       for (const b of list) syncBuild(b, false);
@@ -1712,17 +2265,19 @@ export async function createWorld(stage, overlay, opts) {
       const { v, prev, finished } = syncBuild(b, true);
       afterBuildsChanged();
       syncBots(null);
-      const bot = bots.get(b.ownerId);
-      if (bot && bot.mode !== 'arrive' && bot.mode !== 'walk' && !(bot.mode === 'act' && bot.act === 'party')) decide(bot);
-      else if (bot && bot.mode === 'walk' && (!prev || prev.status !== b.status)) decide(bot);
+      const bot = b.ownerId ? bots.get(b.ownerId) : null;
+      if (bot && bot.mode !== 'arrive' && !(bot.mode === 'act' && bot.act === 'party')) {
+        if (bot.mode !== 'walk' || !prev || prev.status !== b.status) decide(bot);
+      }
       const p = v.root.position;
       if (finished) {
         if (bot && Math.hypot(bot.x - p.x, bot.z - p.z) < 1) { party(bot); showBubble(bot, pick(LINES.done), 2500); }
-        interest(3, p.x, p.z, 6, null, 8000);
-      } else if (b.status === 'building' && (!prev || prev.status !== 'building')) {
+        interest(b.wonder ? 4 : 3, p.x, p.z, b.wonder ? 5 : 6, null, b.wonder ? 12000 : 8000);
+      } else if (b.status === 'building' && (!prev || prev.status !== 'building') && !b.wonder && !b.evolving) {
         if (bot) interest(2, bot.x, bot.z, 6.5, bot, 9000);
         else interest(2, p.x, p.z, 6.5, null, 9000);
       }
+      if (b.damaged && prev && !prev.damaged) interest(3, p.x, p.z, 5, null, 6000);
     },
     removeBuild(id) {
       removeBuild(id, true);
@@ -1734,6 +2289,42 @@ export async function createWorld(stage, overlay, opts) {
       for (const v of builds.values()) if (v.b.ownerId === builder.id && v.label) v.label.w = 0;
       if (joined) interest(1, 0, 0, 7, null, 6000);
     },
+    setJob(userId, job) {
+      if (job) data.jobs.set(userId, job);
+      else data.jobs.delete(userId);
+      syncBots(null);
+      const b = bots.get(userId);
+      if (b && b.mode !== 'arrive' && b.mode !== 'walk') decide(b);
+      else if (b && b.mode === 'walk' && job) decide(b);
+    },
+    setEconomy(econ) {
+      data.econ = econ;
+    },
+    produce(list) {
+      const camDist = camera.position.distanceTo(controls.target);
+      for (const p of list) {
+        const v = builds.get(p.id);
+        if (!v) continue;
+        const res = Object.keys(p.out)[0];
+        if (rand() < 0.22) spawnPorter(v, res);
+        const d = Math.hypot(v.root.position.x - controls.target.x, v.root.position.z - controls.target.z);
+        if ((camDist < 10 && d < 6) || rand() < 0.06) addPop(v, p.out);
+      }
+    },
+    setEvent,
+    eraChanged(e) {
+      applyEra(e);
+      fireworks(0, 0, 8);
+      for (const b of bots.values()) if (b.mode !== 'arrive' && b.mode !== 'walk' && b.mode !== 'work') party(b);
+      interest(9, 0, 0, fitDistance(), null, 14000);
+      if (opts.stream) setTimeout(() => startTimelapse({ createdAt: opts.createdAt ? opts.createdAt() : now() - DAY }), 18000);
+    },
+    finale() {
+      data.finale = true;
+      const s = [...builds.values()].find((v) => v.b.item === 'spire');
+      if (s) interest(10, s.root.position.x, s.root.position.z, 6, null, 30000);
+    },
+    timelapse: startTimelapse,
     dance(id) {
       const b = bots.get(id);
       if (!b || b.mode === 'arrive') return;
@@ -1751,9 +2342,13 @@ export async function createWorld(stage, overlay, opts) {
     // For tests and curious people: what every bot and build is doing.
     debug() {
       return {
-        bots: [...bots.values()].map((b) => ({ id: b.id, name: b.builder.name, mode: b.mode, act: b.act, x: +b.x.toFixed(2), z: +b.z.toFixed(2) })),
-        builds: [...builds.values()].map((v) => ({ id: v.id, item: v.b.item, status: v.b.status, level: v.level, scaleY: v.body ? +v.body.scale.y.toFixed(2) : 0 })),
+        era,
+        bots: [...bots.values()].map((b) => ({ id: b.id, name: b.builder.name, mode: b.mode, act: b.act, carrying: b.carrying, x: +b.x.toFixed(2), z: +b.z.toFixed(2) })),
+        porters: porters.size,
+        builds: [...builds.values()].map((v) => ({ id: v.id, item: v.b.item, status: v.b.status, key: v.key, scaleY: v.body ? +v.body.scale.y.toFixed(2) : 0 })),
         landRing: layout.landRing,
+        train: train ? train.style : null,
+        season,
       };
     },
   };

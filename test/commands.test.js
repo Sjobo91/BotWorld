@@ -8,21 +8,39 @@ test('plain chat is not a command', () => {
   assert.equal(parseCommand('!unknowncommand'), null);
 });
 
-test('build understands items, colors and filler words', () => {
-  assert.deepEqual(parseCommand('!build house'), { type: 'build', item: 'house', color: null, raw: '' });
-  assert.deepEqual(parseCommand('!build a red house'), { type: 'build', item: 'house', color: 'red', raw: '' });
-  assert.deepEqual(parseCommand('!BUILD Tower BLUE'), { type: 'build', item: 'tower', color: 'blue', raw: '' });
+test('build understands items, colors, filler words and "near"', () => {
+  assert.deepEqual(parseCommand('!build house'), { type: 'build', item: 'house', color: null, near: null, raw: '' });
+  assert.deepEqual(parseCommand('!build a red hut'), { type: 'build', item: 'hut', color: 'red', near: null, raw: '' });
+  assert.equal(parseCommand('!BUILD Woodcutter BLUE').color, 'blue');
   assert.equal(parseCommand('!b castle').item, 'tower');
-  assert.equal(parseCommand('!build some trees please').item, 'park');
-  assert.equal(parseCommand('!build houses').item, 'house');
+  assert.equal(parseCommand('!build some factories please').item, 'factory');
+  assert.equal(parseCommand('!build huts').item, 'hut');
   assert.equal(parseCommand('!build grey statue!!').color, 'gray');
+  const near = parseCommand('!build a house next to the fountain');
+  assert.equal(near.item, 'house');
+  assert.equal(near.near, 'fountain');
+});
+
+test('wonders cannot be built by hand', () => {
+  assert.equal(parseCommand('!build stonecircle').item, null);
 });
 
 test('build with an unknown item keeps what it did not understand', () => {
   const c = parseCommand('!build a spaceship');
-  assert.equal(c.type, 'build');
   assert.equal(c.item, null);
   assert.equal(c.raw, 'spaceship');
+});
+
+test('work, repair and vote', () => {
+  assert.deepEqual(parseCommand('!work'), { type: 'work', target: null, raw: '' });
+  assert.equal(parseCommand('!work wood').target, 'wood');
+  assert.equal(parseCommand('!work logs').target, 'wood');
+  assert.equal(parseCommand('!work wonder').target, 'wonder');
+  assert.equal(parseCommand('!work banana').target, null);
+  assert.deepEqual(parseCommand('!repair'), { type: 'repair' });
+  assert.deepEqual(parseCommand('!vote 2'), { type: 'vote', option: 2 });
+  assert.deepEqual(parseCommand('!vote 9'), { type: 'vote', option: null });
+  assert.deepEqual(parseCommand('!1'), { type: 'vote', option: 1 });
 });
 
 test('other commands', () => {
@@ -31,11 +49,20 @@ test('other commands', () => {
   assert.equal(parseCommand('!hat helmet').hat, 'hardhat');
   assert.equal(parseCommand('!hat sombrero').hat, null);
   assert.deepEqual(parseCommand('!dance'), { type: 'dance' });
+  assert.deepEqual(parseCommand('!me'), { type: 'me' });
   assert.deepEqual(parseCommand('!help'), { type: 'help' });
+  assert.deepEqual(parseCommand('!demolish #7'), { type: 'demolish', id: 7 });
   assert.deepEqual(parseCommand('!remove #12'), { type: 'remove', id: 12 });
   assert.deepEqual(parseCommand('!remove x'), { type: 'remove', id: null });
+  assert.deepEqual(parseCommand('!event storm'), { type: 'event', key: 'storm' });
+  assert.deepEqual(parseCommand('!event tallTrees'), { type: 'event', key: 'tallTrees' });
 });
 
 test('very long lines are ignored', () => {
   assert.equal(parseCommand('!build ' + 'house '.repeat(60)), null);
+});
+
+test('!vote start is its own command', () => {
+  assert.deepEqual(parseCommand('!vote start'), { type: 'vote', option: null, start: true });
+  assert.deepEqual(parseCommand('!vote 2'), { type: 'vote', option: 2 });
 });

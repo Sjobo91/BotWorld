@@ -3,3 +3,4 @@ data/
 botworld.config.json
 *.log
 .DS_Store
+data-*/

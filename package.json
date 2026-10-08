@@ -10,9 +10,13 @@
   "scripts": {
     "start": "node server/index.js",
     "demo": "node server/index.js --simulate",
-    "test": "node --test"
+    "test": "node --test",
+    "balance": "node scripts/balance.js"
   },
   "dependencies": {
     "three": "0.160.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "0.132.1"
   }
 }

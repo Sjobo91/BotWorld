@@ -27,52 +27,77 @@
     <p class="pill" id="subtitle" data-live="0"><span class="dot"></span><span id="subtitleText">Connecting…</span></p>
   </header>
 
-  <ul class="stats" id="stats" aria-label="World counters"></ul>
+  <ul class="res" id="res" aria-label="Goods in storage"></ul>
+
+  <div class="center-top" id="centerTop">
+    <section class="panel vote" id="vote" hidden aria-label="Chat vote">
+      <h2><span>🗳️ Chat vote!</span> <span class="vote-time" id="voteTime"></span></h2>
+      <ol class="vote-list" id="voteList"></ol>
+    </section>
+    <div class="eventbar" id="eventBar" hidden role="status">
+      <span class="em" id="eventEmoji"></span>
+      <span class="ev-main"><b id="eventName"></b><small id="eventText"></small></span>
+      <span class="ev-time" id="eventTime"></span>
+    </div>
+  </div>
 
   <section class="ticker" id="ticker" aria-live="polite" aria-label="What just happened"></section>
 
-  <section class="panel howto" id="howto" aria-label="How to build">
-    <h2>Build something!</h2>
-    <p class="big">Type in chat <code>!build house</code></p>
+  <section class="panel howto" id="howto" aria-label="How to play">
+    <h2>Build with chat</h2>
+    <p class="big">Type <code>!build house</code></p>
     <ul class="items" id="items"></ul>
-    <p class="label">Add a color <code>!build blue tower</code></p>
-    <ul class="colors" id="colors"></ul>
-    <p class="more"><code>!upgrade</code> grow it &nbsp; <code>!hat tophat</code> dress up &nbsp; <code>!dance</code> party</p>
+    <p class="more" id="howMore"><code>!work wood</code> help make goods &nbsp;<code>!work wonder</code> haul to the wonder<br><code>!upgrade</code> <code>!vote 1</code> <code>!me</code> <code>!hat</code> <code>!dance</code> &nbsp;<span id="howColor"><br>add a color: <code>!build red house</code></span></p>
   </section>
 
-  <section class="panel queue" id="queue" aria-label="Building now">
-    <h2>Building now</h2>
-    <ol class="rows" id="queueList"></ol>
-    <p class="empty" id="queueEmpty">Nobody is building. Type <code>!build house</code> to start!</p>
-  </section>
+  <aside class="side" id="side">
+    <section class="panel era" id="era" aria-label="Era progress">
+      <div class="era-head">
+        <span class="em era-emoji" id="eraEmoji">🪨</span>
+        <div class="era-title"><h2 id="eraName">Stone Age</h2><p id="eraTag">Sticks and stones</p></div>
+      </div>
+      <p class="era-next" id="eraNext"></p>
+      <ul class="goals" id="goals"></ul>
+      <ul class="town" id="town"></ul>
+      <ul class="needs" id="needs"></ul>
+    </section>
+    <section class="panel queue" id="queue" aria-label="Building now">
+      <h2>Building now</h2>
+      <ol class="rows" id="queueList"></ol>
+      <p class="empty" id="queueEmpty">Nobody is building. Type <code>!build house</code> to start!</p>
+    </section>
+    <section class="panel leaders" id="leaders" aria-label="Top builders this week">
+      <h2>🏆 Top builders this week</h2>
+      <ol class="lead-list" id="leadList"></ol>
+    </section>
+  </aside>
 
   <div class="cta" id="emptyCta" hidden>
     <strong>A brand new island</strong>
-    <span>Type <code>!build house</code> in chat and your bot lands to build the very first house.</span>
+    <span>It all starts with sticks and stones. Type <code>!build house</code> in chat and your bot lands to build the very first hut.</span>
   </div>
+
+  <section class="mecard" id="meCard" hidden aria-live="polite"></section>
+  <section class="banner" id="banner" hidden aria-live="polite"></section>
+  <div class="lapse" id="lapse" hidden><b>⏪ Timelapse</b><span id="lapseText"></span><span class="bar"><span id="lapseFill"></span></span></div>
+  <div class="gazette" id="gazette" hidden><span class="gz-tag">📰 BotWorld Gazette</span><span class="gz-text" id="gazetteText"></span></div>
 
   <form class="devbar" id="devbar" hidden autocomplete="off">
     <div class="devrow">
       <span class="devmode" id="devMode"></span>
       <a href="/?stream=1" class="devlink">Stream view</a>
+      <a href="/gallery.html" class="devlink">Gallery</a>
       <button type="button" class="devbtn" id="soundBtn" aria-pressed="false">🔈 Sound off</button>
     </div>
     <div class="devrow">
       <label class="sr" for="devUser">Name</label>
       <input id="devUser" value="tester" maxlength="25" size="9" aria-label="Pretend to be">
       <label class="sr" for="devText">Command</label>
-      <input id="devText" placeholder="!build red house" maxlength="200" aria-label="Chat message">
+      <input id="devText" placeholder="!build hut" maxlength="200" aria-label="Chat message">
       <label class="devcheck"><input type="checkbox" id="devMod"> mod</label>
       <button class="devbtn primary" type="submit">Send</button>
     </div>
-    <div class="devrow quick">
-      <button type="button" class="devbtn" data-cmd="!build house">!build house</button>
-      <button type="button" class="devbtn" data-cmd="!build red tower">!build red tower</button>
-      <button type="button" class="devbtn" data-cmd="!build windmill">!build windmill</button>
-      <button type="button" class="devbtn" data-cmd="!upgrade">!upgrade</button>
-      <button type="button" class="devbtn" data-cmd="!hat tophat">!hat tophat</button>
-      <button type="button" class="devbtn" data-cmd="!dance">!dance</button>
-    </div>
+    <div class="devrow quick" id="quick"></div>
     <p class="devresult" id="devResult" aria-live="polite"></p>
   </form>
 </div>

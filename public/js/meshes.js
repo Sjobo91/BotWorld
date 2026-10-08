@@ -6,6 +6,7 @@ let T = null;
 export const mats = {};
 const geos = {};
 
+export const three = () => T;
 export function initMeshes(three) {
   T = three;
   setupMaterials();
@@ -102,8 +103,53 @@ function setupMaterials() {
     beam: new T.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide }),
     flowers: [std(0xff6b8b), std(0xffd23f), std(0xb07cff), std(0xff9f43), std(0xffffff)],
     starTex: starTexture(),
-    sign: new T.MeshBasicMaterial({ map: signTexture('SHOP') }),
+    sign: new T.MeshBasicMaterial({ map: signTexture('MARKET') }),
+    straw: std(0xd2ac5f),
+    mud: std(0xa47a52),
+    brick: std(0xb5583b),
+    brickDark: std(0x8e4330),
+    timber: std(0x5a3d28),
+    plaster: std(0xf1e7d0),
+    slate: std(0x56606e),
+    roofTile: std(0xb4553a),
+    concrete: std(0xc9cdd2),
+    concreteDark: std(0x8d939b),
+    steel: std(0x8e99a6, { roughness: 0.45, metalness: 0.5 }),
+    darkMetal: std(0x4a525e, { roughness: 0.5, metalness: 0.4 }),
+    coal: std(0x2b2b2e),
+    hay: std(0xe2c35a),
+    berryRed: std(0xc0304a),
+    berryBlue: std(0x4a5bd0),
+    furnace: std(0xff7a2e, { emissive: 0xff5a1e, emissiveIntensity: 1.2 }),
+    panelBlue: std(0x1d3f8f, { roughness: 0.3, metalness: 0.5 }),
+    whiteGloss: new T.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.25, metalness: 0.1 }),
+    glassBlue: new T.MeshStandardMaterial({ color: 0x7fb2e0, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.8 }),
+    neonCyan: new T.MeshStandardMaterial({ color: 0x5ef2ff, emissive: 0x3fe0ff, emissiveIntensity: 1.4, roughness: 0.3 }),
+    neonPink: new T.MeshStandardMaterial({ color: 0xff7ad9, emissive: 0xff4fc8, emissiveIntensity: 1.2, roughness: 0.3 }),
+    holo: new T.MeshBasicMaterial({ color: 0x7ffcff, transparent: true, opacity: 0.45, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide }),
+    redLight: new T.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff2020, emissiveIntensity: 1.5 }),
+    clockFace: std(0xfaf6ea),
+    rail: std(0x6b5a4a),
   });
+  mats.towerGlass = towerGlassMat();
+}
+// Glass and steel with a grid of windows; some light up at night.
+function towerGlassMat() {
+  const r = rng(99);
+  const draw = (lit) => (g) => {
+    g.fillStyle = lit ? '#000000' : '#5d7fa6';
+    g.fillRect(0, 0, 64, 128);
+    for (let y = 4; y < 128; y += 10) {
+      for (let x = 4; x < 64; x += 10) {
+        const on = r() < 0.45;
+        g.fillStyle = lit ? (on ? '#ffd58a' : '#000000') : on ? '#a9c6e6' : '#7e9dc2';
+        g.fillRect(x, y, 6, 6);
+      }
+    }
+  };
+  const map = canvasTex(64, 128, draw(false));
+  const emissiveMap = canvasTex(64, 128, draw(true));
+  return new T.MeshStandardMaterial({ map, emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.25, metalness: 0.4 });
 }
 export function glowTexture() {
   return canvasTex(64, 64, (g) => {
@@ -128,7 +174,7 @@ function starTexture() {
     g.fill();
   });
 }
-function signTexture(text) {
+export function signTexture(text) {
   return canvasTex(128, 40, (g) => {
     g.fillStyle = '#2b3a55';
     g.fillRect(0, 0, 128, 40);
@@ -140,7 +186,7 @@ function signTexture(text) {
   });
 }
 const stripeMats = {};
-function stripeMat(color) {
+export function stripeMat(color) {
   if (!stripeMats[color]) {
     const map = canvasTex(64, 64, (g) => {
       for (let i = 0; i < 8; i++) {
@@ -154,8 +200,8 @@ function stripeMat(color) {
 }
 
 // --- Small pieces --------------------------------------------------------------
-const oct = (rt, rb, h) => new T.CylinderGeometry(rt, rb, h, 8, 1, false, Math.PI / 8);
-function addWindows(g, radius, y, count, skipFront) {
+export const oct = (rt, rb, h) => new T.CylinderGeometry(rt, rb, h, 8, 1, false, Math.PI / 8);
+export function addWindows(g, radius, y, count, skipFront) {
   const ap = radius * Math.cos(Math.PI / 8);
   for (let i = 0; i < 8 && count > 0; i++) {
     if (skipFront && i === 0) continue;
@@ -195,7 +241,7 @@ export function lampMesh() {
   g.add(glow);
   return g;
 }
-function flowerBed(g, r, n, radius, fixed) {
+export function flowerBed(g, r, n, radius, fixed) {
   for (let i = 0; i < n; i++) {
     const a = r() * Math.PI * 2;
     const rr = Math.sqrt(r()) * radius;
@@ -203,250 +249,11 @@ function flowerBed(g, r, n, radius, fixed) {
     mesh(geo('bloom', () => new T.SphereGeometry(0.025, 6, 5)), fixed || mats.flowers[i % mats.flowers.length], Math.cos(a) * rr, 0.12, Math.sin(a) * rr, g);
   }
 }
-function crenellations(g, radius, y, m) {
+export function crenellations(g, radius, y, m) {
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
     mesh(geo('cren', () => new T.BoxGeometry(0.05, 0.05, 0.05)), m, Math.sin(a) * radius, y, Math.cos(a) * radius, g).rotation.y = a;
   }
-}
-
-// --- Buildings -------------------------------------------------------------------
-// Returns { g, h, anim } where h is about how tall it is (for scaffolding and
-// labels) and anim lists parts that move (windmill blades, flames, beams).
-export function buildingMesh(b, level) {
-  const g = new T.Group();
-  const anim = [];
-  const color = colorOf(b);
-  const trim = trimMat(color);
-  const r = rng(hashStr('b' + b.id));
-  const lv = level || b.level || 1;
-  const part = (name, make, m, x, y, z) => mesh(geo(name, make), m, x, y, z, g);
-  let h = 0.4;
-  switch (b.item) {
-    case 'house': {
-      const dome = b.color ? trim : mats.domes[Math.floor(r() * mats.domes.length)];
-      if (lv === 1) {
-        part('hutBase', () => new T.BoxGeometry(0.34, 0.24, 0.3), mats.wall, 0, 0.12, 0);
-        const roof = part('hutRoof', () => new T.CylinderGeometry(0.2, 0.2, 0.38, 3), b.color ? trim : mats.roof, 0, 0.3, 0);
-        roof.rotation.x = -Math.PI / 2;
-        roof.scale.set(1, 1, 0.6);
-        part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.156);
-        part('band', () => new T.BoxGeometry(0.345, 0.03, 0.305), trim, 0, 0.2, 0);
-        part('hutWin', () => new T.BoxGeometry(0.014, 0.06, 0.075), mats.window, 0.172, 0.13, 0);
-        h = 0.42;
-      } else if (lv === 2) {
-        part('o2', () => oct(0.25, 0.26, 0.24), mats.wall, 0, 0.12, 0);
-        part('o2band', () => oct(0.255, 0.255, 0.035), trim, 0, 0.215, 0);
-        part('o2roof', () => oct(0.19, 0.25, 0.07), mats.roof, 0, 0.275, 0);
-        part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.245);
-        addWindows(g, 0.25, 0.15, 4, true);
-        h = 0.36;
-      } else if (lv === 3) {
-        part('o3', () => oct(0.28, 0.3, 0.27), mats.wall, 0, 0.135, 0);
-        part('o3band', () => oct(0.285, 0.285, 0.035), trim, 0, 0.245, 0);
-        part('dome3', () => new T.SphereGeometry(0.235, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), dome, 0, 0.265, 0);
-        part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.282);
-        addWindows(g, 0.28, 0.17, 6, true);
-        part('mast', () => new T.CylinderGeometry(0.008, 0.008, 0.26, 5), mats.metal, 0.13, 0.58, -0.04);
-        part('mastTip', () => new T.SphereGeometry(0.02, 8, 6), trim, 0.13, 0.72, -0.04);
-        h = 0.55;
-      } else {
-        part('o4', () => oct(0.32, 0.34, 0.28), mats.wall, 0, 0.14, 0);
-        part('o4band', () => oct(0.325, 0.325, 0.04), trim, 0, 0.255, 0);
-        part('o4up', () => oct(0.25, 0.29, 0.17), mats.wall2, 0, 0.36, 0);
-        part('dome4', () => new T.SphereGeometry(0.2, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), dome, 0, 0.445, 0);
-        part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.318);
-        addWindows(g, 0.32, 0.17, 7, true);
-        addWindows(g, 0.27, 0.37, 4, false);
-        part('mast4', () => new T.CylinderGeometry(0.01, 0.012, 0.42, 5), mats.metal, -0.16, 0.74, 0.05);
-        part('dish', () => new T.ConeGeometry(0.07, 0.04, 10, 1, true), mats.metal, -0.16, 0.95, 0.05).rotation.x = Math.PI * 0.8;
-        h = 0.7;
-      }
-      break;
-    }
-    case 'tower': {
-      const floors = 1 + lv;
-      const fh = 0.2;
-      for (let i = 0; i < floors; i++) {
-        const rad = 0.2 - i * 0.012;
-        part('towerFloor' + i, () => oct(rad, rad + 0.012, fh), i % 2 ? mats.stoneDark : mats.stone, 0, fh / 2 + i * fh, 0);
-        if (i > 0) addWindows(g, rad, i * fh + fh / 2, 3, false);
-      }
-      const top = floors * fh;
-      part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.195);
-      if (lv >= 3) {
-        part('towerRoof', () => new T.ConeGeometry(0.2, 0.3, 8), trim, 0, top + 0.15, 0);
-        part('flagPole', () => new T.CylinderGeometry(0.006, 0.006, 0.18, 4), mats.metal, 0, top + 0.38, 0);
-        anim.push({ kind: 'flag', o: part('flag', () => new T.BoxGeometry(0.1, 0.06, 0.005), trim, 0.05, top + 0.43, 0) });
-        h = top + 0.45;
-      } else {
-        part('towerTop', () => oct(0.21, 0.19, 0.04), mats.stoneDark, 0, top + 0.02, 0);
-        crenellations(g, 0.18, top + 0.065, mats.stone);
-        part('flagPole', () => new T.CylinderGeometry(0.006, 0.006, 0.22, 4), mats.metal, 0, top + 0.11, 0);
-        anim.push({ kind: 'flag', o: part('flag', () => new T.BoxGeometry(0.12, 0.07, 0.005), trim, 0.06, top + 0.18, 0) });
-        h = top + 0.22;
-      }
-      break;
-    }
-    case 'shop': {
-      part('shopBase', () => new T.BoxGeometry(0.56, 0.34, 0.4), mats.wall, 0, 0.17, 0);
-      part('shopRoof', () => new T.BoxGeometry(0.62, 0.05, 0.46), mats.roof, 0, 0.365, 0);
-      const aw = part('awning', () => new T.BoxGeometry(0.6, 0.02, 0.24), stripeMat(color), 0, 0.3, 0.3);
-      aw.rotation.x = 0.35;
-      part('counter', () => new T.BoxGeometry(0.42, 0.12, 0.08), mats.wood, 0, 0.06, 0.25);
-      part('shopSign', () => new T.PlaneGeometry(0.28, 0.085), mats.sign, 0, 0.42, 0.232);
-      part('shopWinL', () => new T.BoxGeometry(0.12, 0.1, 0.012), mats.window, -0.17, 0.19, 0.201);
-      part('shopWinR', () => new T.BoxGeometry(0.12, 0.1, 0.012), mats.window, 0.17, 0.19, 0.201);
-      h = 0.45;
-      break;
-    }
-    case 'farm': {
-      part('field', () => new T.BoxGeometry(0.62, 0.03, 0.42), mats.soil, 0.04, 0.015, 0.06);
-      for (let i = 0; i < 5; i++) {
-        const row = part('cropRow', () => new T.BoxGeometry(0.56, 0.05, 0.04), i % 2 ? mats.crop : mats.crop2, 0.04, 0.05, -0.1 + i * 0.08);
-        row.scale.y = 0.8 + r() * 0.4;
-      }
-      const barn = new T.Group();
-      barn.position.set(-0.22, 0, -0.24);
-      barn.rotation.y = 0.5;
-      mesh(geo('barnBody', () => new T.BoxGeometry(0.2, 0.16, 0.18)), b.color ? trim : mats.shipRed, 0, 0.08, 0, barn);
-      const br = mesh(geo('barnRoof', () => new T.CylinderGeometry(0.12, 0.12, 0.19, 3)), mats.roof, 0, 0.2, 0, barn);
-      br.rotation.x = -Math.PI / 2;
-      br.scale.set(1, 1, 0.55);
-      mesh(geo('barnDoor', () => new T.BoxGeometry(0.07, 0.1, 0.01)), mats.white, 0, 0.05, 0.091, barn);
-      g.add(barn);
-      h = 0.3;
-      break;
-    }
-    case 'windmill': {
-      part('millBody', () => oct(0.12, 0.2, 0.5), mats.wall, 0, 0.25, 0);
-      part('millCap', () => new T.ConeGeometry(0.15, 0.16, 8), trim, 0, 0.58, 0);
-      part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.19);
-      addWindows(g, 0.15, 0.32, 2, true);
-      const blades = new T.Group();
-      blades.position.set(0, 0.5, 0.17);
-      mesh(geo('hub', () => new T.CylinderGeometry(0.025, 0.025, 0.04, 8)), mats.woodDark, 0, 0, 0, blades).rotation.x = Math.PI / 2;
-      for (let i = 0; i < 4; i++) {
-        const arm = new T.Group();
-        arm.rotation.z = (i * Math.PI) / 2;
-        mesh(geo('bladeArm', () => new T.BoxGeometry(0.016, 0.34, 0.01)), mats.woodDark, 0, 0.18, 0.01, arm);
-        mesh(geo('bladeSail', () => new T.BoxGeometry(0.07, 0.24, 0.006)), mats.sail, 0.042, 0.21, 0.016, arm);
-        blades.add(arm);
-      }
-      g.add(blades);
-      anim.push({ kind: 'spin', o: blades, speed: 0.8 + r() * 0.4 });
-      h = 0.8;
-      break;
-    }
-    case 'lighthouse': {
-      const bands = [[0.17, 0.2, 0.2], [0.145, 0.17, 0.2], [0.125, 0.145, 0.2]];
-      bands.forEach(([rt, rb, hh], i) => part('lhBand' + i, () => new T.CylinderGeometry(rt, rb, hh, 12), i % 2 ? mats.white : trim, 0, hh / 2 + i * hh, 0));
-      part('lhGallery', () => new T.CylinderGeometry(0.17, 0.17, 0.025, 12), mats.black, 0, 0.61, 0);
-      part('lhGlass', () => new T.CylinderGeometry(0.09, 0.09, 0.1, 10), mats.glass, 0, 0.67, 0);
-      part('lhLamp', () => new T.SphereGeometry(0.05, 10, 8), mats.lamp, 0, 0.67, 0);
-      part('lhRoof', () => new T.ConeGeometry(0.12, 0.1, 10), trim, 0, 0.77, 0);
-      part('door', () => new T.BoxGeometry(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.2);
-      const glow = new T.Sprite(mats.glow);
-      glow.position.set(0, 0.67, 0);
-      glow.scale.set(1.1, 1.1, 1);
-      g.add(glow);
-      const beam = new T.Group();
-      beam.position.y = 0.67;
-      const cone = mesh(geo('beam', () => new T.ConeGeometry(0.22, 2.4, 12, 1, true)), mats.beam, 0, 0, 1.2, beam);
-      cone.rotation.x = -Math.PI / 2;
-      g.add(beam);
-      anim.push({ kind: 'beam', o: beam });
-      h = 0.85;
-      break;
-    }
-    case 'fountain': {
-      part('basin', () => new T.CylinderGeometry(0.3, 0.32, 0.09, 16), mats.statue, 0, 0.045, 0);
-      part('basinWater', () => new T.CylinderGeometry(0.27, 0.27, 0.02, 16), mats.waterLight, 0, 0.085, 0);
-      part('column', () => new T.CylinderGeometry(0.035, 0.045, 0.26, 8), b.color ? trim : mats.statue, 0, 0.17, 0);
-      part('bowl', () => new T.SphereGeometry(0.09, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mats.statue, 0, 0.31, 0);
-      part('bowlWater', () => new T.CylinderGeometry(0.08, 0.08, 0.01, 10), mats.waterLight, 0, 0.305, 0);
-      anim.push({ kind: 'fountain', x: 0, y: 0.33, z: 0 });
-      h = 0.36;
-      break;
-    }
-    case 'park': {
-      part('lawn', () => new T.CylinderGeometry(0.47, 0.47, 0.02, 6), mats.grass, 0, 0.01, 0);
-      const n = 2 + Math.floor(r() * 2);
-      for (let i = 0; i < n; i++) {
-        const t = treeMesh(r() < 0.4);
-        const a = (i / n) * Math.PI * 2 + r();
-        t.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24);
-        t.scale.setScalar(0.75 + r() * 0.35);
-        g.add(t);
-      }
-      const bench = benchMesh();
-      bench.position.set(0, 0, 0.3);
-      g.add(bench);
-      flowerBed(g, r, 6, 0.12, b.color ? trim : null);
-      h = 0.5;
-      break;
-    }
-    case 'garden': {
-      part('bed', () => new T.CylinderGeometry(0.44, 0.45, 0.04, 6), mats.soil, 0, 0.02, 0);
-      for (let row = -2; row <= 2; row++) {
-        for (let i = -2; i <= 2; i++) {
-          if (Math.abs(row) + Math.abs(i) > 3) continue;
-          const x = i * 0.12 + (row % 2 ? 0.06 : 0);
-          const z = row * 0.12;
-          mesh(geo('stem', () => new T.CylinderGeometry(0.006, 0.006, 0.08, 4)), mats.leaf2, x, 0.08, z, g);
-          mesh(geo('bloomBig', () => new T.SphereGeometry(0.035, 6, 5)), b.color ? trim : mats.flowers[(row + i + 7) % mats.flowers.length], x, 0.13, z, g);
-        }
-      }
-      h = 0.2;
-      break;
-    }
-    case 'statue': {
-      part('pedestal', () => new T.BoxGeometry(0.22, 0.16, 0.22), mats.stone, 0, 0.08, 0);
-      part('pedestalTop', () => new T.BoxGeometry(0.26, 0.03, 0.26), mats.stoneDark, 0, 0.175, 0);
-      const fig = new T.Group();
-      fig.position.y = 0.19;
-      fig.scale.setScalar(1.35);
-      const m = b.color ? trim : mats.statue;
-      mesh(geo('botBody', () => new T.CapsuleGeometry(0.06, 0.07, 4, 10)), m, 0, 0.15, 0, fig);
-      mesh(geo('botHead', () => new T.SphereGeometry(0.08, 14, 12)), m, 0, 0.3, 0, fig);
-      const arm = mesh(geo('statueArm', () => new T.CapsuleGeometry(0.017, 0.08, 3, 6)), m, 0.08, 0.27, 0, fig);
-      arm.rotation.z = -2.6;
-      g.add(fig);
-      h = 0.7;
-      break;
-    }
-    case 'campfire': {
-      for (let i = 0; i < 3; i++) {
-        const log = part('log', () => new T.CylinderGeometry(0.025, 0.025, 0.26, 6), mats.woodDark, 0, 0.035, 0);
-        log.rotation.z = Math.PI / 2;
-        log.rotation.y = (i / 3) * Math.PI;
-      }
-      for (let i = 0; i < 9; i++) {
-        const sa = (i / 9) * Math.PI * 2;
-        part('stone', () => new T.DodecahedronGeometry(0.04, 0), mats.rock, Math.cos(sa) * 0.19, 0.025, Math.sin(sa) * 0.19);
-      }
-      for (const sa of [0.6, 2.7, 4.6]) {
-        const seat = part('seatLog', () => new T.CylinderGeometry(0.04, 0.04, 0.2, 7), mats.wood, Math.cos(sa) * 0.36, 0.04, Math.sin(sa) * 0.36);
-        seat.rotation.z = Math.PI / 2;
-        seat.rotation.y = -sa + Math.PI / 2;
-      }
-      const f1 = part('flame1', () => new T.ConeGeometry(0.08, 0.22, 7), mats.flame, 0, 0.13, 0);
-      const f2 = part('flame2', () => new T.ConeGeometry(0.045, 0.15, 7), mats.flame2, 0, 0.11, 0);
-      const glow = new T.Sprite(mats.fireGlow);
-      glow.position.set(0, 0.16, 0);
-      glow.scale.set(0.9, 0.9, 1);
-      g.add(glow);
-      anim.push({ kind: 'fire', f1, f2 });
-      h = 0.3;
-      break;
-    }
-    default: {
-      part('crate', () => new T.BoxGeometry(0.2, 0.2, 0.2), mats.wood, 0, 0.1, 0);
-      h = 0.25;
-    }
-  }
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = o.material !== mats.beam; o.receiveShadow = true; o.userData.buildId = b.id; } });
-  return { g, h, anim };
 }
 
 // Poles and planks around a build site.

@@ -4,7 +4,7 @@
 //   /?stream=1    the broadcast view for OBS: 1920x1080, camera directs itself
 // Extra options: &sound=1 (start with sound), &quality=low (no shadows, for
 // weak or GPU-less machines), &time=21:30 (pretend it is that time, for testing).
-import { ITEMS } from '../shared/catalog.js';
+import { ITEMS, ERAS, EVENTS, RESOURCES } from '../shared/catalog.js';
 import { createWorld } from './world3d.js';
 import { createHud } from './hud.js';
 
@@ -13,7 +13,22 @@ const stream = params.get('stream') === '1';
 document.documentElement.dataset.stream = stream ? '1' : '0';
 const $ = (id) => document.getElementById(id);
 
-const state = { builds: new Map(), builders: new Map(), offset: 0, createdAt: Date.now(), connected: false };
+const state = {
+  builds: new Map(),
+  builders: new Map(),
+  jobs: new Map(),
+  offset: 0,
+  createdAt: Date.now(),
+  era: 0,
+  eraStartedAt: Date.now(),
+  eraHistory: [],
+  finished: false,
+  finishedAt: null,
+  econ: null,
+  vote: null,
+  event: null,
+  connected: false,
+};
 const now = () => Date.now() + state.offset;
 const clock = fakeClock(params.get('time'));
 const hud = createHud(state, now, { stream, clock });
@@ -28,9 +43,13 @@ const world = await createWorld($('stage'), $('overlay'), {
   insets: hud.insets,
   blocked: hud.blocked,
   onFirstTap: () => setSound(true),
+  onTimelapse: hud.timelapse,
+  createdAt: () => state.createdAt,
 });
 if (stream && params.get('sound') === '1') setSound(true);
 window.botworld = world;
+// For testing from the browser console: botworldEvent({ type: 'era', era: 1, at: Date.now() })
+window.botworldEvent = (ev) => handle(ev);
 connect();
 
 function fakeClock(spec) {
@@ -57,16 +76,28 @@ function connect() {
   };
 }
 
+const resText = (bag) => Object.entries(bag || {}).map(([r, n]) => (RESOURCES[r] ? RESOURCES[r].emoji : r) + ' ' + n).join(', ');
+
 function handle(ev) {
   switch (ev.type) {
     case 'snapshot':
       state.offset = ev.serverNow - Date.now();
       state.createdAt = ev.createdAt;
+      state.era = ev.era || 0;
+      state.eraStartedAt = ev.eraStartedAt || ev.createdAt;
+      state.eraHistory = ev.eraHistory || [];
+      state.finished = !!ev.finished;
+      state.finishedAt = ev.finishedAt || null;
+      state.econ = ev.econ || null;
+      state.vote = ev.vote || null;
+      state.event = ev.event || null;
       state.builds = new Map(ev.builds.map((b) => [b.id, b]));
       state.builders = new Map(ev.builders.map((b) => [b.id, b]));
+      state.jobs = new Map(Object.entries(ev.jobs || {}));
       state.connected = true;
-      world?.load(ev.builds, ev.builders);
+      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo });
       showDevbar(ev.mode);
+      if (ev.gazette && Date.now() - ev.gazette.at < 40 * 60e3) hud.gazette(ev.gazette);
       break;
     case 'build': {
       const prev = state.builds.get(ev.build.id);
@@ -83,17 +114,75 @@ function handle(ev) {
       state.builders.set(ev.builder.id, ev.builder);
       world?.updateBuilder(ev.builder, ev.joined);
       if (ev.joined) hud.toast('join', '🛬', ev.builder.name, ' landed on BotWorld!');
+      return;
+    case 'job':
+      if (ev.job) state.jobs.set(ev.userId, ev.job);
+      else state.jobs.delete(ev.userId);
+      world?.setJob(ev.userId, ev.job);
+      announceJob(ev.userId, ev.job);
+      return;
+    case 'economy':
+      state.econ = ev.econ;
+      world?.setEconomy(ev.econ);
+      hud.renderEcon();
+      return;
+    case 'produce':
+      world?.produce(ev.pops);
+      return;
+    case 'vote':
+      state.vote = ev.vote;
+      if (ev.winner && EVENTS[ev.winner]) hud.toast('vote', '🗳️', 'Chat chose ', EVENTS[ev.winner].emoji + ' ' + EVENTS[ev.winner].label + '!');
       break;
+    case 'event':
+      state.event = ev.event;
+      world?.setEvent(ev.event);
+      if (ev.event && EVENTS[ev.event.key]) {
+        const e = EVENTS[ev.event.key];
+        let text = e.text + '.';
+        if (ev.gift && Object.keys(ev.gift).length) text = 'brought gifts: ' + resText(ev.gift) + '.';
+        if (ev.damaged && ev.damaged.length) text = 'damaged ' + ev.damaged.length + (ev.damaged.length === 1 ? ' building' : ' buildings') + '! Type !repair to fix.';
+        hud.toast('event', e.emoji, e.label + ' ', text.startsWith('brought') || text.startsWith('damaged') ? text : '· ' + text);
+      }
+      break;
+    case 'level':
+      hud.toast('level', '⭐', ev.name, ' reached level ' + ev.level + ': ' + ev.title + '!');
+      world?.dance(ev.userId);
+      return;
+    case 'me':
+      hud.showMe(ev.card);
+      return;
+    case 'era':
+      state.era = ev.era;
+      state.eraStartedAt = ev.at;
+      state.eraHistory = state.eraHistory.concat([{ era: ev.era, at: ev.at }]);
+      world?.eraChanged(ev.era);
+      hud.eraBanner(ev.era, ev.evolved);
+      hud.toast('era', ERAS[ev.era].emoji, 'BotWorld', ' entered the ' + ERAS[ev.era].name + '!');
+      break;
+    case 'finale':
+      state.finished = true;
+      state.finishedAt = ev.at;
+      world?.finale();
+      hud.finaleBanner();
+      break;
+    case 'gazette':
+      hud.gazette(ev.item);
+      return;
     case 'dance':
       world?.dance(ev.userId);
       hud.toast('dance', '💃', (state.builders.get(ev.userId) || {}).name || 'someone', ' is dancing!');
-      break;
+      return;
     case 'notice':
       if (ev.kind === 'help') hud.toast('help', '💡', '', ev.text);
-      else hud.toast('warn', '💬', ev.user ? '@' + ev.user + ' ' : '', ev.text);
-      break;
+      else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
+      else if (ev.kind === 'wonder') {
+        const w = state.econ?.wonder;
+        hud.wonderBanner(w ? w.item : ERAS[state.era].wonder);
+        hud.toast('done', '🏛️', '', ev.text);
+      } else hud.toast('warn', '💬', ev.user ? '@' + ev.user + ' ' : '', ev.text);
+      return;
     default:
-      break;
+      return;
   }
   hud.render();
 }
@@ -105,14 +194,29 @@ function withArticle(text) {
   return (/^[aeiou]/i.test(text) ? 'an ' : 'a ') + text;
 }
 function announce(b, prev) {
+  if (b.wonder) return;
   const who = (state.builders.get(b.ownerId) || {}).name || 'someone';
   const em = ITEMS[b.item] ? ITEMS[b.item].emoji : '📦';
-  if (!prev && b.status === 'queued') hud.toast('build', '🔨', who, ' is building ' + withArticle(describe(b)) + ' (#' + b.id + ')');
-  else if (prev && prev.status === 'done' && b.upgradeTo) hud.toast('upgrade', '⬆️', who, ' is upgrading their ' + describe(b) + ' (#' + b.id + ')');
-  else if (prev && prev.status !== 'done' && b.status === 'done') {
-    if (prev.upgradeTo) hud.toast('done', em, who, "'s " + describe(b) + ' reached level ' + b.level + '!');
+  if (!prev && b.status === 'queued') {
+    const wait = b.waitingFor && b.waitingFor.length ? ', waiting for ' + b.waitingFor.map((r) => RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase()).join(' and ') : '';
+    hud.toast('build', '🔨', who, ' is building ' + withArticle(describe(b)) + ' (#' + b.id + ')' + wait);
+  } else if (prev && prev.status === 'done' && b.upgrade && !b.evolving) {
+    const to = ITEMS[b.upgrade.item];
+    hud.toast('upgrade', '⬆️', who, to && b.upgrade.item !== b.item ? ' is turning their ' + describe(b) + ' into ' + withArticle(to.label.toLowerCase()) + ' (#' + b.id + ')' : ' is upgrading their ' + describe(b) + ' (#' + b.id + ')');
+  } else if (prev && prev.status !== 'done' && b.status === 'done' && !prev.evolving) {
+    if (prev.upgrade && prev.item !== b.item) hud.toast('done', em, who, "'s home is now " + withArticle(describe(b)) + '!');
+    else if (prev.upgrade) hud.toast('done', em, who, "'s " + describe(b) + ' reached level ' + b.level + '!');
     else hud.toast('done', em, who, ' finished ' + withArticle(describe(b)) + '!');
   }
+}
+function announceJob(userId, job) {
+  if (!job || job.kind === 'gather') return;
+  const who = (state.builders.get(userId) || {}).name || 'someone';
+  const at = state.builds.get(job.buildId);
+  const label = at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island';
+  if (job.kind === 'wonder') hud.toast('job', '📦', who, ' is hauling goods to the ' + label + '.');
+  else if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
+  else hud.toast('job', '⚒️', who, ' is helping at the ' + label + (job.res && RESOURCES[job.res] ? ' (' + RESOURCES[job.res].emoji + ')' : '') + '.');
 }
 
 function setSound(on) {
@@ -136,7 +240,10 @@ $('devbar').addEventListener('submit', (e) => {
   e.preventDefault();
   send($('devText').value);
 });
-for (const b of document.querySelectorAll('[data-cmd]')) b.addEventListener('click', () => send(b.dataset.cmd));
+$('quick').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cmd]');
+  if (b) send(b.dataset.cmd);
+});
 $('soundBtn').addEventListener('click', () => setSound(!(world && world.soundOn)));
 async function send(text) {
   if (!text.trim()) return;
