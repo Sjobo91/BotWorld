@@ -13,6 +13,12 @@ function words(text) {
     .split(/\s+/)
     .filter(Boolean);
 }
+const TOOL_WORDS = new Set(['tools', 'tool', 'axe', 'pickaxe', 'gear', 'bot', 'worker', 'workers', 'robot']);
+// "!wood 3" or "!wood x3": do it three times in a row.
+function withTimes(cmd, args) {
+  const n = args.map((a) => Number(String(a).replace(/^x/, ''))).find((x) => Number.isInteger(x) && x > 1);
+  return n ? { ...cmd, times: Math.min(9, n) } : cmd;
+}
 const idArg = (w) => {
   const id = Number(String(w || '').replace(/^#/, ''));
   return Number.isInteger(id) && id > 0 ? id : null;
@@ -31,7 +37,22 @@ export function parseCommand(text) {
       return parseBuild(args);
     case 'upgrade':
     case 'up':
-      return { type: 'upgrade' };
+    case 'improve': {
+      // !upgrade (your home), !upgrade tools, !upgrade woodcutter, !upgrade #12
+      const w = args.find((a) => !FILLER.has(a)) || '';
+      if (!w || w === 'home' || w === 'house') return { type: 'upgrade' };
+      if (TOOL_WORDS.has(w)) return { type: 'upgrade', what: 'tools' };
+      const id = idArg(w);
+      if (id && /^#?\d+$/.test(w)) return { type: 'upgrade', id };
+      const item = resolveItem(w);
+      return item ? { type: 'upgrade', item } : { type: 'upgrade', raw: w };
+    }
+    case 'tools':
+    case 'tool':
+      return { type: 'upgrade', what: 'tools' };
+    case 'stop':
+    case 'rest':
+      return { type: 'stop' };
     case 'home':
     case 'myhome':
     case 'house':
@@ -42,8 +63,9 @@ export function parseCommand(text) {
     case 'helpbuild': {
       // !help, !help #12, !help wonder
       const w = args.find((a) => !FILLER.has(a));
-      if (w === 'wonder') return { type: 'help', target: 'wonder' };
-      return { type: 'help', id: idArg(w) };
+      if (w === 'wonder') return withTimes({ type: 'help', target: 'wonder' }, args.slice(1));
+      if (w && /^x?\d$/.test(w)) return withTimes({ type: 'help', id: null }, [w]);
+      return withTimes({ type: 'help', id: idArg(w) }, args.slice(1));
     }
     case 'work':
     case 'gather':
@@ -58,31 +80,31 @@ export function parseCommand(text) {
     case 'cut':
     case 'lumber':
     case 'logs':
-      return { type: 'work', target: 'wood' };
+      return withTimes({ type: 'work', target: 'wood' }, args);
     case 'stone':
     case 'stones':
     case 'rock':
     case 'rocks':
-      return { type: 'work', target: 'stone' };
+      return withTimes({ type: 'work', target: 'stone' }, args);
     case 'mine':
     case 'dig': {
       // !mine is stone, !mine coal and !mine iron dig ore.
       const r = args.length ? resolveResource(args[0]) : null;
-      return { type: 'work', target: r === 'coal' || r === 'iron' ? r : 'stone' };
+      return withTimes({ type: 'work', target: r === 'coal' || r === 'iron' ? r : 'stone' }, args);
     }
     case 'food':
     case 'berries':
     case 'berry':
     case 'pick':
     case 'forage':
-      return { type: 'work', target: 'food' };
+      return withTimes({ type: 'work', target: 'food' }, args);
     case 'fish':
     case 'fishing':
-      return { type: 'work', target: 'food', how: 'fish' };
+      return withTimes({ type: 'work', target: 'food', how: 'fish' }, args);
     case 'coal':
-      return { type: 'work', target: 'coal' };
+      return withTimes({ type: 'work', target: 'coal' }, args);
     case 'iron':
-      return { type: 'work', target: 'iron' };
+      return withTimes({ type: 'work', target: 'iron' }, args);
     case 'explore':
     case 'scout':
     case 'discover': {

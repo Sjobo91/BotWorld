@@ -2,9 +2,9 @@
 // and one bot per viewer that walks to its plot, hammers, hauls goods to the
 // wonder, chats and sleeps. Each era changes how the island itself looks.
 // The server decides everything; this file only makes it look alive.
-import { ITEMS, ERAS, RESOURCES, hashStr } from '../shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, TOOLS, hashStr } from '../shared/catalog.js';
 import { DIRS, hexDist } from '../shared/hex.js';
-import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER, HAND_LOAD, HAND_TRIP_SEC, HAND_FIRST_SEC } from '../shared/terrain.js';
+import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
 import { buildingMesh } from './buildings.js';
@@ -68,7 +68,7 @@ export async function createWorld(stage, overlay, opts) {
   const still = !opts.stream && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const low = opts.quality === 'low';
   const audio = createAudio();
-  const data = { builders: new Map(), jobs: new Map(), econ: null, event: null };
+  const data = { builders: new Map(), jobs: new Map(), queues: new Map(), econ: null, event: null };
   mats.path = std(0xdccfb2);
   mats.mountain = std(0x8c867f);
   mats.snow = std(0xf3f6f8);
@@ -1060,8 +1060,18 @@ export async function createWorld(stage, overlay, opts) {
     botGroup.remove(p.parts.g);
     porters.delete(p);
   }
+  const toolMats = [];
+  function toolMat(tier) {
+    if (!toolMats[tier]) {
+      const t = TOOLS[tier] || TOOLS[0];
+      toolMats[tier] = new T.MeshStandardMaterial({ color: t.color, metalness: tier >= 2 ? 0.6 : 0.1, roughness: tier >= 2 ? 0.35 : 0.8, emissive: tier === TOOLS.length - 1 ? t.color : 0x000000, emissiveIntensity: tier === TOOLS.length - 1 ? 0.6 : 0, flatShading: true });
+    }
+    return toolMats[tier];
+  }
   function refreshLook(b) {
     const p = b.parts;
+    const tier = b.builder.tool || 0;
+    if (b.tool !== tier && p.hammer.children[1]) { p.hammer.children[1].material = toolMat(tier); b.tool = tier; }
     if (b.hat !== b.builder.hat) {
       if (p.hat) p.head.remove(p.hat);
       p.hat = b.builder.hat && b.builder.hat !== 'none' ? hatMesh(b.builder.hat, b.builder.color) : null;
@@ -1069,7 +1079,8 @@ export async function createWorld(stage, overlay, opts) {
       p.antenna.visible = !p.hat || b.builder.hat === 'flowers' || b.builder.hat === 'headphones';
       b.hat = b.builder.hat;
     }
-    if (b.tag && b.tag.el.textContent !== b.builder.name) { b.tag.el.textContent = b.builder.name; b.tag.w = 0; }
+    const tagText = b.builder.name + (data.queues.get(b.id) ? ' ⏳' + data.queues.get(b.id) : '');
+    if (b.tag && b.tag.el.textContent !== tagText) { b.tag.el.textContent = tagText; b.tag.w = 0; }
   }
   function resnap(b) {
     releasePoi(b);
@@ -1202,19 +1213,27 @@ export async function createWorld(stage, overlay, opts) {
     const pose = job.kind === 'repair' ? 'hammer' : WATER_JOBS.has(v.b.item) ? 'water' : FISH_JOBS.has(v.b.item) ? 'fish' : 'hammer';
     return goSpot(b, s, (x) => { x.mode = 'job'; x.jobPose = pose; x.yawTarget = s.yaw; });
   }
-  // Gathering by hand: work on the land, carry a crate to the nearest store
-  // (or the landing pad), and go back. The crate reaches town about when the
-  // server counts the load.
+  // Gathering by hand, one trip in step with the server: walk out to the
+  // land, work there, carry the crate to the nearest store. The goods count
+  // when the server says the trip is done.
   function gatherTrip(b, job) {
     const drop = dropSpot(b);
-    if (b.carrying) {
+    const outEnd = job.startedAt + (job.out || 0) * 1000;
+    const workEnd = outEnd + (job.work || 8) * 1000;
+    if (b.dropped === job.startedAt) {
+      // Crate delivered: wait by the store for the next job.
+      startAct(b, 'look', 1.2, drop ? drop.yaw : b.yaw);
+      return true;
+    }
+    if (b.carrying || now() >= workEnd) {
+      if (!b.carrying) carry(b, job.res);
       if (!drop) return false;
       return goSpot(b, drop, (x) => {
         carry(x, null);
+        x.dropped = job.startedAt;
         dust(x.x, x.y, x.z, 0.25);
-        popAt(x.x, x.y + 0.5, x.z, { [job.res]: HAND_LOAD });
-        startAct(x, 'look', 0.8, drop.yaw);
-      });
+        startAct(x, 'look', 1.2, drop.yaw);
+      }, job.until);
     }
     const t = layout.index.get(job.q + ',' + job.r);
     if (!t) return false;
@@ -1227,12 +1246,8 @@ export async function createWorld(stage, overlay, opts) {
       x.mode = 'job';
       x.jobPose = job.pose || 'chop';
       x.yawTarget = yaw;
-      const back = drop ? (Math.hypot(drop.x - x.x, drop.z - x.z) * 1.3) / WALK : 0;
-      const first = job.startedAt + HAND_FIRST_SEC * 1000;
-      let at = first + Math.max(0, Math.ceil((now() - first) / (HAND_TRIP_SEC * 1000))) * HAND_TRIP_SEC * 1000;
-      if (at - back * 1000 < now() + 5000) at += HAND_TRIP_SEC * 1000;
-      x.gatherUntil = Math.min(job.until, at) - back * 1000;
-    });
+      x.gatherUntil = workEnd;
+    }, outEnd);
   }
   function dropSpot(b) {
     let best = null;
@@ -2255,12 +2270,16 @@ export async function createWorld(stage, overlay, opts) {
     } else if (b.project && b.status !== 'done' && !b.evolving) {
       // A town project: how far along, who helps, what it waits for.
       const pr = progressOf(b);
-      title = item.label + ' ' + Math.floor(pr * 100) + '% #' + b.id;
+      title = item.label + (b.upgrade ? ' → level ' + b.upgrade.level : '') + ' ' + Math.floor(pr * 100) + '% #' + b.id;
       let helpers = 0;
       for (const j of data.jobs.values()) if (j.buildId === b.id && j.kind === 'build') helpers++;
       if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · ' + (GATHER[b.waitingFor[0]] ? '!' : '!work ') + b.waitingFor[0];
       else sub = (helpers ? helpers + (helpers === 1 ? ' helper' : ' helpers') : 'nobody helping yet') + ' · !help #' + b.id;
       bar = pr;
+    } else if (b.project && b.status === 'done' && !b.home) {
+      title = item.label + (b.level > 1 ? ' ' + '★'.repeat(b.level - 1) : '') + ' #' + b.id;
+      const founder = data.builders.get(b.founderId);
+      sub = (b.level < 3 ? '!upgrade #' + b.id + ' · ' : 'top level · ') + (founder ? 'started by ' + founder.name : 'town');
     } else if (b.home && b.status === 'done') {
       title = (bd ? bd.name + "'s home" : item.label) + (b.level > 1 ? ' · level ' + b.level : '');
       sub = item.label + ' #' + b.id;
@@ -2309,10 +2328,13 @@ export async function createWorld(stage, overlay, opts) {
     popAt(v.root.position.x, v.root.position.y + v.h + 0.1, v.root.position.z, out);
   }
   function popAt(x, y, z, out) {
-    if (pops.length >= (low ? 4 : 8)) return;
+    popText(x, y, z, Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  '));
+  }
+  function popText(x, y, z, text, kind) {
+    if (pops.length >= (low ? 6 : 12)) return;
     const e = document.createElement('div');
-    e.className = 'pop';
-    e.textContent = Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  ');
+    e.className = 'pop' + (kind ? ' ' + kind : '');
+    e.textContent = text;
     overlay.append(e);
     pops.push({ el: e, x, y, z, t0: performance.now() });
   }
@@ -2716,6 +2738,7 @@ export async function createWorld(stage, overlay, opts) {
         if (fresh.length) revealTiles(fresh, false);
       }
       data.jobs = new Map(Object.entries(extra.jobs || {}));
+      data.queues = new Map(Object.entries(extra.queues || {}));
       data.econ = extra.econ || data.econ;
       if (extra.era != null && extra.era !== era) applyEra(extra.era);
       data.finale = !!extra.finished;
@@ -2759,6 +2782,30 @@ export async function createWorld(stage, overlay, opts) {
       syncBots(joined ? builder.id : null);
       for (const v of builds.values()) if (v.b.ownerId === builder.id && v.label) v.label.w = 0;
       if (joined) interest(1, 0, 0, 7, null, 6000);
+    },
+    // Jobs waiting in line for a bot: shown next to its name.
+    setQueue(userId, n) {
+      if (n) data.queues.set(userId, n);
+      else data.queues.delete(userId);
+      const b = bots.get(userId);
+      if (b) refreshLook(b);
+    },
+    // A gathering trip is done: the goods show over the bot.
+    gathered(ev) {
+      const b = bots.get(ev.userId);
+      if (!b || !ev.n) return;
+      popAt(b.x, b.y + 0.55, b.z, { [ev.res]: ev.n });
+    },
+    xp(userId, n) {
+      const b = bots.get(userId);
+      if (!b || !(n > 0) || b.mode === 'arrive') return;
+      popText(b.x + 0.12, b.y + 0.42, b.z, '+' + n + ' ⭐', 'xp');
+    },
+    toolsChanged(userId) {
+      const b = bots.get(userId);
+      if (!b) return;
+      refreshLook(b);
+      sparkle(b.x, b.y + 0.3, b.z);
     },
     setJob(userId, job) {
       if (job) data.jobs.set(userId, job);

@@ -225,6 +225,22 @@ export function titleFor(level) {
 // Every viewer has one home of their own. It grows with !upgrade (levels 1
 // to 3) and turns into the new kind of home whenever a new era starts.
 export const HOME_LEVELS = 3;
+// Town buildings can be upgraded twice; every level makes 50% more
+// (goods, power, storage room, people or knowledge).
+export const BUILD_LEVELS = 3;
+export const levelMult = (level) => 1 + 0.5 * ((level || 1) - 1);
+// Better tools for a viewer's bot (!upgrade tools): a bigger load on every
+// trip and faster building. Each needs a viewer level, the era its material
+// comes from, and a few goods from the town.
+export const TOOLS = [
+  { key: 'stone', label: 'Stone tools', level: 1, era: 0, cost: {}, load: 2, build: 1, color: '#9b9a94' },
+  { key: 'copper', label: 'Copper tools', level: 3, era: 1, cost: { bricks: 6, wood: 6 }, load: 3, build: 1.25, color: '#c97a3c' },
+  { key: 'iron', label: 'Iron tools', level: 6, era: 2, cost: { iron: 8 }, load: 4, build: 1.5, color: '#5a616b' },
+  { key: 'steel', label: 'Steel tools', level: 10, era: 3, cost: { steel: 8 }, load: 5, build: 1.75, color: '#cfd6de' },
+  { key: 'power', label: 'Power tools', level: 15, era: 4, cost: { parts: 8 }, load: 6, build: 2, color: '#f2b705' },
+  { key: 'laser', label: 'Laser tools', level: 20, era: 5, cost: { chips: 6 }, load: 8, build: 2.5, color: '#38e0ff' },
+];
+export const toolsOf = (builder) => TOOLS[Math.max(0, Math.min(TOOLS.length - 1, builder?.tool || 0))];
 export const homePop = (level) => 2 + (level || 1);
 
 export const PALETTE = Object.values(COLORS).filter((c) => c !== COLORS.white && c !== COLORS.black);

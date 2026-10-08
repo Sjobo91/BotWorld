@@ -3,7 +3,7 @@
 // events, the build queue, the weekly leaderboard, the ticker, !me cards
 // and the big banners for wonders, new eras and the finale.
 // Viewer names and text only ever go in as text, never as HTML.
-import { ITEMS, ERAS, RESOURCES, EVENTS, itemsOfEra } from '../shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, EVENTS, TOOLS, itemsOfEra } from '../shared/catalog.js';
 import { GATHER } from '../shared/terrain.js';
 
 const DAY = 864e5;
@@ -84,13 +84,14 @@ export function createHud(state, now, opts) {
       cmds.append(li);
     };
     row('!home', 'get your own home and bot');
-    row('!build ' + starter, 'start a town project');
-    row('!help', 'help build it, more bots go faster');
-    row('!wood !stone !food', 'gather by hand: chop, mine, pick');
+    row('!wood !stone !food', 'one trip: chop, mine, pick');
     if (state.era >= RESOURCES.coal.era) row('!coal !iron', 'dig ore from a deposit');
+    row('!build ' + starter, 'start a town project');
+    row('!help', 'build it, more bots go faster');
+    row('!upgrade ' + starter, 'make a building stronger');
+    row('!upgrade tools', 'better tools, bigger loads');
     row('!explore', 'scout the fog for new land');
-    row('!help wonder', 'haul goods to the wonder');
-    row('!me', 'find your bot and your home');
+    row('!me', 'find your bot · !wood 3 does 3');
     renderSources();
     $('howBuildTitle').textContent = 'Build in the ' + ERAS[state.era].name;
     $('howBuildCmd').textContent = '!build ' + starter;
@@ -108,7 +109,7 @@ export function createHud(state, now, opts) {
     }
     const quick = $('quick');
     quick.textContent = '';
-    for (const c of ['!home', '!build ' + starter, '!help', '!wood', '!stone', '!food', '!explore', '!help wonder', '!upgrade', '!vote 1', '!repair', '!me', '!dance']) {
+    for (const c of ['!home', '!build ' + starter, '!help', '!wood', '!stone', '!food', '!wood 3', '!explore', '!help wonder', '!upgrade ' + starter, '!upgrade tools', '!upgrade', '!stop', '!vote 1', '!repair', '!me', '!dance']) {
       const b = el('button', 'devbtn', c);
       b.type = 'button';
       b.dataset.cmd = c;
@@ -139,7 +140,7 @@ export function createHud(state, now, opts) {
   }
 
   // --- What to do now: the town's next steps, from the server ---------------------------------
-  const STEP_ICON = { help: '🔨', gather: '📦', build: '🎯', explore: '🧭', wonder: '🏛️' };
+  const STEP_ICON = { help: '🔨', gather: '📦', build: '🎯', explore: '🧭', wonder: '🏛️', upgrade: '⬆️' };
   function renderNext() {
     const plan = state.econ?.plan || [];
     const box = $('next');
@@ -337,6 +338,7 @@ export function createHud(state, now, opts) {
       else if (b.home) { title = nameOf(b.ownerId) + "'s home" + (b.upgrade ? ' → level ' + b.upgrade.level : ''); sub = item.label.toLowerCase() + ' · #' + b.id; }
       else {
         const h = helpersAt(b.id);
+        if (b.upgrade) title += ' → level ' + b.upgrade.level;
         sub = '#' + b.id + ' · ' + (h ? h + (h === 1 ? ' helper' : ' helpers') : 'needs helpers') + ' · !help #' + b.id;
       }
       main.append(el('b', null, title), el('small', null, sub));
@@ -442,6 +444,10 @@ export function createHud(state, now, opts) {
       const at = state.builds.get(c.job.buildId);
       fact('⚒️', (c.job.kind === 'wonder' ? 'Hauling to the ' : c.job.kind === 'repair' ? 'Repairing the ' : 'Working at the ') + (at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'town'));
     }
+    const tool = TOOLS[c.tool || 0];
+    const next = TOOLS[(c.tool || 0) + 1];
+    fact('🛠️', tool.label + ', ' + tool.load + ' per trip' + (next ? ' · next: ' + next.label.toLowerCase() + ' at level ' + next.level : ''));
+    if (c.queued) fact('⏳', c.queued + (c.queued === 1 ? ' job' : ' jobs') + ' lined up · !stop clears them');
     box.append(head, bar, facts);
     box.hidden = false;
     box.classList.remove('out');

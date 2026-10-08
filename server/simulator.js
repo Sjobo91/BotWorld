@@ -28,8 +28,8 @@ export function line(world, name) {
     const color = Math.random() < 0.3 ? pick(Object.keys(COLORS)) + ' ' : '';
     return pick(['!build ', '!b ']) + color + item;
   }
-  if (r < 0.82) return pick(['!wood', '!stone', '!food', '!chop', '!mine', '!fish', '!work']);
-  if (r < 0.85) return '!upgrade';
+  if (r < 0.82) return pick(['!wood', '!stone', '!food', '!chop', '!mine', '!fish', '!wood 3', '!stone 2', '!work']);
+  if (r < 0.85) return pick(['!upgrade', '!upgrade tools', '!upgrade ' + pick(itemsOfEra(era).filter((k) => k !== 'hut'))]);
   if (r < 0.89) {
     const level = me ? levelFor(me.xp || 0) : 1;
     return '!hat ' + pick(Object.keys(HATS).filter((h) => HATS[h].level <= level));

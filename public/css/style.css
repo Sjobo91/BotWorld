@@ -128,6 +128,7 @@ code {
   white-space: nowrap;
   will-change: transform, opacity;
 }
+.pop.xp { color: #ffe27a; font-size: 0.72rem; }
 
 /* --- Title and ticker ---------------------------------------------------------- */
 .title { position: absolute; top: 1.1rem; left: var(--edge); display: grid; gap: 0.4rem; justify-items: start; pointer-events: none; }

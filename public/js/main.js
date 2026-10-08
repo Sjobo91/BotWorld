@@ -4,7 +4,7 @@
 //   /?stream=1    the broadcast view for OBS: 1920x1080, camera directs itself
 // Extra options: &sound=1 (start with sound), &quality=low (no shadows, for
 // weak or GPU-less machines), &time=21:30 (pretend it is that time, for testing).
-import { ITEMS, ERAS, EVENTS, RESOURCES } from '../shared/catalog.js';
+import { ITEMS, ERAS, EVENTS, RESOURCES, TOOLS } from '../shared/catalog.js';
 import { GATHER } from '../shared/terrain.js';
 import { createWorld } from './world3d.js';
 import { createHud } from './hud.js';
@@ -18,6 +18,7 @@ const state = {
   builds: new Map(),
   builders: new Map(),
   jobs: new Map(),
+  queues: new Map(),
   offset: 0,
   createdAt: Date.now(),
   era: 0,
@@ -96,7 +97,8 @@ function handle(ev) {
       state.builders = new Map(ev.builders.map((b) => [b.id, b]));
       state.jobs = new Map(Object.entries(ev.jobs || {}));
       state.connected = true;
-      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo, map: ev.map, explored: ev.explored });
+      state.queues = new Map(Object.entries(ev.queues || {}));
+      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, queues: ev.queues, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo, map: ev.map, explored: ev.explored });
       showDevbar(ev.mode);
       if (ev.gazette && Date.now() - ev.gazette.at < 40 * 60e3) hud.gazette(ev.gazette);
       break;
@@ -111,11 +113,34 @@ function handle(ev) {
       state.builds.delete(ev.id);
       world?.removeBuild(ev.id);
       break;
-    case 'builder':
+    case 'builder': {
+      // Every bit of XP shows over the bot: chat sees itself make progress.
+      const before = state.builders.get(ev.builder.id);
+      const gain = before ? (ev.builder.xp || 0) - (before.xp || 0) : 0;
       state.builders.set(ev.builder.id, ev.builder);
       world?.updateBuilder(ev.builder, ev.joined);
+      if (gain > 0) world?.xp(ev.builder.id, gain);
       if (ev.joined) hud.toast('join', '🛬', ev.builder.name, ' landed on BotWorld!');
       return;
+    }
+    case 'queue':
+      if (ev.n) state.queues.set(ev.userId, ev.n);
+      else state.queues.delete(ev.userId);
+      world?.setQueue(ev.userId, ev.n);
+      return;
+    case 'gathered':
+      world?.gathered(ev);
+      if (ev.full && Date.now() - (fullAt.get(ev.res) || 0) > 60e3) {
+        fullAt.set(ev.res, Date.now());
+        hud.toast('help', '📦', '', 'Storage is full of ' + (RESOURCES[ev.res]?.label.toLowerCase() || ev.res) + '. Build a store, or spend it on a project!');
+      }
+      return;
+    case 'tools': {
+      const t = TOOLS[ev.tool];
+      world?.toolsChanged(ev.userId);
+      if (t) hud.toast('level', '🛠️', ev.name, ' got ' + t.label.toLowerCase() + ': ' + t.load + ' per trip!');
+      return;
+    }
     case 'job':
       if (ev.job) state.jobs.set(ev.userId, ev.job);
       else state.jobs.delete(ev.userId);
@@ -224,9 +249,16 @@ function announce(b, prev) {
     else hud.toast('done', em, who, ' finished ' + withArticle(describe(b)) + '!');
   }
 }
+const fullAt = new Map();
 const HAND_ICON = { chop: '🪓', mine: '⛏️', pick: '🫐', fish: '🎣' };
+// Jobs are short and come often: tell each viewer's news at most every 90 s.
+const lastJobToast = new Map();
 function announceJob(userId, job) {
   if (!job || job.kind === 'gather') return;
+  const key = userId + ':' + job.kind + ':' + (job.res || job.buildId || '');
+  if (Date.now() - (lastJobToast.get(key) || 0) < 90e3) return;
+  lastJobToast.set(key, Date.now());
+  if (lastJobToast.size > 500) lastJobToast.clear();
   const who = (state.builders.get(userId) || {}).name || 'someone';
   if (job.kind === 'hand') {
     const g = Object.values(GATHER).find((x) => x.pose === job.pose && x.res === job.res);

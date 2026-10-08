@@ -18,8 +18,8 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/
 const VIEWERS = Number(args.viewers || 5);
 const DAYS = Number(args.days || 90);
 const HOURS_ONLINE = Number(args.hours || 1.5); // per viewer per day
-const ACT_EVERY_MIN = Number(args.every || 4); // a command every few minutes while online
-const STEP = 30e3;
+const ACT_EVERY_MIN = Number(args.every || 1); // a command about every minute while online
+const STEP = 15e3;
 const SEED = Number(args.seed || 7);
 
 let seed = SEED;
@@ -51,7 +51,8 @@ function choose(v) {
   if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * 3)));
   if (world.builds.some((b) => b.damaged && !b.repairBy) && rnd() < 0.5) return say('!repair');
   const job = s.jobs[v.id];
-  if (job && job.kind !== 'gather' && rnd() < 0.7) return null;
+  // Busy bots: chat sometimes lines up more, often just watches.
+  if (job && job.kind !== 'gather' && (rnd() < 0.6 || (s.queues[v.id] || []).length >= 2)) return null;
   const econ = world.econ || {};
   const plan = econ.plan || [];
   const r = rnd();
@@ -60,7 +61,9 @@ function choose(v) {
     const i = rnd() < 0.55 ? 0 : rnd() < 0.6 ? 1 : Math.floor(rnd() * plan.length);
     return say(plan[Math.min(i, plan.length - 1)].cmd);
   }
-  if (r < 0.72) return say('!explore');
+  if (r < 0.7) return say('!explore');
+  if (r < 0.74) return say('!upgrade tools');
+  if (r < 0.77) return say('!upgrade ' + pick(itemsOfEra(s.era).filter((k) => ITEMS[k].kind === 'producer') || ['woodcutter']));
   if (r < 0.8) return say('!upgrade');
   if (r < 0.92) {
     const era = s.era;
@@ -71,7 +74,7 @@ function choose(v) {
     return say('!build ' + pick(pool));
   }
   if (r < 0.96) return say('!help');
-  return say(pick(['!me', '!dance', '!hat cap', '!work', '!wood', '!stone', '!food']));
+  return say(pick(['!me', '!dance', '!hat cap', '!work', '!wood 3', '!stone 2', '!food']));
 }
 
 const nextAct = new Map(viewers.map((v) => [v.id, T0 + rnd() * ACT_EVERY_MIN * 60e3]));

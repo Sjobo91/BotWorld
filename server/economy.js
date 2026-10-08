@@ -7,7 +7,7 @@
 //     speed = jobs filled x happiness x power x helping bots x events x boosts
 //   residents eat, power plants burn coal, the era's wonder takes deliveries
 //   and knowledge grows (faster with campfires, schools and labs)
-import { ITEMS, RESOURCES, homePop } from '../public/shared/catalog.js';
+import { ITEMS, RESOURCES, homePop, levelMult } from '../public/shared/catalog.js';
 import { daylight } from '../public/shared/sun.js';
 import { hexBetween } from '../public/shared/hex.js';
 
@@ -27,7 +27,7 @@ export const isUp = (b) => !!b.built && !b.damaged;
 
 export function capacity(builds) {
   let extra = 0;
-  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'storage') extra += itemOf(b).storage;
+  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'storage') extra += itemOf(b).storage * levelMult(b.level);
   return BASE_CAP + extra;
 }
 
@@ -38,7 +38,7 @@ export function comfortOf(b) {
 }
 
 // People living in one house: your own home is small, the town's homes are big.
-export const popOf = (b) => (b.home ? homePop(b.level) : itemOf(b)?.pop || 0);
+export const popOf = (b) => (b.home ? homePop(b.level) : Math.round((itemOf(b)?.pop || 0) * levelMult(b.level)));
 export function popCapacity(builds) {
   let n = 0;
   for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'house') n += popOf(b);
@@ -59,7 +59,7 @@ export function power(builds, now, fuel, geo = {}) {
     const it = itemOf(b);
     if (!it?.power) continue;
     if (it.power > 0) {
-      let p = it.power;
+      let p = it.power * levelMult(b.level);
       if (it.solar) p *= daylight(now, geo.lat, geo.lon);
       if (it.recipe?.in && fuel.get(b.id) === false) p = 0;
       supply += p;
@@ -129,8 +129,9 @@ export function produce(builds, stock, ctx, dt) {
     for (const r of Object.keys(out)) ev = Math.max(ev, ctx.boosts[r] || 1);
     m *= ev;
     m *= adjacencyBoost(b, boosters);
-    // A good spot (a woodcutter in a big forest) works faster than a poor one.
-    m *= b.rich || 1;
+    // A good spot (a woodcutter in a big forest) works faster than a poor one,
+    // and every upgrade adds half again.
+    m *= (b.rich || 1) * levelMult(b.level);
     let prog = (ctx.progress.get(b.id) || 0) + (dt / 60) * m;
     while (prog >= 1) {
       const inp = it.recipe.in || {};
@@ -184,7 +185,7 @@ export function wonderProgress(w) {
 
 export function knowledgeBoost(builds) {
   let k = 0;
-  for (const b of builds) if (isUp(b) && itemOf(b)?.knowledge) k += itemOf(b).knowledge;
+  for (const b of builds) if (isUp(b) && itemOf(b)?.knowledge) k += itemOf(b).knowledge * levelMult(b.level);
   return Math.min(0.5, k);
 }
 

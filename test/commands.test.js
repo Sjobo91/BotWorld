@@ -56,6 +56,21 @@ test('gathering by hand', () => {
   assert.equal(parseCommand('!coal').target, 'coal');
 });
 
+test('repeat counts, upgrades and !stop', () => {
+  assert.deepEqual(parseCommand('!wood 3'), { type: 'work', target: 'wood', times: 3 });
+  assert.equal(parseCommand('!stone x2').times, 2);
+  assert.equal(parseCommand('!help 3').times, 3);
+  assert.equal(parseCommand('!help #12').id, 12);
+  assert.equal(parseCommand('!help #12 2').times, 2);
+  assert.deepEqual(parseCommand('!upgrade'), { type: 'upgrade' });
+  assert.deepEqual(parseCommand('!upgrade tools'), { type: 'upgrade', what: 'tools' });
+  assert.deepEqual(parseCommand('!tools'), { type: 'upgrade', what: 'tools' });
+  assert.deepEqual(parseCommand('!upgrade woodcutter'), { type: 'upgrade', item: 'woodcutter' });
+  assert.deepEqual(parseCommand('!upgrade #12'), { type: 'upgrade', id: 12 });
+  assert.deepEqual(parseCommand('!upgrade the house'), { type: 'upgrade' });
+  assert.deepEqual(parseCommand('!stop'), { type: 'stop' });
+});
+
 test('other commands', () => {
   assert.deepEqual(parseCommand('!upgrade'), { type: 'upgrade' });
   assert.deepEqual(parseCommand('!hat tophat'), { type: 'hat', hat: 'tophat', raw: 'tophat' });
