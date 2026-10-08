@@ -71,7 +71,7 @@ function choose(v) {
     return say('!build ' + pick(pool));
   }
   if (r < 0.96) return say('!help');
-  return say(pick(['!me', '!dance', '!hat cap', '!work']));
+  return say(pick(['!me', '!dance', '!hat cap', '!work', '!wood', '!stone', '!food']));
 }
 
 const nextAct = new Map(viewers.map((v) => [v.id, T0 + rnd() * ACT_EVERY_MIN * 60e3]));

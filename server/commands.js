@@ -47,8 +47,42 @@ export function parseCommand(text) {
     }
     case 'work':
     case 'gather':
-    case 'job':
-      return { type: 'work', target: args.length ? resolveResource(args[0]) : null, raw: args[0] || '' };
+    case 'job': {
+      const w = args[0] || '';
+      if (w === 'fish' || w === 'fishing') return { type: 'work', target: 'food', how: 'fish', raw: w };
+      return { type: 'work', target: w ? resolveResource(w) : null, raw: w };
+    }
+    // Gathering by hand: the bot goes out to the right land itself.
+    case 'wood':
+    case 'chop':
+    case 'cut':
+    case 'lumber':
+    case 'logs':
+      return { type: 'work', target: 'wood' };
+    case 'stone':
+    case 'stones':
+    case 'rock':
+    case 'rocks':
+      return { type: 'work', target: 'stone' };
+    case 'mine':
+    case 'dig': {
+      // !mine is stone, !mine coal and !mine iron dig ore.
+      const r = args.length ? resolveResource(args[0]) : null;
+      return { type: 'work', target: r === 'coal' || r === 'iron' ? r : 'stone' };
+    }
+    case 'food':
+    case 'berries':
+    case 'berry':
+    case 'pick':
+    case 'forage':
+      return { type: 'work', target: 'food' };
+    case 'fish':
+    case 'fishing':
+      return { type: 'work', target: 'food', how: 'fish' };
+    case 'coal':
+      return { type: 'work', target: 'coal' };
+    case 'iron':
+      return { type: 'work', target: 'iron' };
     case 'explore':
     case 'scout':
     case 'discover': {

@@ -4,7 +4,7 @@
 // The server decides everything; this file only makes it look alive.
 import { ITEMS, ERAS, RESOURCES, hashStr } from '../shared/catalog.js';
 import { DIRS, hexDist } from '../shared/hex.js';
-import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS } from '../shared/terrain.js';
+import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER, HAND_LOAD, HAND_TRIP_SEC, HAND_FIRST_SEC } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
 import { buildingMesh } from './buildings.js';
@@ -26,6 +26,10 @@ const LINES = {
   hello: ['Hi! I am {name}.', 'Hello there!', 'Nice island, right?', 'I build what {name} asks for.'],
   work: ['Tap, tap, tap!', 'Almost there!', 'This is going to look great.', 'Hammer time!'],
   job: ['Hard work!', 'Every bit helps.', 'For the village!', 'Heave ho!'],
+  chop: ['Timber!', 'Chop, chop!', 'Nice logs here.', 'Wood for the town!'],
+  mine: ['Clink, clink!', 'Rock solid.', 'Heavy stuff!', 'Found a good vein!'],
+  pick: ['So many berries!', 'One for the basket, one for me.', 'Yum!'],
+  fish: ['Come on, fishy...', 'A bite!', 'Patience...'],
   done: ['Done!', 'Ta-da!', 'Looks good!', 'Another one!'],
   sleep: ['Zzz…', 'Five more minutes…', 'Dreaming of bricks.'],
   poke: ['Hey, I am busy!', 'That tickles!', 'I am getting dizzy…'],
@@ -1133,6 +1137,7 @@ export async function createWorld(stage, overlay, opts) {
     if (b.mode === 'arrive') return;
     b.act = null;
     b.after = null;
+    b.gatherUntil = 0;
     const own = jobOf(b.id);
     if (own && own.b.status === 'building') {
       const s = workSpot(own.b);
@@ -1178,6 +1183,7 @@ export async function createWorld(stage, overlay, opts) {
       carry(b, null);
       return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw: Math.atan2(t.x - nd.x, t.z - nd.z) }, (x) => { x.mode = 'job'; x.jobPose = 'scout'; x.yawTarget = Math.atan2(t.x - nd.x, t.z - nd.z); }, deadline, WALK * 1.6);
     }
+    if (job.kind === 'hand') return gatherTrip(b, job);
     const v = builds.get(job.buildId);
     if (!v) return false;
     if (job.kind === 'wonder') {
@@ -1195,6 +1201,48 @@ export async function createWorld(stage, overlay, opts) {
     if (!s) return false;
     const pose = job.kind === 'repair' ? 'hammer' : WATER_JOBS.has(v.b.item) ? 'water' : FISH_JOBS.has(v.b.item) ? 'fish' : 'hammer';
     return goSpot(b, s, (x) => { x.mode = 'job'; x.jobPose = pose; x.yawTarget = s.yaw; });
+  }
+  // Gathering by hand: work on the land, carry a crate to the nearest store
+  // (or the landing pad), and go back. The crate reaches town about when the
+  // server counts the load.
+  function gatherTrip(b, job) {
+    const drop = dropSpot(b);
+    if (b.carrying) {
+      if (!drop) return false;
+      return goSpot(b, drop, (x) => {
+        carry(x, null);
+        dust(x.x, x.y, x.z, 0.25);
+        popAt(x.x, x.y + 0.5, x.z, { [job.res]: HAND_LOAD });
+        startAct(x, 'look', 0.8, drop.yaw);
+      });
+    }
+    const t = layout.index.get(job.q + ',' + job.r);
+    if (!t) return false;
+    let node = -1;
+    for (let k = 0; k < 6 && node < 0; k++) node = cornerNode(t, (k + b.haulSalt) % 6);
+    if (node < 0) node = nearestNode(t.x, t.z);
+    const nd = nav.nodes[node];
+    const yaw = Math.atan2(t.x - nd.x, t.z - nd.z);
+    return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw }, (x) => {
+      x.mode = 'job';
+      x.jobPose = job.pose || 'chop';
+      x.yawTarget = yaw;
+      const back = drop ? (Math.hypot(drop.x - x.x, drop.z - x.z) * 1.3) / WALK : 0;
+      const first = job.startedAt + HAND_FIRST_SEC * 1000;
+      let at = first + Math.max(0, Math.ceil((now() - first) / (HAND_TRIP_SEC * 1000))) * HAND_TRIP_SEC * 1000;
+      if (at - back * 1000 < now() + 5000) at += HAND_TRIP_SEC * 1000;
+      x.gatherUntil = Math.min(job.until, at) - back * 1000;
+    });
+  }
+  function dropSpot(b) {
+    let best = null;
+    let bd = Infinity;
+    for (const o of builds.values()) {
+      if (!o.b.built || o.b.damaged || ITEMS[o.b.item]?.kind !== 'storage') continue;
+      const d = Math.hypot(o.root.position.x - b.x, o.root.position.z - b.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return (best && workSpot(best.b, b.haulSalt)) || padSpot(b.haulSalt);
   }
   function freePois() {
     return beachPois.concat(buildPois).filter((p) => !poiUser.has(p.id) && (!p.night || sky.night > 0.5));
@@ -1350,10 +1398,17 @@ export async function createWorld(stage, overlay, opts) {
         if (rand() < dt * 0.05) showBubble(b, pick(LINES.work), 2600);
         break;
       }
-      case 'job':
-        if (!data.jobs.has(b.id) || jobOf(b.id)?.b.status === 'building') { decide(b); break; }
-        if (rand() < dt * 0.03) showBubble(b, pick(LINES.job), 2200);
+      case 'job': {
+        const job = data.jobs.get(b.id);
+        if (!job || jobOf(b.id)?.b.status === 'building') { decide(b); break; }
+        if (job.kind === 'hand') {
+          if (b.gatherUntil && now() >= b.gatherUntil) { carry(b, job.res); decide(b); break; }
+          if ((b.jobPose === 'chop' || b.jobPose === 'mine') && b.struck && !b.chipped) chips(b);
+          b.chipped = b.struck;
+        }
+        if (rand() < dt * 0.03) showBubble(b, pick(LINES[job.kind === 'hand' ? b.jobPose : 'job'] || LINES.job), 2200);
         break;
+      }
       case 'wait': {
         const job = jobOf(b.id);
         if (!job || job.b.status !== 'queued' || data.jobs.has(b.id)) decide(b);
@@ -1411,8 +1466,9 @@ export async function createWorld(stage, overlay, opts) {
     p.legL.rotation.set(0, 0, 0);
     p.legR.rotation.set(0, 0, 0);
     const jobPose = b.mode === 'job' ? b.jobPose : null;
-    p.hammer.visible = b.mode === 'work' || jobPose === 'hammer';
-    p.cup.visible = b.act === 'drink';
+    const swing = jobPose === 'hammer' || jobPose === 'chop' || jobPose === 'mine';
+    p.hammer.visible = b.mode === 'work' || swing;
+    p.cup.visible = b.act === 'drink' || jobPose === 'pick';
     p.rod.visible = b.act === 'fish' || jobPose === 'fish';
     p.can.visible = b.act === 'water' || jobPose === 'water';
     p.dizzy.visible = false;
@@ -1425,8 +1481,14 @@ export async function createWorld(stage, overlay, opts) {
       p.armR.rotation.x = w * 0.5;
       lift = Math.abs(w) * 0.012;
       if (b.speed > WALK * 1.6) p.inner.rotation.x = 0.15;
-    } else if (b.mode === 'work' || jobPose === 'hammer') {
-      lift = hammerPose(b, p, t, data.event?.key === 'builderRush' ? 2.6 : 1.5);
+    } else if (b.mode === 'work' || swing) {
+      lift = hammerPose(b, p, t, data.event?.key === 'builderRush' && !jobPose ? 2.6 : jobPose === 'mine' ? 1.2 : 1.5);
+    } else if (jobPose === 'pick') {
+      // Bent over a bush, picking with one hand, basket in the other.
+      p.inner.rotation.x = 0.35;
+      p.armR.rotation.x = -0.6;
+      p.armL.rotation.x = still ? -1.1 : -0.9 - Math.max(0, Math.sin(t * 3 + b.phase)) * 0.6;
+      p.head.rotation.x = 0.2;
     } else if (jobPose === 'water') {
       p.armR.rotation.x = -1.1;
       p.can.rotation.x = still ? 0.6 : 0.4 + Math.sin(t * 3) * 0.3;
@@ -1872,6 +1934,14 @@ export async function createWorld(stage, overlay, opts) {
     if (still) return;
     burst({ x, y: y + 0.05, z, count: Math.round(40 * k), colors: ['#d8cbb0', '#c2b59a', '#efe6d2'], speed: 0.6, life: 1.4, size: 0.07, gravity: -0.2, drag: 1.5, spread: 0.4, up: 0.4, grow: 0.04 });
   }
+  // Wood chips or bits of stone where a gathering bot strikes.
+  function chips(b) {
+    if (still || distVol(b) < 0.2) return;
+    const x = b.x + Math.sin(b.yaw) * 0.14;
+    const z = b.z + Math.cos(b.yaw) * 0.14;
+    const colors = b.jobPose === 'mine' ? ['#8c8f94', '#b3b6ba', '#6f7378'] : ['#c79a5b', '#a8783f', '#e2c08c'];
+    burst({ x, y: b.y + 0.12, z, count: 6, colors, speed: 0.5, life: 0.7, size: 0.035, gravity: 3, spread: 0.05, up: 1.2 });
+  }
   function smoke(x, y, z, dark) {
     if (still) return;
     burst({ x, y, z, count: 10, colors: dark ? ['#5d636e', '#7a808a', '#454a52'] : ['#e9ecef', '#d6dbe0', '#f6f7f8'], speed: 0.1, life: 3, size: 0.12, gravity: -0.3, spread: 0.06, up: 1, grow: 0.1 });
@@ -2188,7 +2258,7 @@ export async function createWorld(stage, overlay, opts) {
       title = item.label + ' ' + Math.floor(pr * 100) + '% #' + b.id;
       let helpers = 0;
       for (const j of data.jobs.values()) if (j.buildId === b.id && j.kind === 'build') helpers++;
-      if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · !work ' + b.waitingFor[0];
+      if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · ' + (GATHER[b.waitingFor[0]] ? '!' : '!work ') + b.waitingFor[0];
       else sub = (helpers ? helpers + (helpers === 1 ? ' helper' : ' helpers') : 'nobody helping yet') + ' · !help #' + b.id;
       bar = pr;
     } else if (b.home && b.status === 'done') {
@@ -2236,12 +2306,15 @@ export async function createWorld(stage, overlay, opts) {
   }
   const pops = [];
   function addPop(v, out) {
+    popAt(v.root.position.x, v.root.position.y + v.h + 0.1, v.root.position.z, out);
+  }
+  function popAt(x, y, z, out) {
     if (pops.length >= (low ? 4 : 8)) return;
     const e = document.createElement('div');
     e.className = 'pop';
     e.textContent = Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  ');
     overlay.append(e);
-    pops.push({ el: e, x: v.root.position.x, y: v.root.position.y + v.h + 0.1, z: v.root.position.z, t0: performance.now() });
+    pops.push({ el: e, x, y, z, t0: performance.now() });
   }
   const v3 = new T.Vector3();
   function project(x, y, z) {

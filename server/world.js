@@ -58,6 +58,7 @@ const res = (r) => (r === 'power' ? '⚡ power' : RESOURCES[r].emoji + ' ' + RES
 const label = (item) => ITEMS[item].label.toLowerCase();
 const scaleCost = (cost, f) => Object.fromEntries(Object.entries(cost).map(([r, n]) => [r, Math.max(1, Math.ceil(n * f))]));
 const withArticle = (s) => (/^[aeiou]/i.test(s) ? 'an ' : 'a ') + s;
+const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const rndPick = (id) => (hashStr(id + ':' + Math.floor(Date.now() / 60e3)) % 1000) / 1000;
 const isProducerLike = (it) => ['producer', 'power', 'storage'].includes(it.kind);
 
@@ -155,6 +156,7 @@ export class World {
     this.fuel = new Map();
     this.stalled = {};
     this.rates = {};
+    this.handMade = {}; // goods gathered by hand since the last economy step
     this.happy = 50;
     this.lastHappy = 0;
     this.lastEcon = 0;
@@ -536,12 +538,13 @@ export class World {
   work(cmd, u, now) {
     const s = this.state;
     const job = s.jobs[u.id];
-    if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, job.kind === 'explore' ? 'Your bot is out exploring!' : 'Your bot is already working (#' + job.buildId + ').');
+    if (job && job.kind !== 'gather' && job.kind !== 'build' && job.kind !== 'hand') return this.refuse(u, now, job.kind === 'explore' ? 'Your bot is out exploring!' : 'Your bot is already working (#' + job.buildId + ').');
     let target = cmd.target;
-    if (!target && cmd.raw) return this.refuse(u, now, 'Try !work wood, !work stone, !work food, or !help to build.');
+    if (!target && cmd.raw) return this.refuse(u, now, 'Try !wood, !stone, !food, or !help to build.');
     if (!target) target = this.suggestWork(u.id);
     if (target === 'wonder') return this.helpWonder(u, now);
-    if (!RESOURCES[target]) return this.refuse(u, now, 'Try !work wood, !work stone, !work food, or !help to build.');
+    if (!RESOURCES[target]) return this.refuse(u, now, 'Try !wood, !stone, !food, or !help to build.');
+    if (M.GATHER[cmd.how || target]) return this.gather(u, cmd.how || target, now);
     const makers = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[target] && (!b.ores || b.ores.includes(target)));
     if (!makers.length) {
       const who = RESOURCES[target].from;
@@ -557,6 +560,46 @@ export class World {
     return this.startJob(u, { buildId: b.id, kind: 'work', res: target, until: now + this.limits.workMinutes * 60e3 }, now, ITEMS[b.item].label);
   }
 
+  // !wood, !stone, !food, !fish, !coal, !iron: the bot walks out to the right
+  // land, gathers by hand and brings a load to town every couple of minutes.
+  gather(u, kind, now) {
+    const s = this.state;
+    let spots = this.gatherSpots(kind);
+    if (kind === 'food' && !spots.length) { kind = 'fish'; spots = this.gatherSpots(kind); }
+    const g = M.GATHER[kind];
+    const r = g.res;
+    if (RESOURCES[r].era > s.era) return this.refuse(u, now, RESOURCES[r].label + ' arrives in the ' + ERAS[RESOURCES[r].era].name + '.');
+    if (!spots.length) return this.refuse(u, now, 'Nobody has found ' + g.land + ' yet. Try !explore');
+    const t = spots[hashStr(u.id + ':' + Math.floor(now / 1000)) % spots.length];
+    if (s.jobs[u.id]) this.endJob(u.id, false, now);
+    return this.startJob(u, { kind: 'hand', res: r, pose: g.pose, q: t.q, r: t.r, until: now + this.limits.workMinutes * 60e3, next: now + M.HAND_FIRST_SEC * 1000 }, now, g.verb + ' in ' + g.land);
+  }
+
+  gatherSpots(kind) {
+    const taken = new Set();
+    for (const b of this.builds) { const t = M.tileAt(this.map, b.q, b.r); if (t) taken.add(t.i); }
+    return M.gatherSpots(this.map, kind, this.known, taken);
+  }
+
+  // The command that gathers this good by hand, if the town knows where.
+  handCmd(r) {
+    if (!M.GATHER[r] || RESOURCES[r].era > this.state.era) return null;
+    if (this.gatherSpots(r).length || (r === 'food' && this.gatherSpots('fish').length)) return '!' + r;
+    return null;
+  }
+
+  handDeliver(uid, job) {
+    const s = this.state;
+    const ev = this.activeEvent(job.next);
+    const n = M.HAND_LOAD * (ev?.boost?.[job.res] || 1);
+    const add = Math.max(0, Math.min(n, E.capacity(this.builds) - (s.stock[job.res] || 0)));
+    s.stock[job.res] = (s.stock[job.res] || 0) + add;
+    this.handMade[job.res] = (this.handMade[job.res] || 0) + add;
+    const me = s.builders[uid];
+    if (me) me.gathered = (me.gathered || 0) + add;
+    this.dirty = true;
+  }
+
   suggestWork(userId) {
     const mine = this.builds.find((b) => (b.founderId === userId || b.ownerId === userId) && b.status === 'queued' && b.waitingFor?.length);
     if (mine) return mine.waitingFor[0];
@@ -567,7 +610,7 @@ export class World {
     const short = (this.wonderShort || []).find((r) => this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]));
     if (short && rndPick(userId) < 0.6) return short;
     if (w && w.status !== 'done' && this.helpersAt(w.id) < WONDER_HELPERS) return 'wonder';
-    const makeable = E.unlockedResources(this.state.era).filter((r) => this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]));
+    const makeable = E.unlockedResources(this.state.era).filter((r) => this.handCmd(r) || this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]));
     makeable.sort((a, b) => (this.state.stock[a] || 0) / cap - (this.state.stock[b] || 0) / cap);
     return makeable[0] || 'wood';
   }
@@ -578,6 +621,7 @@ export class World {
     this.state.jobs[u.id] = job;
     this.changed({ type: 'job', userId: u.id, job });
     if (job.kind === 'explore') return { ok: true, message: u.name + ' sets off to explore.' };
+    if (job.kind === 'hand') return { ok: true, message: u.name + ' goes out to ' + where + ': +' + M.HAND_LOAD + ' ' + res(job.res) + ' every ' + M.HAND_TRIP_SEC / 60 + ' minutes.' };
     const verb = { wonder: 'is hauling goods to the', repair: 'is repairing the', build: 'is helping build the' }[job.kind] || 'is helping at the';
     return { ok: true, message: u.name + ' ' + verb + ' ' + (where || 'town') + ' (#' + job.buildId + ').' };
   }
@@ -594,7 +638,7 @@ export class World {
         this.changed({ type: 'build', build: b });
         this.emit({ type: 'notice', kind: 'repair', user: this.nameOf(userId), text: 'repaired the ' + label(b.item) + ' (#' + b.id + ')' });
       }
-      this.grant(userId, { work: 6, wonder: 8, repair: 12, gather: 3, build: 4 }[job.kind] || 0, now);
+      this.grant(userId, { work: 6, hand: 6, wonder: 8, repair: 12, gather: 3, build: 4 }[job.kind] || 0, now);
     } else if (job.kind === 'repair' && b) delete b.repairBy;
     this.changed({ type: 'job', userId, job: null });
   }
@@ -815,13 +859,14 @@ export class World {
       built: this.builds.filter((x) => x.project && x.built && x.helpers && x.helpers[id]).length,
       founded: this.builds.filter((x) => x.project && x.founderId === id).length,
       trips: b.trips || 0,
+      gathered: Math.floor(b.gathered || 0),
       rank: rank || null,
       job: this.state.jobs[id] || null,
     };
   }
 
   commands(now, u) {
-    const text = '!home your own house · !build ' + itemsOfEra(this.state.era)[1] + ' start a project · !help build it · !work wood · !explore · !vote 1 · !me';
+    const text = '!home your own house · !wood !stone !food gather · !build ' + itemsOfEra(this.state.era)[1] + ' start a project · !help build it · !explore · !me';
     if (this.onCooldown('help', this.limits.helpCooldownSec, now)) return { ok: true, message: text };
     this.emit({ type: 'notice', kind: 'help', text });
     void u;
@@ -956,6 +1001,11 @@ export class World {
         }
         continue;
       }
+      if (job.kind === 'hand') {
+        while (job.next <= now && job.next <= job.until) { this.handDeliver(uid, job); job.next += M.HAND_TRIP_SEC * 1000; }
+        if (now >= job.until) this.endJob(uid, true, now);
+        continue;
+      }
       const b = this.builds.find((x) => x.id === job.buildId);
       if (!b || (job.kind === 'wonder' && b.status === 'done') || (job.kind === 'build' && b.status === 'done')) { this.endJob(uid, !!b, now); continue; }
       if (job.kind === 'gather') {
@@ -1020,9 +1070,10 @@ export class World {
     for (const r of Object.keys(s.stock)) s.stock[r] = Math.max(0, Math.min(cap, s.stock[r]));
     if (dt > 0) {
       for (const r of E.unlockedResources(s.era)) {
-        const inst = (((out.made[r] || 0) - (out.used[r] || 0)) * 60) / dt;
+        const inst = (((out.made[r] || 0) + (this.handMade[r] || 0) - (out.used[r] || 0)) * 60) / dt;
         this.rates[r] = this.rates[r] == null ? inst : this.rates[r] * 0.9 + inst * 0.1;
       }
+      this.handMade = {};
     }
     this.stalled = out.stalled;
     const needs = this.needs(cap, pw);
@@ -1100,17 +1151,21 @@ export class World {
       if (p.status === 'building') add({ kind: 'help', id: p.id, item: p.item, text: 'Help build the ' + name, cmd: many ? '!help #' + p.id : '!help' });
       else if (p.waitingFor?.length) {
         const r = p.waitingFor[0];
+        const hand = this.handCmd(r);
         const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]);
-        if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: '!work ' + r });
+        if (hand) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: hand });
+        else if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: '!work ' + r });
         else add({ kind: 'build', item: RESOURCES[r].from, res: r, text: 'Nobody makes ' + RESOURCES[r].label.toLowerCase() + ' yet', cmd: '!build ' + RESOURCES[r].from });
       }
     }
     const room = projects.length < this.limits.maxProjects;
     for (const n of needs) {
       const what = n.res === 'power' ? 'power' : RESOURCES[n.res].label.toLowerCase();
-      if (!room) break;
-      if (n.site) add({ kind: 'build', item: n.item, res: n.res, text: 'The town needs ' + what, cmd: '!build ' + n.item });
-      else add({ kind: 'explore', item: n.item, res: n.res, text: 'Find ' + (n.where || 'more land') + ' for ' + what, cmd: '!explore' });
+      const hand = n.res !== 'power' && this.handCmd(n.res);
+      if (hand) add({ kind: 'gather', res: n.res, text: 'The town needs ' + what + ', gather some', cmd: hand });
+      if (!room) continue;
+      if (n.site) add({ kind: 'build', item: n.item, res: n.res, text: (hand ? cap1(withArticle(label(n.item))) + ' makes ' + what + ' all day' : 'The town needs ' + what), cmd: '!build ' + n.item });
+      else if (!hand) add({ kind: 'explore', item: n.item, res: n.res, text: 'Find ' + (n.where || 'more land') + ' for ' + what, cmd: '!explore' });
     }
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });

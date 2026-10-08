@@ -43,6 +43,19 @@ test('work, repair and vote', () => {
   assert.deepEqual(parseCommand('!1'), { type: 'vote', option: 1 });
 });
 
+test('gathering by hand', () => {
+  assert.deepEqual(parseCommand('!wood'), { type: 'work', target: 'wood' });
+  assert.equal(parseCommand('!chop').target, 'wood');
+  assert.equal(parseCommand('!stone').target, 'stone');
+  assert.equal(parseCommand('!mine').target, 'stone');
+  assert.equal(parseCommand('!mine coal').target, 'coal');
+  assert.equal(parseCommand('!dig iron').target, 'iron');
+  assert.equal(parseCommand('!berries').target, 'food');
+  assert.deepEqual(parseCommand('!fish'), { type: 'work', target: 'food', how: 'fish' });
+  assert.equal(parseCommand('!work fish').how, 'fish');
+  assert.equal(parseCommand('!coal').target, 'coal');
+});
+
 test('other commands', () => {
   assert.deepEqual(parseCommand('!upgrade'), { type: 'upgrade' });
   assert.deepEqual(parseCommand('!hat tophat'), { type: 'hat', hat: 'tophat', raw: 'tophat' });

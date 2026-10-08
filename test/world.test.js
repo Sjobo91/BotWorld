@@ -166,7 +166,8 @@ test('a project waits for missing goods, !help then gathers them', () => {
   const res = say(w, carol, '!help', T0 + 201e3);
   assert.equal(res.ok, true);
   assert.match(res.message, /waiting for/);
-  assert.equal(w.state.jobs.c.kind, 'work');
+  assert.equal(w.state.jobs.c.kind, 'hand');
+  assert.equal(w.state.jobs.c.res, 'wood');
   w.state.stock.wood = 50;
   w.tick(T0 + 202e3);
   assert.equal(p.status, 'building');
@@ -330,15 +331,18 @@ test('parks next to homes make people happier', () => {
   assert.ok(w.econ.happy > bare, bare + ' -> ' + w.econ.happy);
 });
 
-test('!work sends your bot to a producer and pays XP', () => {
+test('!work bricks sends your bot to a kiln and pays XP', () => {
   const { w, events } = makeWorld();
-  let now = finish(w, bob, 'woodcutter', T0);
-  const res = say(w, alice, '!work wood', now);
-  assert.equal(res.ok, true);
+  w.state.era = 1;
+  w.ensureWonder(T0);
+  assert.match(say(w, alice, '!work bricks', T0).message, /!build kiln/);
+  const now = finish(w, bob, 'kiln', T0);
+  const res = say(w, alice, '!work bricks', now);
+  assert.equal(res.ok, true, res.message);
   const job = w.state.jobs.a;
   assert.equal(job.kind, 'work');
-  assert.equal(w.builds.find((b) => b.id === job.buildId).item, 'woodcutter');
-  assert.equal(say(w, alice, '!work stone', now).ok, false);
+  assert.equal(w.builds.find((b) => b.id === job.buildId).item, 'kiln');
+  assert.equal(say(w, alice, '!work steel', now).ok, false);
   const xp = w.state.builders.a.xp;
   run(w, now, 11 * 60e3);
   assert.equal(w.state.jobs.a, undefined);
@@ -346,9 +350,47 @@ test('!work sends your bot to a producer and pays XP', () => {
   assert.ok(events.some((e) => e.type === 'job' && e.job === null));
 });
 
-test('!work explains what to build when nothing makes that resource', () => {
+test('!wood sends your bot into a forest, and it brings wood to town', () => {
+  const { w, events } = makeWorld();
+  w.state.stock.wood = 10;
+  const res = say(w, alice, '!wood', T0);
+  assert.equal(res.ok, true, res.message);
+  assert.match(res.message, /cut wood in a forest/);
+  const job = w.state.jobs.a;
+  assert.equal(job.kind, 'hand');
+  assert.equal(job.res, 'wood');
+  const t = M.tileAt(w.map, job.q, job.r);
+  assert.equal(t.t, 'forest');
+  assert.ok(M.isExplored(w.bits, t.i));
+  assert.ok(events.some((e) => e.type === 'job' && e.job?.kind === 'hand'));
+  const xp = w.state.builders.a.xp;
+  run(w, T0, 70e3);
+  assert.equal(w.state.stock.wood, 10 + M.HAND_LOAD);
+  run(w, T0 + 70e3, 11 * 60e3);
+  // One load a minute in, then one every two minutes until the job ends.
+  const loads = 1 + Math.floor((10 * 60 - M.HAND_FIRST_SEC) / M.HAND_TRIP_SEC);
+  assert.equal(w.state.stock.wood, 10 + loads * M.HAND_LOAD);
+  assert.equal(w.state.builders.a.gathered, loads * M.HAND_LOAD);
+  assert.equal(w.state.jobs.a, undefined);
+  assert.ok(w.state.builders.a.xp > xp);
+});
+
+test('gathering by hand needs known land, the right era and room in storage', () => {
   const { w } = makeWorld();
-  assert.match(say(w, alice, '!work stone', T0).message, /!build quarry/);
+  assert.match(say(w, alice, '!coal', T0).message, /Medieval Town/);
+  assert.equal(say(w, alice, '!mine', T0).ok, true);
+  assert.equal(w.state.jobs.a.res, 'stone');
+  assert.ok(['hills', 'mountain'].includes(M.tileAt(w.map, w.state.jobs.a.q, w.state.jobs.a.r).t));
+  w.state.stock.stone = w.econ ? w.econ.cap : 100;
+  run(w, T0, 70e3);
+  assert.ok(w.state.stock.stone <= 100);
+  w.bits.fill(0);
+  assert.match(say(w, bob, '!wood', T0 + 80e3).message, /Nobody has found a forest yet/);
+  // Food comes from berries, or from fishing when no meadow is known.
+  revealAll(w);
+  assert.equal(say(w, carol, '!fish', T0 + 90e3).ok, true);
+  assert.equal(w.state.jobs.c.pose, 'fish');
+  assert.equal(w.state.jobs.c.res, 'food');
 });
 
 test('the wonder fills up, the era changes, and homes and huts grow into the new era', () => {
@@ -477,8 +519,8 @@ test('the town says what it needs and what to do next', () => {
   assert.ok(food);
   assert.ok(['gatherer', 'fisher'].includes(food.item));
   assert.equal(food.site, true);
+  assert.equal(w.econ.plan[0].cmd, '!food');
   assert.ok(w.econ.plan.some((s) => s.cmd === '!build ' + food.item));
-  assert.ok(w.econ.plan.some((s) => s.cmd === '!explore'));
   rich(w);
   say(w, alice, '!build woodcutter', T0);
   w.economy(T0 + 5000, 5);

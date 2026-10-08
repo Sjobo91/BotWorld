@@ -5,6 +5,7 @@
 // Extra options: &sound=1 (start with sound), &quality=low (no shadows, for
 // weak or GPU-less machines), &time=21:30 (pretend it is that time, for testing).
 import { ITEMS, ERAS, EVENTS, RESOURCES } from '../shared/catalog.js';
+import { GATHER } from '../shared/terrain.js';
 import { createWorld } from './world3d.js';
 import { createHud } from './hud.js';
 
@@ -223,9 +224,15 @@ function announce(b, prev) {
     else hud.toast('done', em, who, ' finished ' + withArticle(describe(b)) + '!');
   }
 }
+const HAND_ICON = { chop: '🪓', mine: '⛏️', pick: '🫐', fish: '🎣' };
 function announceJob(userId, job) {
   if (!job || job.kind === 'gather') return;
   const who = (state.builders.get(userId) || {}).name || 'someone';
+  if (job.kind === 'hand') {
+    const g = Object.values(GATHER).find((x) => x.pose === job.pose && x.res === job.res);
+    hud.toast('job', HAND_ICON[job.pose] || '🧺', who, ' went out to ' + (g ? g.verb + ' in ' + g.land : 'gather') + '.');
+    return;
+  }
   const at = state.builds.get(job.buildId);
   const label = at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island';
   if (job.kind === 'explore') { hud.toast('job', '🧭', who, ' set off to explore the fog.'); return; }

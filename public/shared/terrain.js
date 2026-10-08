@@ -318,6 +318,36 @@ export function oresNear(map, t) {
   return [...set];
 }
 
+// --- Gathering by hand -----------------------------------------------------------------------
+// !wood, !stone, !food, !fish, !coal, !iron send a bot out to gather on the
+// right land. It brings HAND_LOAD goods to town every HAND_TRIP_SEC seconds
+// (the first load a little sooner). Buildings make more, and keep going
+// while chat sleeps.
+export const HAND_LOAD = 2;
+export const HAND_TRIP_SEC = 120;
+export const HAND_FIRST_SEC = 60;
+const nearWater = (map, t) => TERRAIN[t.t].land && neighborsOf(map, t).some((n) => WATER.includes(n.t));
+export const GATHER = {
+  wood: { res: 'wood', pose: 'chop', verb: 'cut wood', land: 'a forest', on: (map, t) => t.t === 'forest' },
+  stone: { res: 'stone', pose: 'mine', verb: 'break stone', land: 'rocky hills', on: (map, t) => t.t === 'hills' || t.t === 'mountain' },
+  food: { res: 'food', pose: 'pick', verb: 'pick berries', land: 'a berry meadow', on: (map, t) => t.t === 'meadow' },
+  fish: { res: 'food', pose: 'fish', verb: 'catch fish', land: 'water', on: nearWater },
+  coal: { res: 'coal', pose: 'mine', verb: 'dig coal', land: 'a coal deposit', on: (map, t) => t.f === 'coal' },
+  iron: { res: 'iron', pose: 'mine', verb: 'dig iron', land: 'an iron deposit', on: (map, t) => t.f === 'iron' },
+};
+// The nearest known tiles to gather on, closest to the town first. taken
+// holds the tile numbers that have a building on them.
+export function gatherSpots(map, kind, known, taken) {
+  const g = GATHER[kind];
+  if (!g) return [];
+  const out = [];
+  for (const t of map.tiles) if ((!known || known(t)) && !taken?.has(t.i) && g.on(map, t)) out.push(t);
+  // Hills before mountains: a bot can stand right on them.
+  const cost = (t) => t.d + (t.t === 'mountain' ? 3 : 0);
+  out.sort((a, b) => cost(a) - cost(b));
+  return out.slice(0, 8);
+}
+
 // --- Paths over land (A* with a small heap) ------------------------------------------------------
 export function findPath(map, from, to, ok = walkable, maxNodes = 6000) {
   if (!from || !to) return null;

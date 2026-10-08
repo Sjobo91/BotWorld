@@ -4,6 +4,7 @@
 // and the big banners for wonders, new eras and the finale.
 // Viewer names and text only ever go in as text, never as HTML.
 import { ITEMS, ERAS, RESOURCES, EVENTS, itemsOfEra } from '../shared/catalog.js';
+import { GATHER } from '../shared/terrain.js';
 
 const DAY = 864e5;
 const $ = (id) => document.getElementById(id);
@@ -85,10 +86,11 @@ export function createHud(state, now, opts) {
     row('!home', 'get your own home and bot');
     row('!build ' + starter, 'start a town project');
     row('!help', 'help build it, more bots go faster');
-    row('!work wood', 'help make goods');
+    row('!wood !stone !food', 'gather by hand: chop, mine, pick');
+    if (state.era >= RESOURCES.coal.era) row('!coal !iron', 'dig ore from a deposit');
     row('!explore', 'scout the fog for new land');
     row('!help wonder', 'haul goods to the wonder');
-    row('!me', 'find your home · !upgrade it');
+    row('!me', 'find your bot and your home');
     renderSources();
     $('howBuildTitle').textContent = 'Build in the ' + ERAS[state.era].name;
     $('howBuildCmd').textContent = '!build ' + starter;
@@ -106,14 +108,15 @@ export function createHud(state, now, opts) {
     }
     const quick = $('quick');
     quick.textContent = '';
-    for (const c of ['!home', '!build ' + starter, '!help', '!work', '!explore', '!help wonder', '!upgrade', '!vote 1', '!repair', '!me', '!dance']) {
+    for (const c of ['!home', '!build ' + starter, '!help', '!wood', '!stone', '!food', '!explore', '!help wonder', '!upgrade', '!vote 1', '!repair', '!me', '!dance']) {
       const b = el('button', 'devbtn', c);
       b.type = 'button';
       b.dataset.cmd = c;
       quick.append(b);
     }
   }
-  // Every good the town can have yet, the building that makes it and where.
+  // Every good the town can have yet: how to gather it by hand, and the
+  // building that makes it all day.
   function renderSources() {
     const ul = $('sources');
     ul.textContent = '';
@@ -123,7 +126,13 @@ export function createHud(state, now, opts) {
       const head = el('span', 's-head');
       head.append(el('span', 'em', info.emoji), el('b', null, info.label));
       const how = el('span', 's-how');
-      how.append(el('span', null, ITEMS[info.from].emoji + ' ' + ITEMS[info.from].label.toLowerCase() + ', ' + info.where + ' '), code('!work ' + r));
+      const maker = ITEMS[info.from].emoji + ' ' + ITEMS[info.from].label.toLowerCase();
+      const hand = GATHER[r];
+      if (hand) {
+        how.append(code('!' + r), el('span', null, r === 'food' ? ' berries or ' : ' in ' + hand.land + ' · '));
+        if (r === 'food') how.append(code('!fish'), el('span', null, ' · '));
+        how.append(el('span', null, maker + ' makes it all day'));
+      } else how.append(el('span', null, maker + ', ' + info.where + ' '), code('!work ' + r));
       li.append(head, how);
       ul.append(li);
     }
@@ -422,11 +431,16 @@ export function createHud(state, now, opts) {
     fact('🏡', c.home ? 'Home: ' + ITEMS[c.home.item].label.toLowerCase() + ', level ' + c.home.level : 'No home yet: type !home');
     fact('🔨', 'Helped build ' + c.built + (c.built === 1 ? ' building' : ' buildings') + (c.founded ? ', started ' + c.founded : ''));
     if (c.trips) fact('🧭', c.trips + (c.trips === 1 ? ' trip' : ' trips') + ' into the fog');
+    if (c.gathered) fact('🧺', 'Gathered ' + c.gathered + ' goods by hand');
     fact('🔥', c.streak + (c.streak === 1 ? ' day' : ' days') + ' in a row');
     if (c.rank) fact('🏆', '#' + c.rank + ' this week');
-    if (c.job) {
+    if (c.job?.kind === 'hand') {
+      const g = Object.values(GATHER).find((x) => x.pose === c.job.pose && x.res === c.job.res);
+      fact('🧺', 'Out to ' + (g ? g.verb + ' in ' + g.land : 'gather'));
+    } else if (c.job?.kind === 'explore') fact('🧭', 'Exploring the fog');
+    else if (c.job) {
       const at = state.builds.get(c.job.buildId);
-      fact('⚒️', (c.job.kind === 'wonder' ? 'Hauling to the ' : c.job.kind === 'repair' ? 'Repairing the ' : 'Working at the ') + (at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island'));
+      fact('⚒️', (c.job.kind === 'wonder' ? 'Hauling to the ' : c.job.kind === 'repair' ? 'Repairing the ' : 'Working at the ') + (at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'town'));
     }
     box.append(head, bar, facts);
     box.hidden = false;

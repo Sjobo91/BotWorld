@@ -15,7 +15,7 @@ npm install
 npm run demo
 ```
 
-Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the town grow without being live. The bar at the bottom lets you type commands yourself as any name.
+Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the town grow without being live. The bar at the bottom lets you type commands yourself as any name. If the panels look tiny, the browser is zoomed out: press Ctrl and 0 to go back to 100%.
 
 Want to see a later era right away? Grow a world in pretend time and open it:
 
@@ -59,12 +59,16 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
 | `!help` | Your bot helps build the project that needs it most. `!help #12` for a certain one |
 | `!help wonder` | Haul goods to the era's wonder |
-| `!work wood` | Help make one good: `wood`, `stone`, `food`, `bricks`, `coal`, `iron`, `steel`, `parts`, `chips` |
+| `!wood` | Your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
+| `!stone` | Your bot breaks stone in the rocky hills (also `!mine`) |
+| `!food` | Your bot picks berries in a meadow, or `!fish` by the water |
+| `!coal`, `!iron` | From the Medieval Town: dig ore at a deposit the scouts found |
+| `!work bricks` | Help at a building that makes a good from other goods: `bricks`, `steel`, `parts`, `chips` |
 | `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
 | `!upgrade` | Make your home bigger (three levels per era) |
 | `!repair` | Fix a building broken by a storm or blackout |
 | `!vote 1` or `!1` | Vote in a chat vote |
-| `!me` | Show your card and fly the camera to your home |
+| `!me` | Show your card, put a beacon in your colour over your bot and fly the camera to it |
 | `!hat tophat` | Dress your bot (more hats unlock as you level up) |
 | `!dance` | Your bot throws a little party |
 | `!commands` | Shows the commands on screen |
@@ -78,6 +82,7 @@ On screen, the **What to do now** box always says the next step for chat, with t
 In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)):
 
 * **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
+* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot out to chop, mine or pick on the right land. It brings 2 goods to town every 2 minutes, so there is always something useful to do, even before the first woodcutter stands.
 * **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge.
 * **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
 * **People** move into homes when there is food and the town is not miserable. Parks, fountains, statues and stadiums make them happier, and happy towns work faster.

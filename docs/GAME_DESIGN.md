@@ -13,15 +13,16 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 
 ## Homes and town projects
 
-* **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` flies the camera to it. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
+* **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` puts an arrow and a column of light in your colour over your bot for 20 seconds and flies the camera to it. Everyone on a stream sees the same picture, so this is how a viewer finds their own bot. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
 * **Everything else is built together.** `!build farm` starts a town project, at most three at a time. It needs its goods first, then work: every bot that types `!help` adds one share of work per second, and the townsfolk always add a little, so a project also finishes when chat is asleep. A hut takes one bot about two minutes and four bots half a minute. Helpers earn XP for the time they put in, and the finished building is credited to its builders.
+* **Gathering by hand.** `!wood`, `!stone` and `!food` (and `!coal` and `!iron` from the Medieval Town) send your bot out to the nearest known land of the right kind: a forest, rocky hills, a berry meadow (or the water with `!fish`), a coal or iron deposit. It chops, mines or picks there and carries a crate back to the nearest store, which adds 2 of that good to the town every 2 minutes (the first load after 1 minute) for 10 minutes. That is as much as one helper adds at a building, so chat always has something useful to do, even before the first woodcutter stands. Buildings make more and keep going while chat sleeps. Goods made from other goods (bricks, steel, parts, chips) come only from their building; `!work bricks` sends your bot to help at a kiln.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
 
 ## What chat sees
 
-* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, fetch the goods a project waits for (`!work wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
+* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, gather the goods a project waits for (`!wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
 * **Being built:** every project with its progress and helpers, and the homes going up.
-* **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs.
+* **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs. The goods page shows both ways for every good: the command to gather it by hand, and the building that makes it all day.
 
 ## The arc
 
@@ -63,7 +64,7 @@ When an era starts, older buildings that have a modern version rebuild themselve
 
 Every 5 seconds the server runs one step:
 
-* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power, scaled by how good their spot is. Helpers sent with `!work` add speed. Happy towns work faster.
+* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power, scaled by how good their spot is. Helpers sent with `!work bricks` (and so on) add speed. Goods gathered by hand go straight into storage. Happy towns work faster.
 * **Storage** limits every good (start 100, stockpiles, barns and warehouses add room). A full store stops its producers.
 * **Power** (from the Industrial Age) comes from coal plants (burn coal), wind turbines, solar farms (only by day, following the real sun) and fusion. Factories, skyscrapers and labs need it.
 * **Happiness** comes from parks, gardens, fountains, statues, stadiums and other decor near homes, and drops when people are hungry or the power is out.

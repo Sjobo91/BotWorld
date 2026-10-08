@@ -28,7 +28,7 @@ export function line(world, name) {
     const color = Math.random() < 0.3 ? pick(Object.keys(COLORS)) + ' ' : '';
     return pick(['!build ', '!b ']) + color + item;
   }
-  if (r < 0.82) return '!work' + pick(['', ' wood', ' stone', ' food']);
+  if (r < 0.82) return pick(['!wood', '!stone', '!food', '!chop', '!mine', '!fish', '!work']);
   if (r < 0.85) return '!upgrade';
   if (r < 0.89) {
     const level = me ? levelFor(me.xp || 0) : 1;
