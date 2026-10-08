@@ -11,7 +11,7 @@
 //   npm start -- --data=data-preview
 import { World, freshState } from '../server/world.js';
 import { Store } from '../server/store.js';
-import { ITEMS, ERAS, itemsOfEra, houseFor } from '../public/shared/catalog.js';
+import { ITEMS, ERAS, itemsOfEra } from '../public/shared/catalog.js';
 import { unlockedResources } from '../server/economy.js';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=')));
@@ -28,7 +28,7 @@ Math.random = rnd;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 
 const T0 = Date.UTC(2026, 9, 1, 8);
-const world = new World(freshState(T0), { pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined });
+const world = new World(freshState(T0, SEED), { pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined });
 const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
@@ -46,44 +46,32 @@ function online(v, t) {
 
 function choose(v) {
   const s = world.state;
-  const say = (text) => {
-    const res = world.handleChat({ id: v.id, name: v.name }, text, now);
-    // A chat that reads the hint demolishes something old when the island is full.
-    const m = res && /!demolish #(\d+)/.exec(res.message || '');
-    if (m && /full/.test(res.message)) world.handleChat({ id: v.id, name: v.name }, '!demolish #' + m[1], now);
-    return res;
-  };
+  const say = (text) => world.handleChat({ id: v.id, name: v.name }, text, now);
+  if (!world.homeOf(v.id)) return say('!home');
   if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * 3)));
   if (world.builds.some((b) => b.damaged && !b.repairBy) && rnd() < 0.5) return say('!repair');
-  const pending = world.pendingOf(v.id);
-  if (pending) return say('!work');
+  const job = s.jobs[v.id];
+  if (job && job.kind !== 'gather' && rnd() < 0.7) return null;
+  const econ = world.econ || {};
+  const plan = econ.plan || [];
   const r = rnd();
-  if (r < 0.55) {
+  // Most of chat does what the "next step" box on screen says.
+  if (r < 0.6 && plan.length) {
+    const i = rnd() < 0.55 ? 0 : rnd() < 0.6 ? 1 : Math.floor(rnd() * plan.length);
+    return say(plan[Math.min(i, plan.length - 1)].cmd);
+  }
+  if (r < 0.72) return say('!explore');
+  if (r < 0.8) return say('!upgrade');
+  if (r < 0.92) {
     const era = s.era;
-    const econ = world.econ || {};
-    const full = Object.values(econ.stock || {}).some((n) => n >= (econ.cap || 100) * 0.9);
-    // What a chat watching the HUD would notice is missing.
-    const needs = new Set();
-    for (const b of world.builds) if (b.status === 'queued') for (const x of b.waitingFor || []) needs.add(x);
-    for (const x of (econ.wonder && econ.wonder.short) || []) needs.add(x);
-    for (const x of unlockedResources(era)) if ((econ.stock || {})[x] < (econ.cap || 100) * 0.1) needs.add(x);
-    // Most of chat follows the "village needs" hint on screen.
-    if (econ.needs && econ.needs.length && rnd() < 0.6) return say('!build ' + pick(econ.needs).item);
-    if (((econ.population || 0) >= (econ.popCap || 0) && rnd() < 0.5) || rnd() < 0.25) return say('!build house');
-    if (needs.size && rnd() < 0.7) {
-      const want = pick([...needs]);
-      const maker = Object.keys(ITEMS).filter((k) => ITEMS[k].era <= era && ITEMS[k].recipe?.out?.[want]);
-      if (maker.length) return say('!build ' + pick(maker));
-    }
-    if (full && rnd() < 0.5) return say('!build ' + Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'storage' && ITEMS[k].era <= era).pop());
-    if (econ.power && econ.power.demand > econ.power.supply) return say('!build ' + pick(Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'power' && ITEMS[k].era <= era)));
+    if ((econ.population || 0) >= (econ.popCap || 0) - 2 && (econ.popCap || 0) < (econ.popGoal || 25) * 1.3) return say('!build house');
     if ((econ.happy || 50) < 60 && rnd() < 0.5) return say('!build ' + pick(Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'decor' && ITEMS[k].era <= era)));
-    const pool = rnd() < 0.6 ? itemsOfEra(era) : world.buildable();
+    if (econ.power && econ.power.demand > econ.power.supply) return say('!build ' + pick(Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'power' && ITEMS[k].era <= era)));
+    const pool = rnd() < 0.6 ? itemsOfEra(era) : world.buildable ? world.buildable() : itemsOfEra(era);
     return say('!build ' + pick(pool));
   }
-  if (r < 0.8) return say(rnd() < 0.5 ? '!work wonder' : '!work');
-  if (r < 0.9) return say('!upgrade');
-  return say(pick(['!me', '!dance', '!hat cap']));
+  if (r < 0.96) return say('!help');
+  return say(pick(['!me', '!dance', '!hat cap', '!work']));
 }
 
 const nextAct = new Map(viewers.map((v) => [v.id, T0 + rnd() * ACT_EVERY_MIN * 60e3]));
@@ -107,6 +95,7 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
       day,
       era: ERAS[world.state.era].name,
       builds: world.builds.filter((b) => b.built).length,
+      explored: Math.round((100 * e.explored.n) / e.explored.total) + '%',
       pop: e.population + '/' + e.popCap,
       happy: e.happy,
       knowledge: Math.round((100 * e.knowledge) / e.knowledgeNeed) + '%',
@@ -124,7 +113,6 @@ if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' 
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;
 console.log('built:', JSON.stringify(byItem));
-void houseFor;
 
 // Save the grown island with every time moved so that the end of the run is now.
 if (args.save) {

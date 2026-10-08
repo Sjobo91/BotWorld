@@ -1,8 +1,8 @@
 # BotWorld
 
-A 24/7 Twitch stream where chat builds a world together. Type `!build house` in chat and your own little bot lands on the island, walks to a free plot and builds it while everyone watches. Built in the style of Botdorp, in English, starting from an empty island.
+A 24/7 Twitch stream where chat builds a world together. Type `!home` in chat and your own little bot lands, gets its own home in your colour, and then helps the whole chat build a town: someone starts a project (`!build woodcutter`), everyone helps (`!help`), and the more bots help, the faster it rises. Built in the style of Botdorp, in English.
 
-The island starts with sticks and stones. Over about two months chat works its way through six eras, from huts and quarries to farms and brick kilns, mines and townhouses, steel mills and factories with electricity, skyscrapers with wind and solar power, and finally a glowing future city with fusion reactors. Every era has a wonder that the whole chat builds together.
+The town sits in the middle of a big world (about ten times the old island), with forests, berry meadows, rocky hills, mountains with coal and iron, lakes, rivers and a sea coast. Everything beyond the first few fields is fog until a bot explores it with `!explore`, like in Age of Empires. It starts with sticks and stones and, over about two months, works its way through six eras up to a glowing future city with fusion reactors. Every era has a wonder that the whole chat builds together.
 
 ![The island in each of the six eras](docs/eras.jpg)
 
@@ -55,34 +55,35 @@ On screen: goods in storage along the top (with how fast they change), the era p
 
 | Command | What happens |
 | --- | --- |
-| `!build house` | Your bot lands (first time) and builds the home of the current era |
-| `!build red farm` | Any building of this era or an earlier one, optionally in a color |
-| `!build fountain near park` | Ask for a spot next to something |
-| `!work` | Your bot helps where it is needed most for 10 minutes (more goods, XP) |
+| `!home` | Your bot lands and builds your own home, with a flag and a rim in your colour |
+| `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
+| `!help` | Your bot helps build the project that needs it most. `!help #12` for a certain one |
+| `!help wonder` | Haul goods to the era's wonder |
 | `!work wood` | Help make one good: `wood`, `stone`, `food`, `bricks`, `coal`, `iron`, `steel`, `parts`, `chips` |
-| `!work wonder` | Haul goods to the era's wonder |
+| `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
+| `!upgrade` | Make your home bigger (three levels per era) |
 | `!repair` | Fix a building broken by a storm or blackout |
-| `!upgrade` | Turn your oldest home into this era's home, or grow a tower |
 | `!vote 1` or `!1` | Vote in a chat vote |
-| `!me` | Show your card: level, XP, buildings, streak, rank |
+| `!me` | Show your card and fly the camera to your home |
 | `!hat tophat` | Dress your bot (more hats unlock as you level up) |
 | `!dance` | Your bot throws a little party |
-| `!demolish #12` | Remove one of your own buildings |
-| `!help` | Shows the commands on screen |
+| `!commands` | Shows the commands on screen |
 
 Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
 
-Plain words work too: `!build a big blue castle please` builds a blue tower (once towers exist).
+On screen, the **What to do now** box always says the next step for chat, with the command to type, and the how-to card takes turns showing the commands, where every good comes from and this era's buildings.
 
 ## The game
 
 In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)):
 
+* **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
+* **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge.
 * **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
 * **People** move into homes when there is food and the town is not miserable. Parks, fountains, statues and stadiums make them happier, and happy towns work faster.
 * **Power** from the Industrial Age: coal plants, wind turbines, solar farms (only by day) and fusion. Factories and skyscrapers stop without it.
-* **Eras.** To move on, a town needs enough people, the era's wonder finished and a full knowledge bar, which takes about 9 days (campfires, schools and labs speed it up). Old buildings then rebuild themselves in the new style.
-* **Viewers** earn XP and levels for everything they do, which unlock hats and more building slots. A weekly leaderboard keeps it fresh.
+* **Eras.** To move on, a town needs enough people, the era's wonder finished and a full knowledge bar, which takes about 11 days (campfires, schools and labs speed it up). Old buildings, homes too, then rebuild themselves in the new style.
+* **Viewers** earn XP and levels for everything they do (helping, exploring, hauling), which unlock hats. A weekly leaderboard keeps it fresh.
 * **Votes and events** every hour or so: festivals, harvests, a merchant ship, meteor showers, storms that break buildings until chat repairs them.
 
 ## The Gazette
@@ -134,12 +135,12 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Port | `--port=3000`, `PORT` | 3000 |
 | Data folder | `--data=folder`, `BOTWORLD_DATA` | `data` |
 | Pretend viewers | `--simulate`, `BOTWORLD_SIMULATE=1` | off |
-| Days per era | `--era-days=9`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 9 (about 2 months in all) |
+| Days per era | `--era-days=11`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 11 (about 2 months in all) |
 | Where the island is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
-| Limits | `limits` in the config file: `maxQueue`, `maxConcurrentBuilds`, `voteEveryMin`, `workMinutes` and more | see `server/world.js` |
+| Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `workMinutes`, `helpMinutes` and more | see `server/world.js` |
 
-Page options: `?stream=1` broadcast view, `&sound=1` start with sound, `&quality=low` no shadows, `&time=21:30` pretend it is that time of day.
+Page options: `?stream=1` broadcast view (press Esc, or the button that shows when you move the mouse, to leave it), `&sound=1` start with sound, `&quality=low` no shadows, `&time=21:30` pretend it is that time of day.
 
 ## How it works
 

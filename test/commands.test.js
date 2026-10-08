@@ -50,7 +50,15 @@ test('other commands', () => {
   assert.equal(parseCommand('!hat sombrero').hat, null);
   assert.deepEqual(parseCommand('!dance'), { type: 'dance' });
   assert.deepEqual(parseCommand('!me'), { type: 'me' });
-  assert.deepEqual(parseCommand('!help'), { type: 'help' });
+  assert.deepEqual(parseCommand('!help'), { type: 'help', id: null });
+  assert.deepEqual(parseCommand('!help #4'), { type: 'help', id: 4 });
+  assert.deepEqual(parseCommand('!help wonder'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!commands'), { type: 'commands' });
+  assert.deepEqual(parseCommand('!home'), { type: 'home' });
+  assert.deepEqual(parseCommand('!explore'), { type: 'explore', dir: null, raw: '' });
+  assert.deepEqual(parseCommand('!explore NW'), { type: 'explore', dir: 'northwest', raw: 'nw' });
+  assert.equal(parseCommand('!scout the south').dir, 'south');
+  assert.equal(parseCommand('!explore moon').dir, null);
   assert.deepEqual(parseCommand('!demolish #7'), { type: 'demolish', id: 7 });
   assert.deepEqual(parseCommand('!remove #12'), { type: 'remove', id: 12 });
   assert.deepEqual(parseCommand('!remove x'), { type: 'remove', id: null });

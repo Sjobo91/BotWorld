@@ -95,7 +95,7 @@ function handle(ev) {
       state.builders = new Map(ev.builders.map((b) => [b.id, b]));
       state.jobs = new Map(Object.entries(ev.jobs || {}));
       state.connected = true;
-      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo });
+      world?.load(ev.builds, ev.builders, { jobs: ev.jobs, econ: ev.econ, era: ev.era, finished: ev.finished, event: ev.event, geo: ev.mode?.geo, map: ev.map, explored: ev.explored });
       showDevbar(ev.mode);
       if (ev.gazette && Date.now() - ev.gazette.at < 40 * 60e3) hud.gazette(ev.gazette);
       break;
@@ -150,6 +150,11 @@ function handle(ev) {
       return;
     case 'me':
       hud.showMe(ev.card);
+      world?.highlight(ev.card.id);
+      return;
+    case 'explore':
+      world?.explore(ev);
+      announceExplore(ev);
       return;
     case 'era':
       state.era = ev.era;
@@ -174,6 +179,7 @@ function handle(ev) {
       return;
     case 'notice':
       if (ev.kind === 'help') hud.toast('help', '💡', '', ev.text);
+      else if (ev.kind === 'project') hud.toast('done', '🎉', '', ev.text);
       else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
       else if (ev.kind === 'wonder') {
         const w = state.econ?.wonder;
@@ -195,16 +201,24 @@ function withArticle(text) {
 }
 function announce(b, prev) {
   if (b.wonder) return;
-  const who = (state.builders.get(b.ownerId) || {}).name || 'someone';
+  const who = (state.builders.get(b.ownerId || b.founderId) || {}).name || 'someone';
   const em = ITEMS[b.item] ? ITEMS[b.item].emoji : '📦';
-  if (!prev && b.status === 'queued') {
+  if (!prev && b.home) {
+    hud.toast('build', '🏡', who, ' is building their own home (#' + b.id + ')');
+  } else if (!prev && b.project) {
+    hud.toast('build', '🔨', who, ' started ' + withArticle(describe(b)) + ' (#' + b.id + '). Help build it: !help');
+  } else if (!prev && b.status === 'queued') {
     const wait = b.waitingFor && b.waitingFor.length ? ', waiting for ' + b.waitingFor.map((r) => RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase()).join(' and ') : '';
     hud.toast('build', '🔨', who, ' is building ' + withArticle(describe(b)) + ' (#' + b.id + ')' + wait);
+  } else if (prev && prev.project && prev.status !== 'done' && b.status === 'done') {
+    return; // the server's notice names everyone who helped
   } else if (prev && prev.status === 'done' && b.upgrade && !b.evolving) {
     const to = ITEMS[b.upgrade.item];
     hud.toast('upgrade', '⬆️', who, to && b.upgrade.item !== b.item ? ' is turning their ' + describe(b) + ' into ' + withArticle(to.label.toLowerCase()) + ' (#' + b.id + ')' : ' is upgrading their ' + describe(b) + ' (#' + b.id + ')');
   } else if (prev && prev.status !== 'done' && b.status === 'done' && !prev.evolving) {
     if (prev.upgrade && prev.item !== b.item) hud.toast('done', em, who, "'s home is now " + withArticle(describe(b)) + '!');
+    else if (prev.upgrade && b.home) hud.toast('done', em, who, "'s home grew to level " + b.level + '!');
+    else if (b.home) hud.toast('done', '🏡', who, ' moved into their new home!');
     else if (prev.upgrade) hud.toast('done', em, who, "'s " + describe(b) + ' reached level ' + b.level + '!');
     else hud.toast('done', em, who, ' finished ' + withArticle(describe(b)) + '!');
   }
@@ -214,9 +228,26 @@ function announceJob(userId, job) {
   const who = (state.builders.get(userId) || {}).name || 'someone';
   const at = state.builds.get(job.buildId);
   const label = at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island';
+  if (job.kind === 'explore') { hud.toast('job', '🧭', who, ' set off to explore the fog.'); return; }
+  if (job.kind === 'build') { hud.toast('job', '🔨', who, ' is helping build the ' + label + '.'); return; }
   if (job.kind === 'wonder') hud.toast('job', '📦', who, ' is hauling goods to the ' + label + '.');
   else if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
   else hud.toast('job', '⚒️', who, ' is helping at the ' + label + (job.res && RESOURCES[job.res] ? ' (' + RESOURCES[job.res].emoji + ')' : '') + '.');
+}
+
+const FOUND = { coal: ['⚫', 'found coal in the hills'], iron: ['⛓️', 'found iron in the hills'], ruins: ['🏚️', 'found ancient ruins'], tablet: ['📜', 'found an old stone tablet (+2 hours of knowledge)'] };
+function announceExplore(ev) {
+  if (!ev.userId) return;
+  const n = (ev.tiles || []).length;
+  if (!(ev.found || []).length) {
+    if (n) hud.toast('explore', '🧭', ev.name, ' explored ' + n + ' new tiles of land.');
+    return;
+  }
+  for (const f of ev.found.slice(0, 2)) {
+    const [em, text] = FOUND[f.f] || ['✨', 'found something'];
+    const gift = f.gift && Object.keys(f.gift).length ? ': ' + resText(f.gift) : '';
+    hud.toast('found', em, ev.name, ' ' + text + gift + '!');
+  }
 }
 
 function setSound(on) {
@@ -260,6 +291,21 @@ async function send(text) {
     out.textContent = 'The BotWorld server is not answering.';
   }
   $('devText').value = '';
+}
+
+// Leaving the stream view: press Esc, or the button that shows up when the
+// mouse moves (OBS never moves the mouse, so it never shows on stream).
+if (stream) {
+  const exit = $('exitStream');
+  let hide = 0;
+  const leave = () => { location.href = '/' + location.search.replace(/([?&])stream=1&?/, '$1').replace(/[?&]$/, ''); };
+  exit.addEventListener('click', leave);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') leave(); });
+  addEventListener('mousemove', () => {
+    exit.hidden = false;
+    clearTimeout(hide);
+    hide = setTimeout(() => { exit.hidden = true; }, 2500);
+  });
 }
 
 // A stream runs for days: start fresh every night at 4:00 to keep memory tidy.

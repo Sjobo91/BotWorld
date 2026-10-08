@@ -3,7 +3,8 @@
 // wonder, chats and sleeps. Each era changes how the island itself looks.
 // The server decides everything; this file only makes it look alive.
 import { ITEMS, ERAS, RESOURCES, hashStr } from '../shared/catalog.js';
-import { landRingFor, hexDist, ringTiles } from '../shared/hex.js';
+import { DIRS, hexDist } from '../shared/hex.js';
+import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
 import { buildingMesh } from './buildings.js';
@@ -17,6 +18,8 @@ const DAY = 864e5;
 const SLEEP_AFTER = 3 * DAY;
 const GONE_AFTER = 14 * DAY;
 const MAX_BOTS = 60;
+const RING2 = [];
+for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) === 2) RING2.push([dq, dr]);
 const WALK = 0.42;
 const CHAT_EMOJI = ['☕', '💬', '😄', '🔨', '🎉', '🤔', '👍', '🍕', '🌻', '✨', '🏠', '📦'];
 const LINES = {
@@ -63,6 +66,13 @@ export async function createWorld(stage, overlay, opts) {
   const audio = createAudio();
   const data = { builders: new Map(), jobs: new Map(), econ: null, event: null };
   mats.path = std(0xdccfb2);
+  mats.mountain = std(0x8c867f);
+  mats.snow = std(0xf3f6f8);
+  mats.bush = std(0x4f8f45);
+  mats.berry = std(0xd23a55);
+  mats.coalOre = std(0x26272b, { roughness: 0.5 });
+  mats.ironOre = std(0xa65a35, { roughness: 0.6, metalness: 0.2 });
+  mats.ruin = std(0xcfc6b3);
   mats.neonGlow = new T.SpriteMaterial({ map: glowTexture(), color: 0x5ef2ff, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending });
   const crateMats = Object.fromEntries(Object.entries(RES_COLORS).map(([r, c]) => [r, std(c)]));
 
@@ -87,7 +97,8 @@ export async function createWorld(stage, overlay, opts) {
 
   const scene = new T.Scene();
   scene.fog = new T.Fog(0xf8e6cd, 30, 90);
-  const camera = new T.PerspectiveCamera(34, 1, 0.05, 400);
+  // A near plane not too close keeps depth precise even on 16 bit depth buffers.
+  const camera = new T.PerspectiveCamera(34, 1, 0.3, 400);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = !still;
   controls.dampingFactor = 0.08;
@@ -112,9 +123,9 @@ export async function createWorld(stage, overlay, opts) {
   sun.shadow.normalBias = 0.02;
   const flash = new T.AmbientLight(0xdfe8ff, 0);
   scene.add(hemi, sun, sun.target, flash);
-  const water = new T.Mesh(new T.CircleGeometry(220, 48), mats.water);
+  const water = new T.Mesh(new T.CircleGeometry(R * SQ3 * (MAP_RADIUS + 1.5), 96), mats.water);
   water.rotation.x = -Math.PI / 2;
-  water.position.y = -0.55;
+  water.position.y = -0.1;
   scene.add(water);
   const stars = makeStars();
   scene.add(stars);
@@ -127,7 +138,7 @@ export async function createWorld(stage, overlay, opts) {
   const critterGroup = new T.Group();
   scene.add(buildGroup, botGroup, fxGroup, critterGroup);
 
-  const TILE_COLORS = { empty: new T.Color('#8ccd74'), edge: new T.Color('#9fd889'), done: new T.Color('#74bb63'), dirt: new T.Color('#b48d5f'), plaza: new T.Color('#cfd6df') };
+  const TILE_COLORS = { dirt: new T.Color('#b48d5f'), plaza: new T.Color('#cfd6df') };
   let era = 0;
   const look = () => ERAS[era].look;
 
@@ -146,120 +157,332 @@ export async function createWorld(stage, overlay, opts) {
     else if (dr > ds) r = -q - s;
     return layout.index.get(q + ',' + r) || null;
   }
-  function onLand(x, z, margin) {
-    const t = tileAtPoint(x, z);
-    return !!t && Math.hypot(x - t.x, z - t.z) < R * margin;
-  }
 
-  // --- The island ------------------------------------------------------------------
+  // --- The world: terrain, fog, roads ---------------------------------------------------
+  // Every tile of the map is drawn once, as two instanced hex prisms: a base
+  // (its edge shows as a road in town, a seam in the wild, the owner's colour
+  // round a home) and a top slab in the colour of the land. Land nobody has
+  // explored yet is drawn as flat dark fog, and lifts into view when a scout
+  // or a new building reveals it.
+  const LAND = {
+    deep: { top: -0.34, c: '#2f6f9f' }, water: { top: -0.24, c: '#4d93c2' }, river: { top: -0.18, c: '#5ba7d1' },
+    sand: { top: 0.06, c: '#e6d39a' }, grass: { top: TILE_TOP, c: '#8ccd74' }, meadow: { top: TILE_TOP, c: '#a8c86a' },
+    forest: { top: TILE_TOP, c: '#5f9f53' }, hills: { top: 0.11, c: '#b3a586' }, mountain: { top: 0.13, c: '#8f8a84' },
+  };
+  const BASE_TOP = PATH_TOP;
+  const FOG = { edge: C3('#5e6878'), mid: C3('#434b59'), deep: C3('#2c323d') };
+  function C3(hex) { return new T.Color(hex); }
+  const landColor = {};
+  for (const [k, v] of Object.entries(LAND)) landColor[k] = new T.Color(v.c);
+  const layout = { map: null, seed: null, tiles: [], index: new Map(), extent: 6, knownR: 6, townR: 3, pierEnd: null, railR: 0, seaAngle: 0, coastD: 0, townTiles: [] };
+  let known = new Uint8Array(0);
   let world = null;
-  let pathMesh = null;
-  let tileMesh = null;
+  let baseMesh = null;
+  let topMesh = null;
   let ship = null;
   let lampGroup = null;
-  let framedR = 0;
-  const layout = { landRing: 0, tiles: [], index: new Map(), landR: 0, beachR: 0, islandR: 0, pierEnd: null, railR: 0 };
-  const nav = { nodes: [], adj: [], ring: [], keys: new Map(), door: -1 };
+  let poiGroup = null;
+  let framed = false;
+  const nav = { nodes: [], adj: [], keys: new Map(), door: -1, town: [] };
   let beachPois = [];
   let buildPois = [];
   const poiUser = new Map();
+  const reveals = [];
+  const decor = { meshes: [], byTile: new Map() };
+  const isWater = (t) => !!t && (t.t === 'deep' || t.t === 'water' || t.t === 'river');
+  const walkTile = (t) => !!t && TERRAIN[t.t] && (TERRAIN[t.t].land || TERRAIN[t.t].ford);
 
-  function buildIsland(landRing) {
+  function buildWorld(mapInfo, exploredHex) {
     if (world) {
       scene.remove(world);
-      pathMesh.dispose();
-      tileMesh.dispose();
+      baseMesh.dispose();
+      topMesh.dispose();
+      for (const d of decor.meshes) d.dispose();
     }
     world = new T.Group();
     scene.add(world);
-    layout.landRing = landRing;
-    layout.tiles = [];
+    const map = makeMap(mapInfo.seed, mapInfo.cleared || []);
+    layout.map = map;
+    layout.seed = mapInfo.seed;
+    layout.seaAngle = map.seaAngle;
+    layout.tiles = map.tiles.map((m) => {
+      const p = hexToWorld(m.q, m.r);
+      return { i: m.i, q: m.q, r: m.r, d: m.d, ring: m.d, t: m.t, f: m.f, x: p.x, z: p.z, top: LAND[m.t].top, k: 0 };
+    });
     layout.index.clear();
-    for (let n = 0; n <= landRing; n++) {
-      for (const [q, r] of ringTiles(n)) {
-        const p = hexToWorld(q, r);
-        const t = { q, r, x: p.x, z: p.z, ring: n, i: layout.tiles.length };
-        layout.tiles.push(t);
-        layout.index.set(q + ',' + r, t);
-      }
-    }
-    layout.landR = landRing * SQ3 * R + R;
-    layout.beachR = layout.landR + 0.35;
-    layout.islandR = layout.landR + 1.7;
-    layout.railR = layout.islandR - 0.42;
-    const island = mesh(new T.CylinderGeometry(layout.islandR, layout.islandR + 0.6, 0.6, 72), mats.sand, 0, -0.3, 0, world);
-    island.receiveShadow = true;
+    for (const t of layout.tiles) layout.index.set(t.q + ',' + t.r, t);
+    const bits = decodeBits(exploredHex || '', map);
+    known = new Uint8Array(map.total);
+    for (let i = 0; i < map.total; i++) known[i] = isExplored(bits, i) ? 1 : 0;
+    for (const t of layout.tiles) t.k = known[t.i];
+    // The world goes on beyond the map, lost in the fog.
+    const outer = mesh(new T.RingGeometry(R * SQ3 * (MAP_RADIUS + 0.4), 420, 96, 1), new T.MeshStandardMaterial({ color: FOG.deep, roughness: 1 }), 0, BASE_TOP - 0.002, 0, world);
+    outer.rotation.x = -Math.PI / 2;
     const n = layout.tiles.length;
-    pathMesh = new T.InstancedMesh(geo('pathHex', () => new T.CylinderGeometry(R, R, PATH_TOP, 6)), mats.path, n);
-    tileMesh = new T.InstancedMesh(geo('tileHex', () => new T.CylinderGeometry(R * 0.9, R * 0.92, TILE_TOP - PATH_TOP, 6)), mats.tile, n);
-    const m = new T.Matrix4();
-    for (const t of layout.tiles) {
-      m.makeTranslation(t.x, PATH_TOP / 2, t.z);
-      pathMesh.setMatrixAt(t.i, m);
-      m.makeTranslation(t.x, PATH_TOP + (TILE_TOP - PATH_TOP) / 2, t.z);
-      tileMesh.setMatrixAt(t.i, m);
-      tileMesh.setColorAt(t.i, TILE_COLORS.empty);
-    }
-    pathMesh.receiveShadow = true;
-    tileMesh.receiveShadow = true;
-    world.add(pathMesh, tileMesh);
+    baseMesh = new T.InstancedMesh(geo('baseHex', () => new T.CylinderGeometry(R, R, 1, 6).translate(0, -0.5, 0)), mats.tile, n);
+    topMesh = new T.InstancedMesh(geo('topHex', () => new T.CylinderGeometry(R * 0.9, R * 0.93, 1, 6).translate(0, -0.5, 0)), mats.tile, n);
+    baseMesh.receiveShadow = true;
+    topMesh.receiveShadow = true;
+    world.add(baseMesh, topMesh);
     mesh(geo('pad', () => new T.CylinderGeometry(R * 0.92, R * 0.92, TILE_TOP - PATH_TOP + 0.006, 6)), mats.pad, 0, (PATH_TOP + TILE_TOP) / 2 + 0.003, 0, world).receiveShadow = true;
     const mark = mesh(geo('padRing', () => new T.RingGeometry(R * 0.55, R * 0.6, 48)), mats.padMark, 0, TILE_TOP + 0.008, 0, world);
     mark.rotation.x = -Math.PI / 2;
     ship = { g: shipMesh(), hopT: 1, amp: 0 };
     ship.g.position.y = TILE_TOP;
     world.add(ship.g);
-    buildNav();
-    buildBeach();
-    decorate();
+    buildDecor();
+    poiGroup = new T.Group();
     lampGroup = new T.Group();
-    world.add(lampGroup);
-    rebuildLamps();
-    refreshTiles();
-    refreshPois();
-    const span = layout.islandR + 2;
-    const sc = sun.shadow.camera;
-    sc.left = -span;
-    sc.right = span;
-    sc.top = span;
-    sc.bottom = -span;
-    sc.near = 0.5;
-    sc.far = span * 5;
-    sc.updateProjectionMatrix();
-    if (Math.abs(layout.islandR - framedR) > 0.4) {
-      frameCamera();
-      framedR = layout.islandR;
-    }
-    for (const b of bots.values()) resnap(b);
+    world.add(poiGroup, lampGroup);
+    afterExplore(true);
+    if (!framed) { frameCamera(); framed = true; }
     for (const p of [...porters]) removePorter(p);
     train = null;
     makeCritters();
-    syncTrain();
     updateSky();
   }
 
-  function ensureLand() {
-    let max = 0;
-    for (const v of builds.values()) max = Math.max(max, hexDist(v.b.q, v.b.r));
-    const want = landRingFor(max);
-    if (want > layout.landRing) buildIsland(want);
+  // Everything that depends on what is explored: the town size, paths, the
+  // pier and benches, the camera limits.
+  function updateTownSize() {
+    let far = START_RADIUS;
+    let knownFar = START_RADIUS;
+    for (const t of layout.tiles) if (known[t.i]) knownFar = Math.max(knownFar, t.d);
+    for (const v of builds.values()) far = Math.max(far, hexDist(v.b.q, v.b.r) + 2);
+    layout.extent = Math.min(MAP_RADIUS, far);
+    layout.knownR = knownFar;
+    layout.townR = (Math.max(3, far - 1) * SQ3 + 1) * R;
+    layout.railR = Math.max(3, far - 1.4) * SQ3 * R;
+    layout.townTiles = layout.tiles.filter((t) => known[t.i] && walkTile(t) && t.d <= layout.extent);
   }
-
-  function refreshTiles() {
-    if (!tileMesh) return;
-    const at = new Map();
-    for (const v of builds.values()) at.set(v.b.q + ',' + v.b.r, v.b);
+  function afterExplore(full) {
+    updateTownSize();
+    let coast = null;
     for (const t of layout.tiles) {
-      const b = at.get(t.q + ',' + t.r);
-      let c = t.ring === layout.landRing ? TILE_COLORS.edge : TILE_COLORS.empty;
-      if (t.ring === 1) c = TILE_COLORS.plaza;
-      else if (b && b.built) c = TILE_COLORS.done;
-      else if (b && b.status === 'building') c = TILE_COLORS.dirt;
-      tileMesh.setColorAt(t.i, c);
+      if (!known[t.i] || !isWater(t) || t.t === 'river') continue;
+      if (!coast || t.d < coast.d) coast = t;
     }
-    tileMesh.instanceColor.needsUpdate = true;
+    layout.coastD = coast ? Math.hypot(coast.x, coast.z) : 0;
+    buildNav();
+    buildBeach();
+    rebuildLamps();
+    refreshTiles();
+    refreshPois();
+    // Node numbers changed: every bot finds its feet again and carries on.
+    for (const p of [...porters]) removePorter(p);
+    for (const b of bots.values()) { const walking = b.mode === 'walk' || b.mode === 'job'; resnap(b); if (walking || full) b.timer = 0.05; }
+    syncTrain();
+    updateView();
     renderer.shadowMap.needsUpdate = true;
   }
+
+  // Tiles next to a building are town: their edges are roads.
+  function townSet() {
+    const s = new Set();
+    for (const t of layout.tiles) if (t.d <= 2) s.add(t.i);
+    for (const v of builds.values()) {
+      const c = layout.index.get(v.b.q + ',' + v.b.r);
+      if (!c) continue;
+      s.add(c.i);
+      for (const [dq, dr] of DIRS) {
+        const nb = layout.index.get(c.q + dq + ',' + (c.r + dr));
+        if (nb && walkTile(nb)) s.add(nb.i);
+      }
+    }
+    return s;
+  }
+  function fogShade(t) {
+    let best = 9;
+    for (let rad = 1; rad <= 2 && best > rad; rad++) {
+      for (const [dq, dr] of rad === 1 ? DIRS : RING2) {
+        const nb = layout.index.get(t.q + dq + ',' + (t.r + dr));
+        if (nb && known[nb.i]) { best = rad; break; }
+      }
+    }
+    return best === 1 ? FOG.edge : best === 2 ? FOG.mid : FOG.deep;
+  }
+  const tmpC = new T.Color();
+  const tmpM = new T.Matrix4();
+  const tmpQ = new T.Quaternion();
+  const tmpS = new T.Vector3();
+  const tmpP = new T.Vector3();
+  function seasonColor(t) {
+    const L = SEASON_LOOK[season] || SEASON_LOOK.summer;
+    if (t.t === 'grass') return tmpC.set(L.tiles[0]);
+    if (t.t === 'meadow') return tmpC.set(L.tiles[1]).lerp(landColor.meadow, 0.5);
+    if (t.t === 'forest') return tmpC.set(L.tiles[2]).multiplyScalar(0.82);
+    if (season === 'winter' && (t.t === 'hills' || t.t === 'sand')) return tmpC.copy(landColor[t.t]).lerp(C3('#eef3f5'), 0.55);
+    return tmpC.copy(landColor[t.t]);
+  }
+  // Draws one tile: k is how far it has risen out of the fog (0 to 1).
+  function drawTile(t, town, homes, at) {
+    const k = t.k;
+    const real = LAND[t.t].top;
+    const water = isWater(t);
+    // Fog is one flat, even surface; explored land rises (or water sinks) out of it.
+    const top = k >= 1 ? real : BASE_TOP + (real - BASE_TOP) * k;
+    const baseTop = water ? top : BASE_TOP;
+    tmpM.compose(tmpP.set(t.x, baseTop, t.z), tmpQ, tmpS.set(1, baseTop + 0.7, 1));
+    baseMesh.setMatrixAt(t.i, tmpM);
+    const slab = water ? 0.0001 : Math.max(0.0001, top - BASE_TOP);
+    tmpM.compose(tmpP.set(t.x, water ? top - 0.0001 : top, t.z), tmpQ, tmpS.set(1, slab, 1));
+    topMesh.setMatrixAt(t.i, tmpM);
+    const fog = fogShade(t);
+    // Base: road in town, owner colour round a home, a darker seam elsewhere.
+    let base;
+    const h = homes.get(t.i);
+    if (h) base = tmpC.set(h);
+    else if (water) base = seasonColor(t).multiplyScalar(0.8);
+    else if (town.has(t.i) && t.t !== 'mountain') base = tmpC.copy(mats.path.color);
+    else base = seasonColor(t).multiplyScalar(0.84);
+    baseMesh.setColorAt(t.i, k >= 1 ? base : base.clone().lerp(fog, 1 - k));
+    let c = t.d === 1 ? TILE_COLORS.plaza.clone() : seasonColor(t).clone();
+    const b = at.get(t.i);
+    if (b && b.status === 'building' && !b.built && !b.wonder) c = TILE_COLORS.dirt.clone();
+    topMesh.setColorAt(t.i, k >= 1 ? c : c.lerp(fog, 1 - k));
+  }
+  function refreshTiles() {
+    if (!topMesh) return;
+    const town = townSet();
+    const homes = new Map();
+    const at = new Map();
+    for (const v of builds.values()) {
+      const t = layout.index.get(v.b.q + ',' + v.b.r);
+      if (!t) continue;
+      at.set(t.i, v.b);
+      if (v.b.home) homes.set(t.i, (data.builders.get(v.b.ownerId) || {}).color || '#3b7ddd');
+    }
+    for (const t of layout.tiles) {
+      drawTile(t, town, homes, at);
+      setDecor(t, at.has(t.i) ? 0 : t.k);
+    }
+    baseMesh.instanceMatrix.needsUpdate = true;
+    topMesh.instanceMatrix.needsUpdate = true;
+    baseMesh.instanceColor.needsUpdate = true;
+    topMesh.instanceColor.needsUpdate = true;
+    for (const d of decor.meshes) d.instanceMatrix.needsUpdate = true;
+    renderer.shadowMap.needsUpdate = true;
+  }
+  // Newly explored tiles rise out of the fog over a second.
+  function revealTiles(list, animate) {
+    for (const i of list) {
+      if (known[i]) continue;
+      known[i] = 1;
+      const t = layout.tiles[i];
+      if (!t) continue;
+      if (animate && !still) { t.k = 0.001; reveals.push(t); } else t.k = 1;
+    }
+    afterExplore(false);
+  }
+  function stepReveals(dt) {
+    if (!reveals.length) return;
+    for (let i = reveals.length - 1; i >= 0; i--) {
+      const t = reveals[i];
+      t.k = Math.min(1, t.k + dt / 1.1);
+      if (t.k >= 1) reveals.splice(i, 1);
+    }
+    refreshTiles();
+  }
+
+  // Trees in the forests, rocks on the hills, peaks with snow, berry bushes,
+  // ore, ruins and old stones, all instanced: thousands of them in a few draws.
+  function buildDecor() {
+    decor.meshes = [];
+    decor.byTile.clear();
+    const kinds = {
+      trunk: { g: () => new T.CylinderGeometry(0.025, 0.035, 0.16, 5).translate(0, 0.08, 0), m: mats.trunk, list: [] },
+      pine: { g: () => new T.ConeGeometry(0.15, 0.4, 7).translate(0, 0.34, 0), m: mats.leaf2, list: [] },
+      crown: { g: () => new T.DodecahedronGeometry(0.15, 0).translate(0, 0.28, 0), m: mats.leaf, list: [] },
+      rock: { g: () => new T.DodecahedronGeometry(0.1, 0), m: mats.rock, list: [] },
+      peak: { g: () => new T.ConeGeometry(R * 0.82, 0.8, 7).translate(0, 0.4, 0), m: mats.mountain, list: [] },
+      snow: { g: () => new T.ConeGeometry(R * 0.3, 0.3, 7).translate(0, 0.66, 0), m: mats.snow, list: [] },
+      bush: { g: () => new T.DodecahedronGeometry(0.075, 0).translate(0, 0.06, 0), m: mats.bush, list: [] },
+      berry: { g: () => new T.SphereGeometry(0.022, 5, 4), m: mats.berry, list: [] },
+      coal: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.coalOre, list: [] },
+      iron: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.ironOre, list: [] },
+      column: { g: () => new T.CylinderGeometry(0.035, 0.04, 1, 6).translate(0, 0.5, 0), m: mats.ruin, list: [] },
+      slab: { g: () => new T.BoxGeometry(0.13, 0.22, 0.045).translate(0, 0.11, 0), m: mats.ruin, list: [] },
+      reed: { g: () => new T.ConeGeometry(0.018, 0.16, 4).translate(0, 0.08, 0), m: mats.leaf2, list: [] },
+    };
+    const add = (t, kind, x, y, z, s, sy, ry) => {
+      kinds[kind].list.push({ t, x, y, z, s, sy: sy || s, ry: ry || 0 });
+    };
+    for (const t of layout.tiles) {
+      const r = rng(hashStr('d' + layout.seed + ':' + t.i));
+      const top = LAND[t.t].top;
+      const jit = (a) => (r() - 0.5) * a;
+      if (t.t === 'forest') {
+        for (let j = 0; j < 3; j++) {
+          const x = t.x + jit(0.62);
+          const z = t.z + jit(0.62);
+          const s = 0.8 + r() * 0.5;
+          add(t, 'trunk', x, top, z, s);
+          add(t, r() < 0.55 ? 'pine' : 'crown', x, top, z, s, s, r() * 6);
+        }
+      } else if (t.t === 'grass' && t.d > 3 && r() < 0.07) {
+        const x = t.x + jit(0.4);
+        const z = t.z + jit(0.4);
+        add(t, 'trunk', x, top, z, 0.9);
+        add(t, 'crown', x, top, z, 0.9, 0.9, r() * 6);
+      } else if (t.t === 'hills') {
+        const n = 2 + Math.floor(r() * 2);
+        for (let j = 0; j < n; j++) add(t, 'rock', t.x + jit(0.6), top + 0.03, t.z + jit(0.6), 0.8 + r() * 0.9, 0.6 + r() * 0.5, r() * 6);
+      } else if (t.t === 'mountain') {
+        const s = 0.85 + r() * 0.4;
+        add(t, 'peak', t.x + jit(0.1), top, t.z + jit(0.1), 1, s, r() * 6);
+        add(t, 'snow', t.x, top, t.z, 1, s, 0);
+      } else if (t.t === 'meadow') {
+        for (let j = 0; j < 3; j++) {
+          const x = t.x + jit(0.6);
+          const z = t.z + jit(0.6);
+          add(t, 'bush', x, top, z, 0.9 + r() * 0.5);
+          add(t, 'berry', x + 0.03, top + 0.1, z + 0.02, 1);
+          add(t, 'berry', x - 0.04, top + 0.08, z - 0.01, 1);
+        }
+      } else if (t.t === 'sand' && r() < 0.3) {
+        add(t, 'rock', t.x + jit(0.5), top + 0.02, t.z + jit(0.5), 0.6, 0.4, r() * 6);
+      } else if (t.t === 'river' && r() < 0.5) {
+        for (let j = 0; j < 3; j++) add(t, 'reed', t.x + jit(0.8), top, t.z + jit(0.8), 1);
+      }
+      if (t.f === 'coal' || t.f === 'iron') {
+        for (let j = 0; j < 3; j++) add(t, t.f, t.x + jit(0.5), top + 0.04, t.z + jit(0.5), 0.8 + r() * 0.6, 0.7, r() * 6);
+      } else if (t.f === 'ruins') {
+        for (let j = 0; j < 4; j++) add(t, 'column', t.x + jit(0.55), top, t.z + jit(0.55), 1, 0.08 + r() * 0.2, 0);
+        add(t, 'slab', t.x + jit(0.3), top, t.z + jit(0.3), 1, 0.4, r() * 6);
+      } else if (t.f === 'tablet') {
+        add(t, 'slab', t.x, top, t.z, 1, 1, r() * 6);
+      }
+    }
+    for (const [name, kd] of Object.entries(kinds)) {
+      if (!kd.list.length) continue;
+      const im = new T.InstancedMesh(geo('decor:' + name, kd.g), kd.m, kd.list.length);
+      im.castShadow = name !== 'reed' && name !== 'berry';
+      im.receiveShadow = name === 'peak';
+      kd.list.forEach((e, idx) => {
+        e.mesh = im;
+        e.idx = idx;
+        if (!decor.byTile.has(e.t.i)) decor.byTile.set(e.t.i, []);
+        decor.byTile.get(e.t.i).push(e);
+      });
+      decor.meshes.push(im);
+      world.add(im);
+    }
+    for (const t of layout.tiles) setDecor(t, t.k);
+  }
+  const decorShown = new Map();
+  function setDecor(t, k) {
+    const list = decor.byTile.get(t.i);
+    if (!list) return;
+    const kk = k >= 1 ? 1 : k;
+    if (decorShown.get(t.i) === kk) return;
+    decorShown.set(t.i, kk);
+    for (const e of list) {
+      tmpQ.setFromAxisAngle(UP, e.ry);
+      tmpM.compose(tmpP.set(e.x, e.y, e.z), tmpQ, tmpS.set(e.s * kk + 1e-4, e.sy * kk + 1e-4, e.s * kk + 1e-4));
+      e.mesh.setMatrixAt(e.idx, tmpM);
+    }
+  }
+  const UP = new T.Vector3(0, 1, 0);
 
   // --- Paths: every hex corner is a crossing, every hex edge a lane -----------------
   const cornerKey = (x, z) => Math.round(x * 400) + ':' + Math.round(z * 400);
@@ -283,47 +506,27 @@ export async function createWorld(stage, overlay, opts) {
     nav.adj[a].push([b, d]);
     nav.adj[b].push([a, d]);
   }
-  function segmentClear(A, B) {
-    for (let i = 1; i < 10; i++) {
-      const x = A.x + ((B.x - A.x) * i) / 10;
-      const z = A.z + ((B.z - A.z) * i) / 10;
-      if (onLand(x, z, 0.8)) return false;
-    }
-    return true;
-  }
+  // Bots walk along the edges of land they know, and one step into the fog
+  // (that is how scouts go exploring).
   function buildNav() {
     nav.nodes = [];
     nav.adj = [];
     nav.keys.clear();
-    const count = new Map();
-    for (const t of layout.tiles) {
+    nav.town = [];
+    const near = (t) => known[t.i] || DIRS.some(([dq, dr]) => { const nb = layout.index.get(t.q + dq + ',' + (t.r + dr)); return nb && known[nb.i]; });
+    const walk = layout.tiles.filter((t) => walkTile(t) && near(t));
+    for (const t of walk) {
       for (let k = 0; k < 6; k++) {
         const p = cornerPos(t, k);
         const key = cornerKey(p.x, p.z);
-        if (!nav.keys.has(key)) nav.keys.set(key, addNode(p.x, p.z, PATH_TOP, 'corner'));
-        count.set(key, (count.get(key) || 0) + 1);
+        if (!nav.keys.has(key)) {
+          const i = addNode(p.x, p.z, PATH_TOP, 'corner');
+          nav.keys.set(key, i);
+          if (known[t.i] && Math.hypot(p.x, p.z) < layout.townR + R * 2) nav.town.push(i);
+        }
       }
     }
-    for (const t of layout.tiles) for (let k = 0; k < 6; k++) link(cornerNode(t, k), cornerNode(t, (k + 1) % 6));
-    const n = Math.max(36, Math.round((2 * Math.PI * layout.beachR) / 0.45));
-    nav.ring = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      nav.ring.push(addNode(Math.cos(a) * layout.beachR, Math.sin(a) * layout.beachR, 0, 'ring'));
-    }
-    for (let i = 0; i < n; i++) link(nav.ring[i], nav.ring[(i + 1) % n]);
-    for (const [key, c] of count) {
-      if (c > 1) continue;
-      const i = nav.keys.get(key);
-      const nd = nav.nodes[i];
-      let best = -1;
-      let bd = Infinity;
-      for (const r of nav.ring) {
-        const d = Math.hypot(nav.nodes[r].x - nd.x, nav.nodes[r].z - nd.z);
-        if (d < bd) { bd = d; best = r; }
-      }
-      if (best >= 0 && segmentClear(nd, nav.nodes[best])) link(i, best);
-    }
+    for (const t of walk) for (let k = 0; k < 6; k++) link(cornerNode(t, k), cornerNode(t, (k + 1) % 6));
     nav.door = cornerNode(layout.tiles[0], 1);
   }
   function nearestNode(x, z) {
@@ -341,111 +544,120 @@ export async function createWorld(stage, overlay, opts) {
     const N = nav.nodes.length;
     if (start < 0 || goal < 0 || start >= N || goal >= N) return null;
     const g = new Float64Array(N).fill(Infinity);
-    const f = new Float64Array(N).fill(Infinity);
     const from = new Int32Array(N).fill(-1);
-    const open = new Set([start]);
     const closed = new Uint8Array(N);
     const gx = nav.nodes[goal].x;
     const gz = nav.nodes[goal].z;
     const H = (i) => Math.hypot(nav.nodes[i].x - gx, nav.nodes[i].z - gz);
+    const heap = [[H(start), start]];
     g[start] = 0;
-    f[start] = H(start);
-    while (open.size) {
-      let cur = -1;
-      let best = Infinity;
-      for (const i of open) if (f[i] < best) { best = f[i]; cur = i; }
+    let steps = 0;
+    while (heap.length && steps++ < 20000) {
+      const cur = heapPop(heap)[1];
+      if (closed[cur]) continue;
       if (cur === goal) {
         const path = [cur];
         while (from[path[0]] >= 0) path.unshift(from[path[0]]);
         return path;
       }
-      open.delete(cur);
       closed[cur] = 1;
       for (const [nb, d] of nav.adj[cur]) {
         if (closed[nb]) continue;
         const ng = g[cur] + d;
-        if (ng < g[nb]) { g[nb] = ng; f[nb] = ng + H(nb); from[nb] = cur; open.add(nb); }
+        if (ng < g[nb]) { g[nb] = ng; from[nb] = cur; heapPush(heap, [ng + H(nb), nb]); }
       }
     }
     return null;
   }
-
-  // --- The beach: benches and a pier, so bots have somewhere to go --------------------
-  function ringNodeAt(angle) {
-    const n = nav.ring.length;
-    let i = Math.round((angle / (Math.PI * 2)) * n) % n;
-    if (i < 0) i += n;
-    return nav.ring[i];
+  function heapPush(h, x) {
+    h.push(x);
+    let i = h.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (h[p][0] <= h[i][0]) break;
+      [h[p], h[i]] = [h[i], h[p]];
+      i = p;
+    }
   }
+  function heapPop(h) {
+    const top = h[0];
+    const last = h.pop();
+    if (h.length) {
+      h[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < h.length && h[l][0] < h[m][0]) m = l;
+        if (r < h.length && h[r][0] < h[m][0]) m = r;
+        if (m === i) break;
+        [h[m], h[i]] = [h[i], h[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  // --- The shore: a pier and benches where the land meets the water ------------------
   function buildBeach() {
     beachPois = [];
-    const bR = layout.beachR;
-    const at = (a, r) => ({ x: Math.cos(a) * r, z: Math.sin(a) * r });
-    const faceOut = (a) => Math.atan2(Math.cos(a), Math.sin(a));
+    poiGroup.clear();
+    layout.pierEnd = null;
+    const faceTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
     const poi = (id, x, z, y, yaw, pose, parentNode) => {
       const node = addNode(x, z, y, 'poi');
       link(node, parentNode);
       beachPois.push({ id, node, x, z, y, yaw, pose, night: false });
     };
-    [1.3, 2.9, 4.5].forEach((a, i) => {
-      const p = at(a, bR + 0.45);
-      const g = benchMesh();
-      g.position.set(p.x, 0, p.z);
-      g.rotation.y = faceOut(a);
-      world.add(g);
-      for (const off of [-0.09, 0.09]) poi('bench' + i + off, p.x - Math.sin(a) * off, p.z + Math.cos(a) * off, 0, faceOut(a), 'sit', ringNodeAt(a));
-    });
-    {
-      const a = -0.35;
+    // Coast tiles near town: land with known water next to it.
+    const coast = [];
+    for (const t of layout.tiles) {
+      if (!known[t.i] || !walkTile(t) || t.t === 'river' || t.d < 2) continue;
+      const wet = DIRS.map(([dq, dr]) => layout.index.get(t.q + dq + ',' + (t.r + dr))).find((nb) => nb && known[nb.i] && (nb.t === 'deep' || nb.t === 'water'));
+      if (wet) coast.push({ t, wet });
+    }
+    coast.sort((a, b) => a.t.d - b.t.d);
+    const taken = new Set([...builds.values()].map((v) => v.b.q + ',' + v.b.r));
+    const free = coast.filter((c) => !taken.has(c.t.q + ',' + c.t.r));
+    const pier = free[0];
+    if (pier) {
+      const { t, wet } = pier;
+      const dir = Math.atan2(wet.z - t.z, wet.x - t.x);
+      const at = (dist) => ({ x: t.x + Math.cos(dir) * dist, z: t.z + Math.sin(dir) * dist });
       const len = 2.1;
-      const start = layout.islandR - 0.5;
-      const mid = at(a, start + len / 2);
+      const mid = at(R * 0.4 + len / 2);
       const g = new T.Group();
       g.position.set(mid.x, 0, mid.z);
-      g.rotation.y = faceOut(a);
-      mesh(geo('pierDeck', () => new T.BoxGeometry(0.36, 0.04, 2.1)), mats.wood, 0, 0.03, 0, g);
-      for (const s of [-1, 1]) for (const zz of [-0.8, -0.2, 0.4, 1.0]) mesh(geo('pierPost', () => new T.CylinderGeometry(0.025, 0.025, 0.6, 6)), mats.woodDark, s * 0.17, -0.25, zz, g);
-      g.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
-      world.add(g);
-      const p0 = at(a, start + 0.1);
-      const n0 = addNode(p0.x, p0.z, 0.06, 'pier');
-      link(n0, ringNodeAt(a));
-      const e1 = at(a, start + len - 0.2);
-      poi('pier1', e1.x, e1.z, 0.06, faceOut(a), 'fish', n0);
-      const e2 = at(a + 0.08, start + len - 0.55);
-      poi('pier2', e2.x, e2.z, 0.06, faceOut(a), 'fish', n0);
-      layout.pierEnd = at(a, start + len + 0.4);
+      g.rotation.y = Math.atan2(Math.cos(dir), Math.sin(dir));
+      mesh(geo('pierDeck', () => new T.BoxGeometry(0.36, 0.04, 2.1)), mats.wood, 0, 0.06, 0, g);
+      for (const s of [-1, 1]) for (const zz of [-0.8, -0.2, 0.4, 1.0]) mesh(geo('pierPost', () => new T.CylinderGeometry(0.025, 0.025, 0.6, 6)), mats.woodDark, s * 0.17, -0.22, zz, g);
+      g.traverse((o) => { if (o.isMesh) { o.receiveShadow = true; o.castShadow = true; } });
+      poiGroup.add(g);
+      const start = at(R * 0.5);
+      const n0 = addNode(start.x, start.z, 0.08, 'pier');
+      link(n0, nearestNode(t.x, t.z));
+      const e1 = at(R * 0.4 + len - 0.2);
+      poi('pier1', e1.x, e1.z, 0.08, faceTo(e1, at(len * 2)), 'fish', n0);
+      const e2 = at(R * 0.4 + len - 0.6);
+      poi('pier2', e2.x + Math.sin(dir) * 0.08, e2.z - Math.cos(dir) * 0.08, 0.08, faceTo(e1, at(len * 2)), 'fish', n0);
+      layout.pierEnd = at(R * 0.4 + len + 0.5);
     }
+    free.slice(1, 4).forEach(({ t, wet }, i) => {
+      const dir = Math.atan2(wet.z - t.z, wet.x - t.x);
+      const p = { x: t.x + Math.cos(dir) * R * 0.45, z: t.z + Math.sin(dir) * R * 0.45 };
+      const g = benchMesh();
+      g.position.set(p.x, TILE_TOP, p.z);
+      g.rotation.y = Math.atan2(Math.cos(dir), Math.sin(dir));
+      poiGroup.add(g);
+      const node = nearestNode(p.x, p.z);
+      for (const off of [-0.09, 0.09]) poi('bench' + i + off, p.x - Math.sin(dir) * off, p.z + Math.cos(dir) * off, TILE_TOP, g.rotation.y, 'sit', node);
+    });
     for (const k of [0, 2, 3, 5]) {
       const node = cornerNode(layout.tiles[0], k);
+      if (node < 0) continue;
       const nd = nav.nodes[node];
       beachPois.push({ id: 'plaza' + k, node, x: nd.x, z: nd.z, y: PATH_TOP, yaw: Math.atan2(nd.x, nd.z), pose: 'look', night: false, plaza: true });
-    }
-  }
-  function decorate() {
-    const r = rng(1234 + layout.landRing);
-    const want = Math.round(14 + layout.islandR * 3);
-    const avoid = beachPois.map((p) => [p.x, p.z]).concat(layout.pierEnd ? [[layout.pierEnd.x, layout.pierEnd.z]] : []);
-    let placed = 0;
-    for (let i = 0; i < want * 4 && placed < want; i++) {
-      const a = r() * Math.PI * 2;
-      const d = layout.beachR + 0.45 + r() * (layout.railR - layout.beachR - 0.6);
-      const x = Math.cos(a) * d;
-      const z = Math.sin(a) * d;
-      if (avoid.some(([px, pz]) => Math.hypot(px - x, pz - z) < 0.7)) continue;
-      if (Math.abs(Math.atan2(Math.sin(a + 0.35), Math.cos(a + 0.35))) < 0.2) continue;
-      placed++;
-      if (r() < 0.7) {
-        const g = treeMesh(r() < 0.5);
-        g.position.set(x, 0, z);
-        g.scale.setScalar(0.7 + r() * 0.6);
-        world.add(g);
-      } else {
-        const rock = mesh(geo('rock', () => new T.DodecahedronGeometry(0.12, 0)), mats.rock, x, 0.04, z, world);
-        rock.scale.set(1 + r(), 0.6 + r() * 0.5, 1 + r() * 0.6);
-        rock.rotation.y = r() * Math.PI;
-        rock.castShadow = true;
-      }
     }
   }
 
@@ -488,14 +700,29 @@ export async function createWorld(stage, overlay, opts) {
     }
     return g;
   }
+  // Street lights stand on street corners next to buildings, nearest the
+  // middle of town first.
   function rebuildLamps() {
-    if (!lampGroup) return;
+    if (!lampGroup || !layout.tiles.length) return;
     lampGroup.clear();
-    const bR = layout.beachR;
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2 + 0.2;
+    const spots = [];
+    const seen = new Set();
+    const addCorner = (t, k) => {
+      const node = cornerNode(t, k);
+      if (node < 0 || seen.has(node)) return;
+      seen.add(node);
+      spots.push(nav.nodes[node]);
+    };
+    for (const k of [0, 2, 4]) for (const [dq, dr] of DIRS) { const t = layout.index.get(dq * 2 + ',' + dr * 2); if (t) addCorner(t, k); }
+    for (const v of builds.values()) {
+      if (!v.b.built || v.b.wonder) continue;
+      const t = layout.index.get(v.b.q + ',' + v.b.r);
+      if (t) addCorner(t, hashStr('l' + v.b.id) % 6);
+    }
+    spots.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    for (const n of spots.slice(0, low ? 18 : 32)) {
       const l = lampFor(look().lamp);
-      l.position.set(Math.cos(a) * (bR + 0.3), 0, Math.sin(a) * (bR + 0.3));
+      l.position.set(n.x, 0, n.z);
       lampGroup.add(l);
     }
     renderer.shadowMap.needsUpdate = true;
@@ -644,9 +871,22 @@ export async function createWorld(stage, overlay, opts) {
       v.scaffold = null;
     }
   }
+  // A home flies the flag of its owner, in their colour.
+  function setFlag(v, on) {
+    const color = on ? (data.builders.get(v.b.ownerId) || {}).color || '#3b7ddd' : null;
+    if (v.flag && v.flag.userData.color !== color) { v.root.remove(v.flag); v.flag = null; }
+    if (on && !v.flag) {
+      v.flag = stakeMesh(color);
+      v.flag.userData.color = color;
+      v.flag.scale.set(1.3, 1.6, 1.3);
+      v.flag.position.set(-0.3, 0, -0.16);
+      v.root.add(v.flag);
+      v.anim = v.anim.filter((a) => a.o !== v.flag);
+    }
+  }
   function setStake(v, on) {
     if (on && !v.stake) {
-      const bd = data.builders.get(v.b.ownerId);
+      const bd = data.builders.get(v.b.ownerId || v.b.founderId);
       v.stake = stakeMesh(bd ? bd.color : '#3b7ddd');
       v.stake.position.set(0.18, 0, 0.18);
       v.root.add(v.stake);
@@ -663,6 +903,11 @@ export async function createWorld(stage, overlay, opts) {
     }
     if (b.status === 'done') return 1;
     if (b.status !== 'building') return 0;
+    // Town projects: work done so far, plus what the helpers did since.
+    if (b.project && !b.evolving && !b.upgrade && b.work) {
+      const extra = b.rate && b.progressAt ? (b.rate * Math.max(0, now() - b.progressAt)) / 1000 : 0;
+      return Math.max(0, Math.min(1, ((b.progress || 0) + extra) / b.work));
+    }
     return Math.max(0, Math.min(1, (now() - b.startedAt - b.walkSec * 1000) / (b.buildSec * 1000)));
   }
   function syncBuild(b, live) {
@@ -670,8 +915,9 @@ export async function createWorld(stage, overlay, opts) {
     const prev = v ? v.b : null;
     if (!v) {
       const p = hexToWorld(b.q, b.r);
-      v = { id: b.id, b, root: new T.Group(), body: null, key: '', h: 0.4, anim: [], scaffold: null, stake: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0, damaged: false, smoke: 0, shown: 0.05 };
-      v.root.position.set(p.x, TILE_TOP, p.z);
+      const t = layout.index.get(b.q + ',' + b.r);
+      v = { id: b.id, b, root: new T.Group(), body: null, key: '', h: 0.4, anim: [], scaffold: null, stake: null, flag: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0, damaged: false, smoke: 0, shown: 0.05 };
+      v.root.position.set(p.x, t && !isWater(t) ? LAND[t.t].top : TILE_TOP, p.z);
       v.root.rotation.y = Math.atan2(-p.x, -p.z);
       buildGroup.add(v.root);
       builds.set(b.id, v);
@@ -684,6 +930,7 @@ export async function createWorld(stage, overlay, opts) {
     if (v.body && b.built && !b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
     setScaffold(v, b.status === 'building');
     setStake(v, b.status === 'queued' && !b.built);
+    setFlag(v, !!b.home);
     v.damaged = !!b.damaged;
     if (v.body) v.body.rotation.z = v.damaged ? 0.07 : 0;
     if (finished) {
@@ -713,14 +960,13 @@ export async function createWorld(stage, overlay, opts) {
     for (const v of builds.values()) if (v.b.ownerId === id && v.b.status !== 'done') job = v;
     return job;
   }
+  function homeOf(id) {
+    for (const v of builds.values()) if (v.b.home && v.b.ownerId === id) return v;
+    return null;
+  }
   function homeSpot(id) {
-    let first = null;
-    for (const v of builds.values()) {
-      if (v.b.ownerId !== id || !v.b.built) continue;
-      const house = ITEMS[v.b.item]?.kind === 'house';
-      if (!first || (house && !first.house) || (house === first.house && v.b.id < first.v.b.id)) first = { v, house };
-    }
-    return first ? workSpot(first.v.b) : null;
+    const v = homeOf(id);
+    return v && v.b.built ? workSpot(v.b) : null;
   }
   function wantedBots() {
     const t = now();
@@ -743,7 +989,7 @@ export async function createWorld(stage, overlay, opts) {
     }
   }
   function newWalker(id, builder, parts, spot) {
-    const node = spot ? spot.node : pick(nav.nodes.map((n, i) => (n.kind === 'corner' || n.kind === 'ring' ? i : -1)).filter((i) => i >= 0));
+    const node = spot ? spot.node : nav.town.length ? pick(nav.town) : Math.max(0, nav.door);
     const n = nav.nodes[node];
     const crate = mesh(geo('carryCrate', () => new T.BoxGeometry(0.09, 0.07, 0.07)), crateMats.wood, 0, 0.2, 0.09, parts.inner);
     crate.visible = false;
@@ -920,6 +1166,17 @@ export async function createWorld(stage, overlay, opts) {
     leisure(b);
   }
   function doJob(b, job) {
+    if (job.kind === 'explore') {
+      const t = layout.index.get(job.q + ',' + job.r);
+      if (!t) return false;
+      let node = -1;
+      for (let k = 0; k < 6 && node < 0; k++) node = cornerNode(t, k);
+      if (node < 0) node = nearestNode(t.x, t.z);
+      const nd = nav.nodes[node];
+      const deadline = job.startedAt + (job.until - job.startedAt) * 0.85;
+      carry(b, null);
+      return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw: Math.atan2(t.x - nd.x, t.z - nd.z) }, (x) => { x.mode = 'job'; x.jobPose = 'scout'; x.yawTarget = Math.atan2(t.x - nd.x, t.z - nd.z); }, deadline, WALK * 1.6);
+    }
     const v = builds.get(job.buildId);
     if (!v) return false;
     if (job.kind === 'wonder') {
@@ -957,10 +1214,9 @@ export async function createWorld(stage, overlay, opts) {
       const partner = [...bots.values()].find((o) => o !== b && !o.partner && !jobOf(o.id) && !data.jobs.has(o.id) && (o.mode === 'idle' || (o.mode === 'act' && o.act === 'look')) && Math.hypot(o.x - b.x, o.z - b.z) < 6);
       if (partner) return startChat(b, partner);
     }
-    if (r < 0.92) {
-      const target = Math.floor(rand() * nav.nodes.length);
-      const kind = nav.nodes[target].kind;
-      if (kind === 'corner' || kind === 'ring') { walkTo(b, target, (x) => startAct(x, 'look', 2 + rand() * 4)); return; }
+    if (r < 0.92 && nav.town.length) {
+      walkTo(b, pick(nav.town), (x) => startAct(x, 'look', 2 + rand() * 4));
+      return;
     }
     startAct(b, 'look', 3 + rand() * 4);
   }
@@ -1177,6 +1433,11 @@ export async function createWorld(stage, overlay, opts) {
     } else if (jobPose === 'fish') {
       p.armR.rotation.x = -1.0;
       p.armL.rotation.x = -0.9;
+    } else if (jobPose === 'scout') {
+      // Hand over the eyes, looking out over the new land.
+      p.armR.rotation.x = -2.6;
+      p.armR.rotation.z = -0.5;
+      if (!still) p.head.rotation.y = Math.sin(t * 0.8 + b.phase) * 0.7;
     } else if (b.mode === 'wait') {
       b.yawTarget = Math.atan2(camera.position.x - b.x, camera.position.z - b.z);
       b.wave = (b.wave || 0) + dt;
@@ -1347,6 +1608,21 @@ export async function createWorld(stage, overlay, opts) {
     groundNight: C('#3a3226'), groundDay: C('#c7a676'), sunLow: C('#ffc98a'), sunHigh: C('#fff4e0'),
   };
   const mixC = (a, b, t) => a.clone().lerp(b, Math.max(0, Math.min(1, t)));
+  // The sun and its shadows follow the camera around the big world.
+  const sunDir = new T.Vector3(-0.4, 0.8, -0.55).normalize();
+  let shadowSpan = 0;
+  function followSun(force) {
+    const tg = controls.target;
+    const want = Math.max(6, Math.min(26, camera.position.distanceTo(tg) * 0.8));
+    if (force || Math.abs(want - shadowSpan) > shadowSpan * 0.15) {
+      shadowSpan = want;
+      const sc = sun.shadow.camera;
+      Object.assign(sc, { left: -want, right: want, top: want, bottom: -want, near: 0.5, far: want * 6 });
+      sc.updateProjectionMatrix();
+    }
+    sun.target.position.set(tg.x, 0, tg.z);
+    sun.position.set(tg.x + sunDir.x * shadowSpan * 2, sunDir.y * shadowSpan * 2, tg.z + sunDir.z * shadowSpan * 2);
+  }
   const sky = { day: 1, night: 0, dusk: 0 };
   let season = '';
   const blackout = () => data.event?.key === 'blackout';
@@ -1356,9 +1632,7 @@ export async function createWorld(stage, overlay, opts) {
     mats.leaf.color.set(L.leaf);
     mats.leaf2.color.set(L.leaf2);
     mats.grass.color.set(L.grass);
-    TILE_COLORS.empty.set(L.tiles[0]);
-    TILE_COLORS.edge.set(L.tiles[1]);
-    TILE_COLORS.done.set(L.tiles[2]);
+    decorShown.clear();
     refreshTiles();
   }
   function updateSky() {
@@ -1390,17 +1664,16 @@ export async function createWorld(stage, overlay, opts) {
     hemi.color.copy(mixC(SKY.hemiNight, SKY.hemiDay, day));
     hemi.groundColor.copy(mixC(SKY.groundNight, SKY.groundDay, day));
     hemi.intensity = 1.2 + 0.5 * day;
-    const span = layout.islandR + 3;
     if (day > 0.15) {
-      const dir = new T.Vector3(-Math.sin(s.az) * Math.cos(s.alt), Math.max(0.12, Math.sin(s.alt)), Math.cos(s.az) * Math.cos(s.alt)).normalize();
-      sun.position.copy(dir.multiplyScalar(span * 1.6));
+      sunDir.set(-Math.sin(s.az) * Math.cos(s.alt), Math.max(0.12, Math.sin(s.alt)), Math.cos(s.az) * Math.cos(s.alt)).normalize();
       sun.color.copy(mixC(SKY.sunLow, SKY.sunHigh, Math.min(1, s.sinAlt / 0.45)));
       sun.intensity = 2.7 * day * (1 - rain * 0.55) * (1 - haze * 0.3);
     } else {
-      sun.position.set(-span * 0.6, span * 1.2, -span * 0.8);
+      sunDir.set(-0.4, 0.8, -0.55).normalize();
       sun.color.set('#a9bfff');
       sun.intensity = 0.95;
     }
+    followSun(true);
     const night = blackout() ? 0 : 1 - day;
     const glowNight = 1 - day;
     mats.window.emissiveIntensity = night * 1.7 + (blackout() ? 0 : dusk * 0.3);
@@ -1505,6 +1778,16 @@ export async function createWorld(stage, overlay, opts) {
     fxGroup.add(pts);
     particles.push({ pts, vel, life: o.life, age: 0, gravity: o.gravity != null ? o.gravity : 3, drag: o.drag || 0, grow: o.grow || 0 });
   }
+  const highlights = [];
+  function stepHighlights(dt) {
+    for (let i = highlights.length - 1; i >= 0; i--) {
+      const h = highlights[i];
+      h.t += dt;
+      h.ring.scale.setScalar(1 + 0.08 * Math.sin(h.t * 5));
+      h.ring.material.opacity = Math.max(0, 0.9 * (1 - h.t / 9));
+      if (h.t > 9) { fxGroup.remove(h.ring); h.ring.geometry.dispose(); h.ring.material.dispose(); highlights.splice(i, 1); }
+    }
+  }
   function stepParticles(dt) {
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -1593,7 +1876,7 @@ export async function createWorld(stage, overlay, opts) {
       ev.festT -= dt;
       if (ev.festT <= 0) {
         ev.festT = 1.5;
-        const tile = pick(layout.tiles);
+        const tile = layout.townTiles.length ? pick(layout.townTiles) : { x: 0, z: 0 };
         confetti(tile.x, 0.6, tile.z);
         if (sky.night > 0.5 && rand() < 0.4) fireworks(tile.x, tile.z, 1);
       }
@@ -1629,13 +1912,13 @@ export async function createWorld(stage, overlay, opts) {
     // The merchant ship sails in to the pier, waits, and sails away again.
     const m = ev.merchant;
     if (m && layout.pierEnd) {
-      const far = { x: layout.pierEnd.x * 4, z: layout.pierEnd.z * 4 };
+      const far = { x: layout.pierEnd.x + Math.cos(layout.seaAngle) * 30, z: layout.pierEnd.z + Math.sin(layout.seaAngle) * 30 };
       m.t += dt;
       let k = 1;
       if (m.state === 'arrive') { k = Math.min(1, m.t / 18); if (k >= 1) m.state = 'stay'; }
       if (m.state === 'leave') { k = 1 - Math.min(1, m.t / 18); if (k <= 0) { scene.remove(m.g); ev.merchant = null; return; } }
       const e = k * k * (3 - 2 * k);
-      m.g.position.set(far.x + (layout.pierEnd.x * 1.15 - far.x) * e, -0.48 + Math.sin(t * 1.2) * 0.02, far.z + (layout.pierEnd.z * 1.15 - far.z) * e);
+      m.g.position.set(far.x + (layout.pierEnd.x - far.x) * e, -0.14 + Math.sin(t * 1.2) * 0.02, far.z + (layout.pierEnd.z - far.z) * e);
       m.g.rotation.y = Math.atan2(layout.pierEnd.x - far.x, layout.pierEnd.z - far.z) + Math.PI / 2;
       m.g.rotation.z = Math.sin(t * 0.9) * 0.03;
     }
@@ -1709,7 +1992,7 @@ export async function createWorld(stage, overlay, opts) {
       const wl = mesh(geo('wing', () => new T.BoxGeometry(0.16, 0.006, 0.05)), birdMat, -0.08, 0, 0, g);
       const wr = mesh(geo('wing', () => new T.BoxGeometry(0.16, 0.006, 0.05)), birdMat, 0.08, 0, 0, g);
       critterGroup.add(g);
-      critters.birds.push({ g, wl, wr, r: 2 + rand() * layout.landR, h: 2.4 + rand() * 2, sp: (0.25 + rand() * 0.25) * (rand() < 0.5 ? -1 : 1), a: rand() * Math.PI * 2, ph: rand() * 10 });
+      critters.birds.push({ g, wl, wr, r: 2 + rand() * layout.townR, h: 2.4 + rand() * 2, sp: (0.25 + rand() * 0.25) * (rand() < 0.5 ? -1 : 1), a: rand() * Math.PI * 2, ph: rand() * 10 });
     }
     makeBoat();
     const cat = new T.Group();
@@ -1750,12 +2033,17 @@ export async function createWorld(stage, overlay, opts) {
       b.wr.rotation.z = -flap;
     }
     const bt = critters.boat;
-    if (bt) {
+    // The boat sails up and down the coast, out at sea.
+    if (bt) bt.g.visible = layout.coastD > 0;
+    if (bt && layout.coastD > 0) {
       bt.a += dt * (look().boat === 'motor' || look().boat === 'hover' ? 0.07 : 0.03);
-      const r = layout.islandR + 2.8;
+      const sa = layout.seaAngle;
+      const off = layout.coastD + 2.4;
+      const sway = Math.sin(bt.a) * 6;
       const hover = look().boat === 'hover';
-      bt.g.position.set(Math.cos(bt.a) * r, (hover ? -0.38 : -0.5) + Math.sin(t * 1.3) * 0.03, Math.sin(bt.a) * r);
-      bt.g.rotation.y = Math.atan2(-Math.sin(bt.a), Math.cos(bt.a));
+      bt.g.position.set(Math.cos(sa) * off - Math.sin(sa) * sway, (hover ? -0.04 : -0.12) + Math.sin(t * 1.3) * 0.03, Math.sin(sa) * off + Math.cos(sa) * sway);
+      const dir = Math.cos(bt.a) >= 0 ? 1 : -1;
+      bt.g.rotation.y = Math.atan2(-Math.sin(sa) * dir, Math.cos(sa) * dir);
       bt.g.rotation.z = hover ? 0 : Math.sin(t * 1.1) * 0.06;
       if (bt.g.userData.smoke && !still) {
         bt.puff -= dt;
@@ -1764,7 +2052,7 @@ export async function createWorld(stage, overlay, opts) {
     }
     const c = critters.cat;
     if (c) {
-      const r = layout.beachR;
+      const r = R * SQ3 * 1.5;
       if (c.pause > 0) { c.pause -= dt; c.sit = true; }
       else {
         c.sit = false;
@@ -1775,7 +2063,7 @@ export async function createWorld(stage, overlay, opts) {
         c.dir = Math.sign(diff) || c.dir;
         if (Math.abs(diff) < 0.01) { c.pause = 2 + rand() * 6; c.target = c.a + (rand() < 0.5 ? -1 : 1) * (0.5 + rand() * 1.5); }
       }
-      c.g.position.set(Math.cos(c.a) * r, 0, Math.sin(c.a) * r);
+      c.g.position.set(Math.cos(c.a) * r, PATH_TOP, Math.sin(c.a) * r);
       c.g.rotation.y = Math.atan2(-Math.sin(c.a) * c.dir, Math.cos(c.a) * c.dir);
       c.body.position.y = c.sit ? 0.045 : 0.06;
       c.tail.rotation.z = still ? 0 : Math.sin(t * 3) * 0.4;
@@ -1789,7 +2077,7 @@ export async function createWorld(stage, overlay, opts) {
         const spots = [...builds.values()].filter((v) => v.b.built && (v.b.item === 'park' || v.b.item === 'garden'));
         const arr = fl.p.geometry.attributes.position.array;
         fl.seeds.forEach((s, i) => {
-          const home = spots.length ? spots[i % spots.length].root.position : { x: Math.cos(i) * layout.beachR, z: Math.sin(i) * layout.beachR };
+          const home = spots.length ? spots[i % spots.length].root.position : { x: Math.cos(i) * layout.townR * 0.6, z: Math.sin(i) * layout.townR * 0.6 };
           arr[i * 3] = home.x + Math.sin(t * 0.3 + s[0]) * 0.5;
           arr[i * 3 + 1] = 0.3 + Math.sin(t * 0.7 + s[1]) * 0.15;
           arr[i * 3 + 2] = home.z + Math.cos(t * 0.25 + s[2]) * 0.5;
@@ -1846,15 +2134,28 @@ export async function createWorld(stage, overlay, opts) {
       const pr = progressOf(b);
       title = item.label + (b.status === 'done' ? '' : ' ' + Math.floor(pr * 100) + '%');
       const short = data.econ?.wonder?.id === b.id ? data.econ.wonder.short : [];
-      sub = b.status === 'done' ? 'Wonder of the ' + ERAS[item.era].name : short.length ? 'needs ' + short.map(resName).join(', ') : 'wonder · !work wonder to help';
+      sub = b.status === 'done' ? 'Wonder of the ' + ERAS[item.era].name : short.length ? 'needs ' + short.map(resName).join(', ') : 'wonder · !help wonder to haul';
       if (b.status !== 'done') bar = pr;
     } else if (v.damaged) {
       title = '🔧 ' + item.label + ' is broken';
       sub = '!repair to fix it';
+    } else if (b.project && b.status !== 'done' && !b.evolving) {
+      // A town project: how far along, who helps, what it waits for.
+      const pr = progressOf(b);
+      title = item.label + ' ' + Math.floor(pr * 100) + '% #' + b.id;
+      let helpers = 0;
+      for (const j of data.jobs.values()) if (j.buildId === b.id && j.kind === 'build') helpers++;
+      if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · !work ' + b.waitingFor[0];
+      else sub = (helpers ? helpers + (helpers === 1 ? ' helper' : ' helpers') : 'nobody helping yet') + ' · !help #' + b.id;
+      bar = pr;
+    } else if (b.home && b.status === 'done') {
+      title = (bd ? bd.name + "'s home" : item.label) + (b.level > 1 ? ' · level ' + b.level : '');
+      sub = item.label + ' #' + b.id;
     } else {
       const to = b.upgrade ? ITEMS[b.upgrade.item] : null;
       title = (to && to !== item ? item.label + ' → ' + to.label : item.label + (b.upgrade ? ' → level ' + b.upgrade.level : '')) + ' #' + b.id;
-      sub = b.evolving ? 'the ' + ERAS[era].name + ' is here' : bd ? bd.name : '';
+      const founder = data.builders.get(b.founderId);
+      sub = b.evolving ? 'the ' + ERAS[era].name + ' is here' : bd ? bd.name + (b.home ? "'s home" : '') : founder ? 'started by ' + founder.name : 'town';
       if (b.status === 'queued') sub += b.waitingFor?.length ? ' · waiting for ' + b.waitingFor.map(resName).join(', ') : ' · waiting for a builder';
       if (b.status === 'building') bar = progressOf(b);
     }
@@ -2007,10 +2308,11 @@ export async function createWorld(stage, overlay, opts) {
     camera.setViewOffset(fullW, fullH, dx < 0 ? -2 * dx : 0, dy < 0 ? -2 * dy : 0, w, h);
     camera.updateProjectionMatrix();
     view = { visW, visH, f: h / 2 / tb };
-    controls.maxDistance = fitDistance() * 1.9;
+    controls.maxDistance = opts.stream ? fitDistance() * 1.9 : Math.max(fitDistance() * 1.9, fitDistance(layout.knownR) * 1.3);
   }
-  function fitDistance() {
-    const s = layout.landR + 0.9;
+  // How far back the camera has to be to see the town (or rings tiles out).
+  function fitDistance(rings) {
+    const s = (rings || layout.extent) * SQ3 * R + R;
     const dW = (s * view.f) / (view.visW / 2);
     const dH = ((s * Math.sin(elevation()) + 0.6) * view.f) / (view.visH / 2);
     return Math.max(3, Math.min(80, Math.max(dW, dH) * 0.95));
@@ -2022,14 +2324,18 @@ export async function createWorld(stage, overlay, opts) {
     controls.target.set(0, 0, 0);
     camera.position.set(Math.sin(az) * Math.cos(el) * d, Math.sin(el) * d, Math.cos(az) * Math.cos(el) * d);
     controls.update();
-    scene.fog.near = d * 0.9;
-    scene.fog.far = d * 3.4;
+    updateFog();
+  }
+  function updateFog() {
+    const d = camera.position.distanceTo(controls.target);
+    scene.fog.near = d * 1.1;
+    scene.fog.far = d * 3.2 + 12;
   }
   function clampTarget() {
     const t = controls.target;
     t.y = 0;
     const len = Math.hypot(t.x, t.z);
-    const max = layout.islandR;
+    const max = (layout.knownR + 1) * SQ3 * R;
     if (len > max) { t.x *= max / len; t.z *= max / len; }
   }
   let focus = null;
@@ -2087,10 +2393,10 @@ export async function createWorld(stage, overlay, opts) {
     const wonder = all.find((v) => v.b.wonder && v.b.item === ERAS[era].wonder);
     const step = tour.i % 5;
     if (step === 0 || (!busy.length && !done.length && !walkers.length)) flyTo(0, 0, fitDistance(), 2600);
-    else if (step === 1 && busy.length) { const v = pick(busy); flyTo(v.root.position.x, v.root.position.z, 6.5, 2400); }
-    else if (step === 2 && walkers.length) { const b = pick(walkers); flyTo(b.x, b.z, 5.5, 2400, b); }
-    else if (step === 3 && wonder) flyTo(wonder.root.position.x * 0.6, wonder.root.position.z * 0.6, 5.5, 2400);
-    else if (done.length) { const v = pick(done.slice(-15)); flyTo(v.root.position.x, v.root.position.z, 6, 2400); }
+    else if (step === 1 && busy.length) { const v = pick(busy); flyTo(v.root.position.x, v.root.position.z, 9, 2400); }
+    else if (step === 2 && walkers.length) { const b = pick(walkers); flyTo(b.x, b.z, 8, 2400, b); }
+    else if (step === 3 && wonder) flyTo(wonder.root.position.x * 0.6, wonder.root.position.z * 0.6, 8, 2400);
+    else if (done.length) { const v = pick(done.slice(-15)); flyTo(v.root.position.x, v.root.position.z, 9, 2400); }
     else flyTo(0, 0, fitDistance() * 0.8, 2600);
   }
 
@@ -2224,7 +2530,9 @@ export async function createWorld(stage, overlay, opts) {
     stepEvents(t, dt);
     stepCritters(t, dt);
     stepParticles(dt);
-    if (frame % 3 === 0) renderer.shadowMap.needsUpdate = true;
+    stepHighlights(dt);
+    stepReveals(dt);
+    if (frame % 3 === 0) { followSun(false); updateFog(); renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
     updateOverlay();
   }
@@ -2234,11 +2542,12 @@ export async function createWorld(stage, overlay, opts) {
   resize();
   new ResizeObserver(resize).observe(stage);
   if (!opts.stream) bindPointer();
-  buildIsland(3);
   requestAnimationFrame(loop);
 
   function afterBuildsChanged() {
-    ensureLand();
+    if (!world) return;
+    updateTownSize();
+    rebuildLamps();
     refreshTiles();
     refreshPois();
     syncTrain();
@@ -2249,6 +2558,15 @@ export async function createWorld(stage, overlay, opts) {
     load(list, builderList, extra = {}) {
       setGeo(extra.geo);
       data.builders = new Map(builderList.map((b) => [b.id, b]));
+      // A new world (or the first connect): draw the map. A reconnect only
+      // catches up on what was explored meanwhile.
+      if (extra.map && (layout.seed !== extra.map.seed || !world)) buildWorld(extra.map, extra.explored);
+      else if (extra.explored && layout.map) {
+        const bits = decodeBits(extra.explored, layout.map);
+        const fresh = [];
+        for (let i = 0; i < layout.map.total; i++) if (!known[i] && isExplored(bits, i)) fresh.push(i);
+        if (fresh.length) revealTiles(fresh, false);
+      }
       data.jobs = new Map(Object.entries(extra.jobs || {}));
       data.econ = extra.econ || data.econ;
       if (extra.era != null && extra.era !== era) applyEra(extra.era);
@@ -2262,7 +2580,11 @@ export async function createWorld(stage, overlay, opts) {
       for (const b of bots.values()) if (b.mode !== 'walk' && b.mode !== 'arrive') decide(b);
     },
     updateBuild(b) {
+      const before = builds.get(b.id)?.b;
+      const changed = !before || before.status !== b.status || before.item !== b.item || before.level !== b.level || !!before.damaged !== !!b.damaged || !!before.built !== !!b.built;
       const { v, prev, finished } = syncBuild(b, true);
+      // Projects send their progress every few seconds: only redraw the map when something really changed.
+      if (!changed) return;
       afterBuildsChanged();
       syncBots(null);
       const bot = b.ownerId ? bots.get(b.ownerId) : null;
@@ -2272,12 +2594,13 @@ export async function createWorld(stage, overlay, opts) {
       const p = v.root.position;
       if (finished) {
         if (bot && Math.hypot(bot.x - p.x, bot.z - p.z) < 1) { party(bot); showBubble(bot, pick(LINES.done), 2500); }
-        interest(b.wonder ? 4 : 3, p.x, p.z, b.wonder ? 5 : 6, null, b.wonder ? 12000 : 8000);
+        if (b.project) for (const o of bots.values()) if (o !== bot && Math.hypot(o.x - p.x, o.z - p.z) < 1.2 && o.mode !== 'walk') { party(o); if (rand() < 0.5) showBubble(o, pick(LINES.done), 2500); }
+        interest(b.wonder ? 4 : 3, p.x, p.z, b.wonder ? 7.5 : 8, null, b.wonder ? 12000 : 8000);
       } else if (b.status === 'building' && (!prev || prev.status !== 'building') && !b.wonder && !b.evolving) {
-        if (bot) interest(2, bot.x, bot.z, 6.5, bot, 9000);
-        else interest(2, p.x, p.z, 6.5, null, 9000);
+        if (bot) interest(2, bot.x, bot.z, 8.5, bot, 9000);
+        else interest(2, p.x, p.z, 8.5, null, 9000);
       }
-      if (b.damaged && prev && !prev.damaged) interest(3, p.x, p.z, 5, null, 6000);
+      if (b.damaged && prev && !prev.damaged) interest(3, p.x, p.z, 7, null, 6000);
     },
     removeBuild(id) {
       removeBuild(id, true);
@@ -2312,6 +2635,39 @@ export async function createWorld(stage, overlay, opts) {
       }
     },
     setEvent,
+    // Land just explored: it rises out of the fog, with sparkles where
+    // something was found.
+    explore(ev) {
+      if (!layout.map) return;
+      revealTiles(ev.tiles || [], true);
+      const at = ev.at && layout.index.get(ev.at.q + ',' + ev.at.r);
+      for (const f of ev.found || []) {
+        const t = layout.index.get(f.q + ',' + f.r);
+        if (!t) continue;
+        sparkle(t.x, LAND[t.t].top + 0.3, t.z);
+        const word = { coal: '⚫ Coal!', iron: '⛓️ Iron!', ruins: '🏚️ Ruins!', tablet: '📜 An old tablet!' }[f.f];
+        if (word) bubbleAt(t.x, LAND[t.t].top + 0.5, t.z, word, 4500);
+      }
+      const scout = ev.userId ? bots.get(ev.userId) : null;
+      if (scout && ev.found?.length) showBubble(scout, 'Look what I found!', 3000);
+      if (at && ev.userId) interest(ev.found?.length ? 4 : 2, at.x, at.z, ev.found?.length ? 7 : 8, null, 9000);
+    },
+    // !me: the camera visits your home, which glows in your colour.
+    highlight(userId) {
+      const v = homeOf(userId);
+      const bot = bots.get(userId);
+      const target = v ? v.root.position : bot ? { x: bot.x, z: bot.z } : null;
+      if (!target) return;
+      if (v) {
+        const color = (data.builders.get(userId) || {}).color || '#3b7ddd';
+        const ring = mesh(new T.TorusGeometry(R * 0.95, 0.03, 6, 48), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }), target.x, PATH_TOP + 0.04, target.z, fxGroup);
+        ring.rotation.x = Math.PI / 2;
+        highlights.push({ ring, t: 0 });
+        sparkle(target.x, v.h + 0.3, target.z);
+      }
+      if (opts.stream) interest(5, target.x, target.z, 5.5, null, 9000);
+      else flyTo(target.x, target.z, Math.min(camera.position.distanceTo(controls.target), 7), 1400);
+    },
     eraChanged(e) {
       applyEra(e);
       fireworks(0, 0, 8);
@@ -2340,13 +2696,28 @@ export async function createWorld(stage, overlay, opts) {
     get soundOn() { return audio.on; },
     relayout: updateView,
     // For tests and curious people: what every bot and build is doing.
+    debugHide(name) {
+      const o = { water, base: baseMesh, top: topMesh }[name];
+      if (o) o.visible = !o.visible;
+      return o ? o.visible : null;
+    },
+    debugTiles() {
+      const e = new T.Matrix4();
+      const p = new T.Vector3();
+      const q = new T.Quaternion();
+      const sc = new T.Vector3();
+      let flat = 0;
+      for (let i = 0; i < baseMesh.count; i++) { baseMesh.getMatrixAt(i, e); e.decompose(p, q, sc); if (sc.y < 0.05) flat++; }
+      return { count: baseMesh.count, flat, sphere: baseMesh.boundingSphere ? baseMesh.boundingSphere.radius : null, frustum: baseMesh.frustumCulled, visible: baseMesh.visible, inScene: !!baseMesh.parent };
+    },
     debug() {
       return {
         era,
         bots: [...bots.values()].map((b) => ({ id: b.id, name: b.builder.name, mode: b.mode, act: b.act, carrying: b.carrying, x: +b.x.toFixed(2), z: +b.z.toFixed(2) })),
         porters: porters.size,
         builds: [...builds.values()].map((v) => ({ id: v.id, item: v.b.item, status: v.b.status, key: v.key, scaleY: v.body ? +v.body.scale.y.toFixed(2) : 0 })),
-        landRing: layout.landRing,
+        knownR: layout.knownR,
+        explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
         season,
       };

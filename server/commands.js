@@ -1,6 +1,7 @@
 // Turns a chat line into a command. Anything that isn't one of ours returns
 // null, so normal chatting is never answered or punished.
 import { resolveColor, resolveHat, resolveItem, resolveResource, EVENTS } from '../public/shared/catalog.js';
+import { DIRECTIONS, DIRECTION_ALIASES } from '../public/shared/terrain.js';
 
 const FILLER = new Set(['a', 'an', 'the', 'some', 'me', 'my', 'please', 'pls', 'plz', 'new', 'big', 'small', 'little', 'tiny', 'huge', 'nice', 'cute', 'of', 'with', 'and', 'to', 'at', 'on', 'for']);
 const NEAR = new Set(['near', 'next', 'by', 'beside', 'besides', 'around']);
@@ -31,11 +32,30 @@ export function parseCommand(text) {
     case 'upgrade':
     case 'up':
       return { type: 'upgrade' };
+    case 'home':
+    case 'myhome':
+    case 'house':
+      return { type: 'home' };
+    case 'help':
+    case 'join':
+    case 'assist':
+    case 'helpbuild': {
+      // !help, !help #12, !help wonder
+      const w = args.find((a) => !FILLER.has(a));
+      if (w === 'wonder') return { type: 'help', target: 'wonder' };
+      return { type: 'help', id: idArg(w) };
+    }
     case 'work':
     case 'gather':
-    case 'help-out':
     case 'job':
       return { type: 'work', target: args.length ? resolveResource(args[0]) : null, raw: args[0] || '' };
+    case 'explore':
+    case 'scout':
+    case 'discover': {
+      const w = args.find((a) => !FILLER.has(a)) || '';
+      const dir = Object.hasOwn(DIRECTIONS, w) ? w : DIRECTION_ALIASES[w] || null;
+      return { type: 'explore', dir, raw: w };
+    }
     case 'repair':
     case 'fix':
       return { type: 'repair' };
@@ -59,10 +79,11 @@ export function parseCommand(text) {
     case 'level':
     case 'profile':
       return { type: 'me' };
-    case 'help':
     case 'commands':
     case 'botworld':
-      return { type: 'help' };
+    case 'how':
+    case 'info':
+      return { type: 'commands' };
     case 'demolish':
     case 'destroy':
       return { type: 'demolish', id: idArg(args[0]) };

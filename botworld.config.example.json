@@ -3,15 +3,15 @@
   "port": 3000,
   "simulate": false,
   "pace": {
-    "eraDays": 9
+    "eraDays": 11
   },
   "geo": {
     "lat": 52.2,
     "lon": 5.1
   },
   "limits": {
-    "maxQueue": 30,
-    "maxConcurrentBuilds": 6,
+    "maxProjects": 3,
+    "maxHelpers": 8,
     "voteEveryMin": 60,
     "workMinutes": 10
   }

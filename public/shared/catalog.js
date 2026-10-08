@@ -8,16 +8,17 @@
 // needs enough people, the era's wonder finished, and enough knowledge (which
 // grows with time, a little faster with campfires, schools and labs).
 
+// from: the building that makes it, where: what that building needs.
 export const RESOURCES = {
-  wood: { label: 'Wood', emoji: '🪵', era: 0 },
-  stone: { label: 'Stone', emoji: '🪨', era: 0 },
-  food: { label: 'Food', emoji: '🍞', era: 0 },
-  bricks: { label: 'Bricks', emoji: '🧱', era: 1 },
-  coal: { label: 'Coal', emoji: '⚫', era: 2 },
-  iron: { label: 'Iron', emoji: '⛓️', era: 2 },
-  steel: { label: 'Steel', emoji: '🔩', era: 3 },
-  parts: { label: 'Parts', emoji: '⚙️', era: 3 },
-  chips: { label: 'Chips', emoji: '💾', era: 4 },
+  wood: { label: 'Wood', emoji: '🪵', era: 0, from: 'woodcutter', where: 'next to a forest' },
+  stone: { label: 'Stone', emoji: '🪨', era: 0, from: 'quarry', where: 'next to rocky hills' },
+  food: { label: 'Food', emoji: '🍞', era: 0, from: 'gatherer', where: 'berry meadows, or a fisher by the water' },
+  bricks: { label: 'Bricks', emoji: '🧱', era: 1, from: 'kiln', where: 'bakes stone and wood' },
+  coal: { label: 'Coal', emoji: '⚫', era: 2, from: 'mine', where: 'on a coal deposit in the hills' },
+  iron: { label: 'Iron', emoji: '⛓️', era: 2, from: 'mine', where: 'on an iron deposit in the hills' },
+  steel: { label: 'Steel', emoji: '🔩', era: 3, from: 'steelmill', where: 'melts iron with coal' },
+  parts: { label: 'Parts', emoji: '⚙️', era: 3, from: 'factory', where: 'makes steel into parts, needs power' },
+  chips: { label: 'Chips', emoji: '💾', era: 4, from: 'chipfab', where: 'makes parts into chips, needs power' },
 };
 
 // look: how the island itself changes (paths, street lights, the air, bots).
@@ -57,7 +58,7 @@ export const ERAS = [
 // evolve: what it turns into by itself once that building's era arrives.
 export const ITEMS = {
   // --- Stone Age -------------------------------------------------------------
-  hut: { era: 0, label: 'Hut', emoji: '🛖', kind: 'house', cost: { wood: 8, stone: 4 }, buildSec: 20, zone: 'any', pop: 4 },
+  hut: { era: 0, label: 'Hut', emoji: '🛖', kind: 'house', cost: { wood: 12, stone: 6 }, buildSec: 20, zone: 'any', pop: 6, evolve: 'cottage' },
   woodcutter: { era: 0, label: 'Woodcutter', emoji: '🪓', kind: 'producer', cost: { stone: 4 }, buildSec: 20, zone: 'outer', workers: 2, recipe: { out: { wood: 2 } } },
   quarry: { era: 0, label: 'Quarry', emoji: '⛏️', kind: 'producer', cost: { wood: 6 }, buildSec: 25, zone: 'outer', workers: 2, recipe: { out: { stone: 2 } } },
   gatherer: { era: 0, label: 'Gatherer', emoji: '🫐', kind: 'producer', cost: { wood: 4 }, buildSec: 15, zone: 'any', workers: 1, recipe: { out: { food: 2 } }, evolve: 'farm' },
@@ -66,7 +67,7 @@ export const ITEMS = {
   stockpile: { era: 0, label: 'Stockpile', emoji: '📦', kind: 'storage', cost: { wood: 12 }, buildSec: 15, zone: 'inner', storage: 60, evolve: 'barn' },
   totem: { era: 0, label: 'Totem', emoji: '🗿', kind: 'decor', cost: { wood: 6, stone: 14 }, buildSec: 25, zone: 'inner', comfort: 14, evolve: 'statue' },
   // --- Village ---------------------------------------------------------------
-  cottage: { era: 1, label: 'Cottage', emoji: '🏠', kind: 'house', cost: { wood: 12, bricks: 8 }, buildSec: 25, zone: 'any', pop: 7 },
+  cottage: { era: 1, label: 'Cottage', emoji: '🏠', kind: 'house', cost: { wood: 16, bricks: 10 }, buildSec: 25, zone: 'any', pop: 10, evolve: 'townhouse' },
   farm: { era: 1, label: 'Farm', emoji: '🌾', kind: 'producer', cost: { wood: 14, stone: 6 }, buildSec: 25, zone: 'outer', workers: 2, recipe: { out: { food: 5 } }, evolve: 'greenhouse' },
   windmill: { era: 1, label: 'Windmill', emoji: '🌬️', kind: 'special', cost: { wood: 20, stone: 10 }, buildSec: 30, zone: 'outer', workers: 1, boost: { item: 'farm', by: 0.5, radius: 2 } },
   kiln: { era: 1, label: 'Kiln', emoji: '🧱', kind: 'producer', cost: { stone: 14, wood: 8 }, buildSec: 25, zone: 'outer', workers: 2, recipe: { in: { stone: 2, wood: 1 }, out: { bricks: 2 } } },
@@ -76,7 +77,7 @@ export const ITEMS = {
   park: { era: 1, label: 'Park', emoji: '🌳', kind: 'decor', cost: { wood: 8, stone: 4 }, buildSec: 15, zone: 'any', comfort: 10 },
   barn: { era: 1, label: 'Barn', emoji: '🏚️', kind: 'storage', cost: { wood: 20, bricks: 10 }, buildSec: 25, zone: 'outer', storage: 150, evolve: 'warehouse' },
   // --- Medieval Town ---------------------------------------------------------
-  townhouse: { era: 2, label: 'Townhouse', emoji: '🏘️', kind: 'house', cost: { bricks: 18, stone: 12, iron: 2 }, buildSec: 30, zone: 'any', pop: 12 },
+  townhouse: { era: 2, label: 'Townhouse', emoji: '🏘️', kind: 'house', cost: { bricks: 22, stone: 14, iron: 3 }, buildSec: 30, zone: 'any', pop: 16, evolve: 'apartments' },
   mine: { era: 2, label: 'Mine', emoji: '⚒️', kind: 'producer', cost: { wood: 30, stone: 20 }, buildSec: 30, zone: 'outer', workers: 3, recipe: { out: { coal: 2, iron: 1 } } },
   tower: { era: 2, label: 'Tower', emoji: '🏰', kind: 'decor', cost: { stone: 40, iron: 4 }, buildSec: 35, zone: 'any', comfort: 20, maxLevel: 3 },
   school: { era: 2, label: 'School', emoji: '🏫', kind: 'knowledge', cost: { bricks: 24, wood: 12 }, buildSec: 30, zone: 'inner', workers: 2, comfort: 5, knowledge: 0.1, evolve: 'lab' },
@@ -85,7 +86,7 @@ export const ITEMS = {
   fountain: { era: 2, label: 'Fountain', emoji: '⛲', kind: 'decor', cost: { stone: 30, iron: 2 }, buildSec: 25, zone: 'inner', comfort: 18 },
   statue: { era: 2, label: 'Statue', emoji: '🗽', kind: 'decor', cost: { stone: 40, iron: 6 }, buildSec: 30, zone: 'inner', comfort: 25, evolve: 'holopark' },
   // --- Industrial Age --------------------------------------------------------
-  apartments: { era: 3, label: 'Apartment block', emoji: '🏢', kind: 'house', cost: { bricks: 40, steel: 8 }, buildSec: 40, zone: 'any', pop: 24 },
+  apartments: { era: 3, label: 'Apartment block', emoji: '🏢', kind: 'house', cost: { bricks: 45, steel: 10 }, buildSec: 40, zone: 'any', pop: 32, evolve: 'skyscraper' },
   steelmill: { era: 3, label: 'Steel mill', emoji: '🏭', kind: 'producer', cost: { bricks: 50, iron: 30 }, buildSec: 45, zone: 'outer', workers: 4, recipe: { in: { iron: 2, coal: 2 }, out: { steel: 2 } } },
   coalplant: { era: 3, label: 'Coal plant', emoji: '🔥', kind: 'power', cost: { bricks: 40, steel: 10 }, buildSec: 45, zone: 'outer', workers: 3, recipe: { in: { coal: 2 } }, power: 20, evolve: 'fusion' },
   factory: { era: 3, label: 'Factory', emoji: '⚙️', kind: 'producer', cost: { bricks: 60, steel: 30 }, buildSec: 50, zone: 'outer', workers: 5, power: -8, recipe: { in: { steel: 2 }, out: { parts: 2 } } },
@@ -93,7 +94,7 @@ export const ITEMS = {
   station: { era: 3, label: 'Train station', emoji: '🚉', kind: 'special', cost: { steel: 60, bricks: 40 }, buildSec: 50, zone: 'coast', comfort: 30, train: true },
   watertower: { era: 3, label: 'Water tower', emoji: '💧', kind: 'decor', cost: { steel: 20 }, buildSec: 30, zone: 'any', comfort: 15 },
   // --- Electric City ---------------------------------------------------------
-  skyscraper: { era: 4, label: 'Skyscraper', emoji: '🏙️', kind: 'house', cost: { steel: 60, parts: 20 }, buildSec: 60, zone: 'inner', pop: 50, power: -6 },
+  skyscraper: { era: 4, label: 'Skyscraper', emoji: '🏙️', kind: 'house', cost: { steel: 70, parts: 24 }, buildSec: 60, zone: 'inner', pop: 64, power: -6, evolve: 'arcology' },
   turbine: { era: 4, label: 'Wind turbine', emoji: '🌀', kind: 'power', cost: { steel: 30, parts: 10 }, buildSec: 40, zone: 'coast', power: 15, wind: true },
   solar: { era: 4, label: 'Solar farm', emoji: '☀️', kind: 'power', cost: { steel: 20, parts: 16 }, buildSec: 40, zone: 'outer', power: 20, solar: true },
   chipfab: { era: 4, label: 'Chip factory', emoji: '💾', kind: 'producer', cost: { steel: 60, parts: 40 }, buildSec: 60, zone: 'outer', workers: 6, power: -15, recipe: { in: { parts: 2 }, out: { chips: 1 } } },
@@ -101,7 +102,7 @@ export const ITEMS = {
   stadium: { era: 4, label: 'Stadium', emoji: '🏟️', kind: 'decor', cost: { steel: 120, parts: 40 }, buildSec: 70, zone: 'any', comfort: 80, power: -5 },
   greenhouse: { era: 4, label: 'Greenhouse', emoji: '🌱', kind: 'producer', cost: { steel: 30, parts: 10 }, buildSec: 40, zone: 'outer', workers: 2, power: -4, recipe: { out: { food: 20 } }, evolve: 'vertifarm' },
   // --- Future ----------------------------------------------------------------
-  arcology: { era: 5, label: 'Arcology', emoji: '🌐', kind: 'house', cost: { steel: 120, chips: 40 }, buildSec: 90, zone: 'inner', pop: 120, power: -10 },
+  arcology: { era: 5, label: 'Arcology', emoji: '🌐', kind: 'house', cost: { steel: 130, chips: 45 }, buildSec: 90, zone: 'inner', pop: 140, power: -10 },
   fusion: { era: 5, label: 'Fusion reactor', emoji: '⚛️', kind: 'power', cost: { steel: 200, chips: 80 }, buildSec: 90, zone: 'outer', workers: 4, power: 120 },
   robofactory: { era: 5, label: 'Robot factory', emoji: '🤖', kind: 'special', cost: { steel: 150, chips: 60 }, buildSec: 80, zone: 'outer', workers: 2, power: -20, global: 0.25 },
   vertifarm: { era: 5, label: 'Vertical farm', emoji: '🥬', kind: 'producer', cost: { steel: 80, chips: 20 }, buildSec: 60, zone: 'any', workers: 2, power: -10, recipe: { out: { food: 60 } } },
@@ -117,7 +118,8 @@ export const ITEMS = {
   spire: { era: 5, label: 'Fusion Spire', emoji: '💠', kind: 'wonder', needs: { steel: 9000, parts: 3000, chips: 3000 }, comfort: 400 },
 };
 
-// Words chat may use. "house" always means the house of the current era.
+// Words chat may use. "house" means your own home first, then the town's
+// homes of the current era.
 export const ITEM_ALIASES = {
   house: 'house', home: 'house', homes: 'house', houses: 'house',
   tent: 'hut', cabin: 'hut',
@@ -220,8 +222,10 @@ export function titleFor(level) {
   for (const [lv, name] of TITLES) if (level >= lv) t = name;
   return t;
 }
-// More building slots as you level up, and as the island grows up.
-export const buildSlots = (level, era = 0) => Math.min(30, 3 + level + 2 * era);
+// Every viewer has one home of their own. It grows with !upgrade (levels 1
+// to 3) and turns into the new kind of home whenever a new era starts.
+export const HOME_LEVELS = 3;
+export const homePop = (level) => 2 + (level || 1);
 
 export const PALETTE = Object.values(COLORS).filter((c) => c !== COLORS.white && c !== COLORS.black);
 
