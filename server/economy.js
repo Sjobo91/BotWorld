@@ -16,7 +16,10 @@ export const FOOD_PER_POP_MIN = 0.05;
 // Later eras farm and store food better, so each resident needs less.
 export const foodPerPop = (era) => FOOD_PER_POP_MIN * [1, 0.9, 0.8, 0.65, 0.5, 0.4][Math.min(5, era)];
 export const START_STOCK = { wood: 70, stone: 45, food: 40 };
-export const RESERVE = 0.2; // wonders leave this share of storage for normal builds
+// Wonders leave this share of storage for normal builds (at most
+// RESERVE_MAX of each good, so a town with huge stores still feeds them).
+export const RESERVE = 0.2;
+export const RESERVE_MAX = 250;
 export const MAX_HELPERS = 3; // bots that can help at one building
 export const WONDER_SPEED_PER_HELPER = 0.6;
 export const MOVE_IN_HAPPINESS = 30; // below this nobody moves in
@@ -169,7 +172,7 @@ export function deliverToWonder(w, stock, { fraction, cap }) {
     const have = w.delivered[r] || 0;
     if (have >= n) continue;
     const want = Math.min(n - have, n * fraction);
-    const take = Math.min(want, Math.max(0, (stock[r] || 0) - cap * RESERVE));
+    const take = Math.min(want, Math.max(0, (stock[r] || 0) - Math.min(cap * RESERVE, RESERVE_MAX)));
     if (take < want * 0.5) short.push(r);
     if (take > 0) { stock[r] -= take; w.delivered[r] = have + take; }
   }

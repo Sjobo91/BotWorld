@@ -695,6 +695,25 @@ test('the rival can be switched off', () => {
   assert.equal(w.econ.race, null);
 });
 
+test('what the town is stuck on may start even when three projects are going', () => {
+  const { w } = makeWorld();
+  rich(w);
+  for (const [u, item] of [[alice, 'hut'], [bob, 'campfire'], [carol, 'totem']]) assert.equal(say(w, u, '!build ' + item, T0).ok, true);
+  w.state.stock.food = 0;
+  w.economy(T0 + 5000, 5);
+  const food = w.econ.needs.find((n) => n.res === 'food');
+  assert.ok(food, 'the town is hungry');
+  assert.ok(w.econ.plan.some((st) => st.cmd === '!build ' + food.item), 'the plan still says what to build');
+  rich(w);
+  w.state.stock.food = 0;
+  assert.match(say(w, { id: 'd', name: 'dave' }, '!build stockpile', T0 + 6000).message, /3 projects are being built already/);
+  const res = say(w, { id: 'e', name: 'erin' }, '!build ' + food.item, T0 + 6000);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.build.urgent, true);
+  assert.equal(w.projects().length, 4);
+  assert.match(say(w, { id: 'f', name: 'finn' }, '!build ' + food.item, T0 + 6000).message, /4 projects are being built already/);
+});
+
 test('a restart catches up on homes, and projects carry on', () => {
   const { w } = makeWorld();
   rich(w);

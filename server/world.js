@@ -54,6 +54,7 @@ const DAY = 864e5;
 // Commands that keep a bot busy for a while (and so can wait in line).
 const JOB_COMMANDS = new Set(['work', 'help', 'explore', 'repair']);
 const EMPTY = new Set();
+const URGENT = new Set(['wonder', 'hungry', 'power', 'build']);
 // Each town's home ground, where the other may not build: no race can
 // leave a town without its first forests, hills and ore.
 export const HOME_GROUND = 13;
@@ -529,7 +530,8 @@ export class World {
     const it = ITEMS[item];
     if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in the ' + ERAS[it.era].name + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
     const active = this.projects();
-    if (active.length >= this.limits.maxProjects) {
+    const urgent = this.urgentRoom(item, active);
+    if (active.length >= this.limits.maxProjects && !urgent) {
       return this.refuse(u, now, active.length + ' projects are being built already (' + active.map((b) => '#' + b.id + ' ' + label(b.item)).join(', ') + '). Help finish one: !help');
     }
     const own = active.find((b) => (b.upgrade ? b.upgradeBy : b.founderId) === u.id);
@@ -564,6 +566,7 @@ export class World {
       cost: { ...it.cost },
       built: false,
     };
+    if (urgent && active.length >= this.limits.maxProjects) b.urgent = true;
     this.placeStats(b);
     this.builds.push(b);
     this.changed({ type: 'build', build: b });
@@ -573,6 +576,15 @@ export class World {
     const what = (b.color ? b.color + ' ' : '') + label(item);
     const wait = b.status === 'queued' ? this.missingText(b.cost) : '';
     return { ok: true, message: u.name + ' started ' + withArticle(what) + ' (#' + b.id + ')' + (wait ? '. It needs ' + wait : '') + '. Everyone can help: !help', build: b };
+  }
+
+  // What the town is stuck on (the wonder, food, power, a waiting project)
+  // may always start, one over the limit, so a full list of projects never
+  // blocks the way to the next era.
+  urgentRoom(item, active = this.projects(), needs = this.econ?.needs || []) {
+    if (active.length < this.limits.maxProjects) return true;
+    if (active.length > this.limits.maxProjects || active.some((b) => b.urgent)) return false;
+    return needs.some((n) => n.item === item && URGENT.has(n.why));
   }
 
   // The project that needs hands most: one being built, with the fewest helpers.
@@ -1408,9 +1420,10 @@ export class World {
     for (const n of needs) {
       const what = n.res === 'power' ? 'power' : RESOURCES[n.res].label.toLowerCase();
       const hand = n.res !== 'power' && this.handCmd(n.res);
-      if (hand) add({ kind: 'gather', res: n.res, text: 'The town needs ' + what + ', gather some', cmd: hand });
-      if (!room) continue;
-      if (n.site) add({ kind: 'build', item: n.item, res: n.res, text: (hand ? cap1(withArticle(label(n.item))) + ' makes ' + what + ' all day' : 'The town needs ' + what), cmd: '!build ' + n.item });
+      if (hand) add({ kind: 'gather', res: n.res, urgent: URGENT.has(n.why), text: 'The town needs ' + what + ', gather some', cmd: hand });
+      const canStart = room || (n.site && this.urgentRoom(n.item, projects, needs));
+      if (!canStart) continue;
+      if (n.site) add({ kind: 'build', item: n.item, res: n.res, urgent: URGENT.has(n.why), text: (hand ? cap1(withArticle(label(n.item))) + ' makes ' + what + ' all day' : (n.why === 'wonder' ? 'The wonder needs ' : 'The town needs ') + what), cmd: '!build ' + n.item });
       else if (!hand) add({ kind: 'explore', item: n.item, res: n.res, text: 'Find ' + (n.where || 'more land') + ' for ' + what, cmd: '!explore' });
       const up = this.upgradable(n.res);
       if (up) add({ kind: 'upgrade', item: up.item, res: n.res, text: 'Upgrade the ' + label(up.item) + ' for more ' + what, cmd: '!upgrade ' + up.item });
@@ -1423,7 +1436,11 @@ export class World {
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
     add({ kind: 'explore', text: 'Explore the fog, there is more to find', cmd: '!explore' });
-    return steps.slice(0, 4);
+    // What the town is stuck on goes near the top, ahead of more !help.
+    const urgent = steps.filter((st) => st.urgent).slice(0, 2);
+    const rest = steps.filter((st) => !urgent.includes(st));
+    const lead = rest[0]?.kind === 'help' || rest[0]?.kind === 'gather' ? rest.slice(0, 1) : [];
+    return lead.concat(urgent, rest.slice(lead.length)).slice(0, 4);
   }
 
   checkEra(now) {
