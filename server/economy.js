@@ -98,12 +98,11 @@ export function happiness(builds, { foodShort, powerRatio, bonus = 0 }) {
 }
 
 // Windmills make the farms around them faster.
-function adjacencyBoost(b, builds) {
+function adjacencyBoost(b, boosters) {
   let boost = 1;
-  for (const o of builds) {
-    const ot = itemOf(o);
-    if (!ot?.boost || ot.boost.item !== b.item || !isUp(o)) continue;
-    if (hexBetween(b, o) <= ot.boost.radius) boost += ot.boost.by;
+  for (const o of boosters) {
+    const ob = itemOf(o).boost;
+    if (ob.item === b.item && hexBetween(b, o) <= ob.radius) boost += ob.by;
   }
   return Math.min(2, boost);
 }
@@ -115,6 +114,7 @@ export function produce(builds, stock, ctx, dt) {
   const used = {};
   const pops = [];
   const stalled = {};
+  const boosters = builds.filter((o) => isUp(o) && itemOf(o)?.boost);
   for (const b of builds) {
     if (!isUp(b)) continue;
     const it = itemOf(b);
@@ -128,7 +128,7 @@ export function produce(builds, stock, ctx, dt) {
     let ev = 1;
     for (const r of Object.keys(out)) ev = Math.max(ev, ctx.boosts[r] || 1);
     m *= ev;
-    m *= adjacencyBoost(b, builds);
+    m *= adjacencyBoost(b, boosters);
     // A good spot (a woodcutter in a big forest) works faster than a poor one.
     m *= b.rich || 1;
     let prog = (ctx.progress.get(b.id) || 0) + (dt / 60) * m;
