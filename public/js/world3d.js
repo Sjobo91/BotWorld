@@ -2697,7 +2697,10 @@ export async function createWorld(stage, overlay, opts) {
     const done = all.filter((v) => v.b.built && !v.b.wonder);
     const walkers = [...bots.values()].filter((b) => b.mode === 'walk' || b.mode === 'work' || b.mode === 'job' || b.mode === 'act');
     const wonder = all.find((v) => v.b.wonder && v.b.item === ERAS[era].wonder);
-    const step = tour.i % 5;
+    const step = tour.i % 6;
+    const rv = data.econ?.race?.rival;
+    const rvTile = rv?.met ? layout.index.get(rv.origin.q + ',' + rv.origin.r) : null;
+    if (step === 5 && rvTile && known[rvTile.i]) { flyTo(rvTile.x, rvTile.z, 9, 3200); return; }
     if (step === 0 || (!busy.length && !done.length && !walkers.length)) flyTo(0, 0, fitDistance(), 2600);
     else if (step === 1 && busy.length) { const v = pick(busy); flyTo(v.root.position.x, v.root.position.z, 9, 2400); }
     else if (step === 2 && walkers.length) { const b = pick(walkers); flyTo(b.x, b.z, 8, 2400, b); }
