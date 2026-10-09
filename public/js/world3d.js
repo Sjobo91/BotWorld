@@ -1323,6 +1323,13 @@ export async function createWorld(stage, overlay, opts) {
       return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw: Math.atan2(t.x - nd.x, t.z - nd.z) }, (x) => { x.mode = 'job'; x.jobPose = 'scout'; x.yawTarget = Math.atan2(t.x - nd.x, t.z - nd.z); }, deadline, WALK * 1.6);
     }
     if (job.kind === 'hand') return gatherTrip(b, job);
+    if (job.kind === 'deliver') {
+      const drop = guildDrop(b.haulSalt);
+      if (!drop) return false;
+      if (b.carrying) return goSpot(b, drop, (x) => { carry(x, null); dust(x.x, x.y, x.z, 0.3); startAct(x, 'look', 0.8, drop.yaw); });
+      const pad = padSpot(b.haulSalt);
+      return pad ? goSpot(b, pad, (x) => { carry(x, job.res); startAct(x, 'look', 0.6, pad.yaw); }) : false;
+    }
     const v = builds.get(job.buildId);
     if (!v) return false;
     if (job.kind === 'wonder') {
@@ -2117,6 +2124,66 @@ export async function createWorld(stage, overlay, opts) {
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     return g;
   }
+  // --- The Merchant Guild's wagon: on the landing pad while an order is open ------------------
+  const guild = { g: null, k: 0, flag: null };
+  // On the pad's camera side, between the ship and the edge, along the ring
+  // and clear of the ramp and the pick-up spots.
+  function guildPlace() {
+    const a = 1.01;
+    return { x: Math.cos(a) * R * 0.7, z: Math.sin(a) * R * 0.7, yaw: -Math.PI / 2 - a };
+  }
+  // Haulers set their crates down at either end of the wagon.
+  function guildDrop(salt) {
+    const node = cornerNode(layout.tiles[0], salt % 2);
+    if (node < 0) return null;
+    const nd = nav.nodes[node];
+    const p = guildPlace();
+    const k = 0.45 + ((salt >> 1) % 2) * 0.1;
+    const x = nd.x + (p.x - nd.x) * k;
+    const z = nd.z + (p.z - nd.z) * k;
+    return { node, x, z, y: TILE_TOP, yaw: Math.atan2(p.x - x, p.z - z) };
+  }
+  function makeGuildWagon() {
+    const g = new T.Group();
+    const gold = trimMat('#e2a72e');
+    const plum = trimMat('#6b3fa0');
+    mesh(geo('gwBed', () => new T.BoxGeometry(0.24, 0.05, 0.13)), mats.wood, 0, 0.08, 0, g);
+    // A barrel-top canopy in Guild gold, plum trim at both ends.
+    mesh(geo('gwTop', () => new T.CylinderGeometry(0.068, 0.068, 0.2, 14, 1, false, 0, Math.PI).rotateZ(Math.PI / 2)), gold, -0.01, 0.105, 0, g);
+    for (const x of [-0.11, 0.09]) mesh(geo('gwRim', () => new T.TorusGeometry(0.068, 0.008, 6, 14, Math.PI)), plum, x, 0.105, 0, g).rotation.y = Math.PI / 2;
+    for (const [x, z] of [[-0.08, -0.07], [-0.08, 0.07], [0.08, -0.07], [0.08, 0.07]]) mesh(geo('gwWheel', () => new T.CylinderGeometry(0.042, 0.042, 0.016, 12).rotateX(Math.PI / 2)), mats.woodDark, x, 0.042, z, g);
+    // A mule in front, and crates waiting by the side.
+    const mule = mesh(geo('cartMule', () => new T.BoxGeometry(0.1, 0.07, 0.05)), mats.trunk, 0.2, 0.09, 0, g);
+    mesh(geo('cartMuleHead', () => new T.BoxGeometry(0.04, 0.05, 0.04)), mats.trunk, 0.06, 0.04, 0, mule);
+    for (const [x, y, z] of [[-0.03, 0.03, 0.12], [0.04, 0.03, 0.12], [0.005, 0.085, 0.12]]) mesh(geo('gwCrate', () => new T.BoxGeometry(0.055, 0.055, 0.055)), mats.wood, x, y, z, g);
+    mesh(geo('gwPole', () => new T.CylinderGeometry(0.006, 0.006, 0.26, 6)), mats.woodDark, 0.11, 0.21, -0.055, g);
+    guild.flag = mesh(geo('gwFlag', () => new T.BoxGeometry(0.09, 0.055, 0.004).translate(0.045, 0, 0)), plum, 0.11, 0.31, -0.055, g);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  function stepGuild(t, dt) {
+    const want = data.econ?.guild?.open ? 1 : 0;
+    // A new map was built: the old wagon went with the old world.
+    if (guild.g && guild.g.parent !== world) guild.g = null;
+    if (want && !guild.g) {
+      const p = guildPlace();
+      guild.g = makeGuildWagon();
+      guild.g.position.set(p.x, TILE_TOP, p.z);
+      guild.g.rotation.y = p.yaw;
+      guild.k = 0;
+      world.add(guild.g);
+      dust(p.x, TILE_TOP, p.z, 0.6);
+    }
+    if (!guild.g) return;
+    guild.k += (want - guild.k) * Math.min(1, dt * 3);
+    guild.g.scale.setScalar(Math.max(0.001, guild.k));
+    if (guild.flag) guild.flag.rotation.y = Math.sin(t * 2.4) * 0.35;
+    if (!want && guild.k < 0.02) {
+      world.remove(guild.g);
+      guild.g = null;
+      guild.flag = null;
+    }
+  }
   function stepEvents(t, dt) {
     const key = data.event?.key;
     // Lightning during storms.
@@ -2839,6 +2906,7 @@ export async function createWorld(stage, overlay, opts) {
     stepBuilds(t, dt);
     stepTrain(dt);
     stepEvents(t, dt);
+    stepGuild(t, dt);
     stepCritters(t, dt);
     stepParticles(dt);
     stepHighlights(dt);
@@ -3071,6 +3139,7 @@ export async function createWorld(stage, overlay, opts) {
         knownR: layout.knownR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
+        guild: guild.g ? { x: +guild.g.position.x.toFixed(2), z: +guild.g.position.z.toFixed(2), k: +guild.k.toFixed(2) } : null,
         season,
       };
     },

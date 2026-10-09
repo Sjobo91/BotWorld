@@ -104,3 +104,10 @@ test('!vote start is its own command', () => {
   assert.deepEqual(parseCommand('!vote start'), { type: 'vote', option: null, start: true });
   assert.deepEqual(parseCommand('!vote 2'), { type: 'vote', option: 2 });
 });
+
+test('!deliver hauls for a Merchant Guild order, and can be lined up', () => {
+  assert.deepEqual(parseCommand('!deliver'), { type: 'deliver' });
+  assert.deepEqual(parseCommand('!deliver 3'), { type: 'deliver', times: 3 });
+  assert.equal(parseCommand('!trade').type, 'deliver');
+  assert.equal(parseCommand('!haul x2').times, 2);
+});

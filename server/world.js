@@ -12,6 +12,7 @@ import * as M from '../public/shared/terrain.js';
 import { parseCommand } from './commands.js';
 import * as E from './economy.js';
 import { Rival, freshRival, raceProgress } from './rival.js';
+import * as G from './guild.js';
 
 export const DEFAULT_LIMITS = {
   maxProjects: 3,
@@ -31,6 +32,11 @@ export const DEFAULT_LIMITS = {
   // An AI town on the far side of the world that races chat (false: off).
   rival: true,
   rivalDifficulty: 1,
+  // Merchant Guild orders both towns race to fill (needs the rival).
+  contracts: true,
+  contractEveryMin: 75,
+  contractMin: 30,
+  deliverSec: 30,
   voteEveryMin: 60,
   voteSec: 180,
   autoEventEveryMin: 150,
@@ -52,7 +58,7 @@ const HOME_COST = 0.5;
 const WONDER_HELPERS = 8;
 const DAY = 864e5;
 // Commands that keep a bot busy for a while (and so can wait in line).
-const JOB_COMMANDS = new Set(['work', 'help', 'explore', 'repair']);
+const JOB_COMMANDS = new Set(['work', 'help', 'explore', 'repair', 'deliver']);
 const EMPTY = new Set();
 const URGENT = new Set(['wonder', 'hungry', 'power', 'build']);
 // Each town's home ground, where the other may not build: no race can
@@ -100,6 +106,9 @@ export function freshState(now, seed) {
     cleared: [],
     found: [],
     queues: {},
+    contract: null,
+    contracts: G.freshContracts(),
+    nextContractAt: now + 45 * 60e3,
   };
 }
 
@@ -358,6 +367,7 @@ export class World {
       case 'work': return this.work(cmd, u, now);
       case 'explore': return this.explore(cmd, u, now);
       case 'repair': return this.repair(u, now);
+      case 'deliver': return this.deliver(u, now);
       case 'vote': return this.vote(cmd, u, now);
       case 'hat': return this.hat(cmd, u, now);
       case 'dance': return this.dance(u, now);
@@ -637,6 +647,25 @@ export class World {
     return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.shiftSec * 1000 }, now, ITEMS[w.item].label);
   }
 
+  // !deliver: one trip with crates to the Merchant Guild's wagon.
+  deliver(u, now) {
+    const s = this.state;
+    const c = s.contract;
+    if (!this.rival || !c || c.winner) {
+      const mins = Math.max(1, Math.round((s.nextContractAt - now) / 60e3));
+      return this.refuse(u, now, this.rival && this.limits.contracts ? 'No Guild order right now. The next one comes in about ' + mins + ' minutes.' : 'The Merchant Guild does not trade here.');
+    }
+    if ((s.stock[c.res] || 0) < 1) {
+      const hand = this.handCmd(c.res);
+      return this.refuse(u, now, 'The town has no ' + res(c.res) + ' to deliver. Make some first: ' + (hand || '!work ' + c.res));
+    }
+    const job = s.jobs[u.id];
+    if (job && job.kind !== 'gather') return this.refuse(u, now, 'Your bot is busy right now.');
+    if (job) this.endJob(u.id, false, now, false);
+    c.haulers[u.id] = (c.haulers[u.id] || 0) + 1;
+    return this.startJob(u, { kind: 'deliver', res: c.res, until: now + this.limits.deliverSec * 1000 }, now);
+  }
+
   remove(cmd, u) {
     if (!u.mod && !u.broadcaster) return { ok: false, message: '' };
     const b = this.builds.find((x) => x.id === cmd.id);
@@ -861,6 +890,7 @@ export class World {
     this.state.jobs[u.id] = job;
     this.changed({ type: 'job', userId: u.id, job });
     if (job.kind === 'explore') return { ok: true, message: u.name + ' sets off to explore.' };
+    if (job.kind === 'deliver') return { ok: true, message: u.name + ' hauls ' + toolsOf(this.state.builders[u.id]).load + ' crates of ' + res(job.res) + ' to the Guild wagon.' };
     if (job.kind === 'hand') return { ok: true, message: u.name + ' goes out to ' + where + ' and brings back ' + toolsOf(this.state.builders[u.id]).load + ' ' + res(job.res) + ' in about ' + Math.round((job.until - now) / 1000) + ' seconds.' };
     const verb = { wonder: 'is hauling goods to the', repair: 'is repairing the', build: 'is helping build the' }[job.kind] || 'is helping at the';
     return { ok: true, message: u.name + ' ' + verb + ' ' + (where || 'town') + ' (#' + job.buildId + ').' };
@@ -880,7 +910,7 @@ export class World {
         this.changed({ type: 'build', build: b });
         this.emit({ type: 'notice', kind: 'repair', user: this.nameOf(userId), text: 'repaired the ' + label(b.item) + ' (#' + b.id + ')' });
       }
-      this.grant(userId, { work: 3, hand: 2, wonder: 3, repair: 10, gather: 2, build: 2 }[job.kind] || 0, now);
+      this.grant(userId, { work: 3, hand: 2, wonder: 3, repair: 10, gather: 2, build: 2, deliver: 3 }[job.kind] || 0, now);
     } else if (job.kind === 'repair' && b) delete b.repairBy;
     this.changed({ type: 'job', userId, job: null });
     if (next && now != null) this.runQueue(userId, now);
@@ -1281,6 +1311,15 @@ export class World {
         }
         continue;
       }
+      if (job.kind === 'deliver') {
+        const c = this.state.contract;
+        if (!c || c.winner) this.endJob(uid, false, now);
+        else if (now >= job.until) {
+          G.tripDone(this, uid, job, now);
+          if (this.state.jobs[uid] === job) this.endJob(uid, true, now);
+        }
+        continue;
+      }
       const b = this.builds.find((x) => x.id === job.buildId);
       if (!b || (job.kind === 'wonder' && b.status === 'done') || (job.kind === 'build' && b.status === 'done')) { this.endJob(uid, !!b, now); continue; }
       if (job.kind === 'gather') {
@@ -1343,6 +1382,7 @@ export class World {
       }
     }
     if (!s.finished) s.knowledge = Math.min(this.knowledgeNeed(), s.knowledge + ((1 + E.knowledgeBoost(builds)) * dt) / 60);
+    if (dt > 0) G.stepContract(this, now, dt);
     for (const r of Object.keys(s.stock)) s.stock[r] = Math.max(0, Math.min(cap, s.stock[r]));
     if (dt > 0) {
       for (const r of E.unlockedResources(s.era)) {
@@ -1377,6 +1417,7 @@ export class World {
       plan: this.plan(needs, w, popCap),
       explored: { n: explored, total: this.map.total },
       race: this.rival ? { you: this.raceProgress(), rival: this.rival.summary() } : null,
+      guild: this.rival && this.limits.contracts ? G.view(this) : null,
     };
     if (dt > 0) {
       this.dirty = true;
@@ -1450,6 +1491,13 @@ export class World {
         else add({ kind: 'build', item: RESOURCES[r].from, res: r, text: 'Nobody makes ' + RESOURCES[r].label.toLowerCase() + ' yet', cmd: '!build ' + RESOURCES[r].from });
       }
     }
+    const c = s.contract;
+    if (c && !c.winner && this.rival) {
+      const what = RESOURCES[c.res].label.toLowerCase();
+      const hand = this.handCmd(c.res);
+      if ((s.stock[c.res] || 0) >= 1) add({ kind: 'deliver', res: c.res, urgent: true, text: 'Guild order: deliver ' + what + ' before ' + this.rival.s.name, cmd: '!deliver' });
+      else add({ kind: 'gather', res: c.res, urgent: true, text: 'The Guild wants ' + what + ', make some', cmd: hand || '!work ' + c.res });
+    }
     const room = projects.length < this.limits.maxProjects;
     for (const n of needs) {
       const what = n.res === 'power' ? 'power' : RESOURCES[n.res].label.toLowerCase();
@@ -1470,11 +1518,14 @@ export class World {
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
     add({ kind: 'explore', text: 'Explore the fog, there is more to find', cmd: '!explore' });
-    // What the town is stuck on goes near the top, ahead of more !help.
+    // What the town is stuck on goes near the top, ahead of more !help; a
+    // Guild order runs against the clock, so it goes first.
     const urgent = steps.filter((st) => st.urgent).slice(0, 2);
     const rest = steps.filter((st) => !urgent.includes(st));
     const lead = rest[0]?.kind === 'help' || rest[0]?.kind === 'gather' ? rest.slice(0, 1) : [];
-    return lead.concat(urgent, rest.slice(lead.length)).slice(0, 4);
+    const order = lead.concat(urgent, rest.slice(lead.length));
+    const guild = order.find((st) => st.kind === 'deliver' || (st.urgent && c && st.res === c.res));
+    return (guild ? [guild].concat(order.filter((st) => st !== guild)) : order).slice(0, 4);
   }
 
   checkEra(now) {

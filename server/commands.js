@@ -115,6 +115,15 @@ export function parseCommand(text) {
     case 'repair':
     case 'fix':
       return { type: 'repair' };
+    // Hauling for the Merchant Guild's order: !deliver, !deliver 3.
+    case 'deliver':
+    case 'trade':
+    case 'haul':
+    case 'sell':
+    case 'guild':
+    case 'order':
+    case 'contract':
+      return withTimes({ type: 'deliver' }, args);
     case 'vote':
     case 'v': {
       if (args[0] === 'start' || args[0] === 'now') return { type: 'vote', option: null, start: true };

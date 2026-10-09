@@ -593,6 +593,100 @@ test('the merchant brings a fair gift, not a fortune', () => {
   assert.ok(total > 0 && total <= 2 * 30);
 });
 
+// A town with a few buildings and chat around, and a Guild order due now.
+function guildWorld() {
+  const { w, events } = makeWorld();
+  let now = T0;
+  for (const [u, item] of [[alice, 'woodcutter'], [bob, 'quarry'], [carol, 'gatherer'], [alice, 'campfire'], [bob, 'stockpile']]) now = finish(w, u, item, now);
+  rich(w);
+  say(w, alice, '!me', now);
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  return { w, events, now };
+}
+
+test('a Merchant Guild order: bots on !deliver haul for it, and the first town to fill it gets paid', () => {
+  const { w, events, now: t0 } = guildWorld();
+  const c = w.state.contract;
+  assert.ok(c, 'an order is posted');
+  assert.ok(['wood', 'stone', 'food'].includes(c.res), 'a good both towns know');
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && /Merchant Guild wants/.test(e.text)));
+  assert.equal(w.econ.plan[0].cmd, '!deliver', 'the plan says to deliver');
+  w.state.stock[c.res] = 100;
+  let now = t0;
+  const res = say(w, alice, '!deliver 3', now);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(w.state.jobs.a.kind, 'deliver');
+  assert.equal(w.state.queues.a.length, 2, 'two more trips lined up');
+  // One trip with stone tools (two crates) fills a twentieth of the order.
+  const before = w.state.contract.town;
+  now = run(w, now, 30e3);
+  assert.ok(w.state.contract.town - before >= c.amount * 0.05 - 1e-6, 'a trip counts');
+  const xp = w.state.builders.a.xp;
+  const knowledge = w.state.knowledge;
+  while (!w.state.contract.winner && now < t0 + 40 * 60e3) {
+    for (const u of [alice, bob]) if (!w.state.jobs[u.id]) say(w, u, '!deliver 5', now);
+    now = run(w, now, 30e3);
+    for (const r of Object.keys(w.state.stock)) w.state.stock[r] = Math.max(w.state.stock[r], 60);
+  }
+  assert.equal(w.state.contract.winner, 'town');
+  assert.equal(w.state.contracts.town, 1);
+  assert.ok(Object.keys(w.state.contract.paid).length > 0, 'paid in goods');
+  assert.ok(w.state.knowledge >= knowledge + 30, 'and some knowledge');
+  assert.ok(w.state.builders.a.xp >= xp + 8, 'haulers earn XP');
+  assert.equal(Object.values(w.state.jobs).some((j) => j.kind === 'deliver'), false, 'hauling stops');
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && e.result === 'town'));
+  // The order card goes away after a while, and the next one comes later.
+  now = run(w, now, 120e3);
+  assert.equal(w.state.contract, null);
+  assert.ok(w.state.nextContractAt > now);
+  assert.match(say(w, alice, '!deliver', now).message, /No Guild order right now/);
+});
+
+test('when chat does not haul, the rival fills the Guild order and chat gets its crates back', () => {
+  const { w, events, now: t0 } = guildWorld();
+  const c = w.state.contract;
+  const before = w.state.rival.knowledge;
+  let now = t0;
+  while (!w.state.contract.winner && now < t0 + 40 * 60e3) {
+    now = run(w, now, 30e3);
+    for (const r of Object.keys(w.state.stock)) w.state.stock[r] = Math.max(w.state.stock[r], 60);
+    for (const r of Object.keys(w.state.rival.stock)) w.state.rival.stock[r] = Math.max(w.state.rival.stock[r], 60);
+  }
+  assert.equal(w.state.contract.winner, 'rival');
+  assert.ok(c.town > 0 && c.rival > c.town, 'the townsfolk hauled a little, the rival more');
+  assert.equal(w.state.contracts.rival, 1);
+  assert.ok(w.state.rival.knowledge > before + 30);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && e.result === 'rival' && /crates come back/.test(e.text)));
+});
+
+test('the Guild needs chat around, goods to deliver and the rival', () => {
+  const { w } = makeWorld();
+  let now = T0;
+  for (const [u, item] of [[alice, 'woodcutter'], [bob, 'quarry'], [carol, 'gatherer'], [alice, 'campfire'], [bob, 'stockpile']]) now = finish(w, u, item, now);
+  // Nobody has typed for an hour: no order, it waits.
+  now += 3600e3;
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  assert.equal(w.state.contract, null);
+  assert.ok(w.state.nextContractAt > now);
+  // Chat is back: the order comes, but nothing to deliver means a hint.
+  say(w, alice, '!me', now);
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  const c = w.state.contract;
+  assert.ok(c);
+  w.state.stock[c.res] = 0;
+  assert.match(say(w, bob, '!deliver', now).message, /no .* to deliver\. Make some first/);
+  // Without the rival there is no Guild.
+  const solo = makeWorld({ limits: { rival: false } }).w;
+  say(solo, alice, '!me', T0);
+  solo.state.nextContractAt = T0;
+  run(solo, T0, 60e3);
+  assert.equal(solo.state.contract, null);
+  assert.match(say(solo, alice, '!deliver', T0 + 60e3).message, /does not trade here/);
+});
+
 test('only moderators can remove builds or start events, and nobody can demolish town buildings', () => {
   const { w } = makeWorld();
   const b = say(w, alice, '!home', T0).build;

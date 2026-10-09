@@ -56,6 +56,8 @@ function choose(v) {
   if (job && job.kind !== 'gather' && (rnd() < 0.6 || (s.queues[v.id] || []).length >= 2)) return null;
   const econ = world.econ || {};
   const plan = econ.plan || [];
+  // A Guild order on screen, racing the rival: chat hauls for it.
+  if (s.contract && !s.contract.winner && rnd() < 0.5) return say('!deliver ' + (1 + Math.floor(rnd() * 3)));
   const r = rnd();
   // Most of chat does what the "next step" box on screen says.
   if (r < 0.6 && plan.length) {
@@ -114,6 +116,8 @@ console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h o
 console.table(daily);
 for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
 if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));
+const guild = world.state.contracts;
+if (guild && guild.n) console.log('Guild orders: ' + guild.n + ' posted, BotWorld won ' + guild.town + ', ' + (world.rival ? world.rival.s.name : 'the rival') + ' won ' + guild.rival);
 if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;
@@ -122,7 +126,7 @@ console.log('built:', JSON.stringify(byItem));
 // Save the grown island with every time moved so that the end of the run is now.
 if (args.save) {
   const shift = Date.now() - now;
-  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at', 'progressAt', 'nextThink', 'lastStep']);
+  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at', 'progressAt', 'nextThink', 'lastStep', 'nextContractAt', 'endedAt']);
   const move = (o) => {
     if (Array.isArray(o)) return o.forEach(move);
     if (!o || typeof o !== 'object') return;

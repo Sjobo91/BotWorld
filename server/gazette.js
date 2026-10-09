@@ -32,6 +32,8 @@ export function templateHeadline(facts, econ, era) {
       else lines.push(ev.label + ': ' + ev.text.toLowerCase());
     }
     if (f.kind === 'rival') lines.push(f.text.replace(/!$/, '').slice(0, 100));
+    if (f.kind === 'guild' && f.result === 'town') lines.push(pick(['Guild deal! Chat beats ' + f.rival + ' to an order of ' + f.what, 'Crates win the day: BotWorld fills the Guild\'s ' + f.what + ' order first']));
+    if (f.kind === 'guild' && f.result === 'rival') lines.push(pick([f.rival + ' snaps up the Guild\'s ' + f.what + ' order', 'Too slow! ' + f.rival + ' beats chat to the Guild\'s ' + f.what]));
     if (f.kind === 'level') lines.push(pick([f.name + ' becomes a ' + f.title + ' at level ' + f.level, 'Rising star: ' + f.name + ' reaches level ' + f.level]));
     if (f.kind === 'built' && f.count >= 3) lines.push(pick(['Building boom: ' + plural(f.count, 'new building', 'new buildings') + ' since the last edition', 'Hammers everywhere: ' + f.count + ' new buildings rise']));
     if (f.kind === 'built' && f.top) lines.push(f.top.name + ' builds ' + (f.top.count > 1 ? f.top.count + ' things' : 'a new ' + lower(f.top.item)) + '; neighbours impressed');
@@ -81,6 +83,10 @@ export class Gazette {
     else if (ev.type === 'finale') add({ kind: 'finale' });
     else if (ev.type === 'notice' && ev.kind === 'wonder') add({ kind: 'wonder', item: ERAS[this.world.era].wonder });
     else if (ev.type === 'notice' && ev.kind === 'rival') add({ kind: 'rival', text: ev.text });
+    else if (ev.type === 'notice' && ev.kind === 'guild' && (ev.result === 'town' || ev.result === 'rival')) {
+      const c = ev.contract?.open;
+      if (c) add({ kind: 'guild', result: ev.result, what: c.amount + ' ' + lower(c.res), rival: c.rivalName });
+    }
     else if (ev.type === 'event' && ev.event) add({ kind: 'event', key: ev.event.key, damaged: ev.damaged ? ev.damaged.length : 0, gift: ev.gift ? Object.entries(ev.gift).map(([r, n]) => n + ' ' + r).join(', ') : '' });
     else if (ev.type === 'level' && ev.level >= 3) add({ kind: 'level', name: ev.name, level: ev.level, title: ev.title });
     else if (ev.type === 'builder' && ev.joined) {
@@ -166,6 +172,7 @@ export class Gazette {
       if (f.kind === 'event' && EVENTS[f.key]) out.push('Event: ' + EVENTS[f.key].label + ' (' + EVENTS[f.key].text + ')' + (f.damaged ? ', ' + f.damaged + ' buildings damaged' : '') + (f.gift ? ', gifts: ' + f.gift : '') + '.');
       if (f.kind === 'level') out.push('Viewer "' + f.name + '" reached level ' + f.level + ' (' + f.title + ').');
       if (f.kind === 'rival') out.push('News about the rival AI town: ' + f.text);
+      if (f.kind === 'guild') out.push('Merchant Guild order of ' + f.what + ' won by ' + (f.result === 'town' ? 'BotWorld (chat)' : 'the rival AI town ' + f.rival) + '.');
       if (f.kind === 'joined') out.push('New viewers arrived: ' + f.names.slice(0, 5).map((n) => '"' + n + '"').join(', ') + '.');
       if (f.kind === 'built') out.push(f.count + ' buildings finished' + (f.top ? ', most by "' + f.top.name + '" (latest: ' + lower(f.top.item) + ')' : '') + '.');
     }

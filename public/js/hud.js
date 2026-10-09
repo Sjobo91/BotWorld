@@ -52,6 +52,15 @@ const resLabel = (r) => (r === 'power' ? 'power' : RESOURCES[r] ? RESOURCES[r].l
 export function createHud(state, now, opts) {
   const nameOf = (id) => (state.builders.get(id) || {}).name || 'someone';
   let shownEra = -1;
+  let shownGuild = false;
+  // The how-to card changes with the era, and shows !deliver when the Guild trades.
+  function syncHowto() {
+    const guild = !!state.econ?.guild;
+    if (shownEra === state.era && shownGuild === guild) return;
+    shownEra = state.era;
+    shownGuild = guild;
+    renderHowto();
+  }
 
   // --- How to play: three pages that take turns -----------------------------------------
   // 1. the commands, 2. where every good comes from, 3. this era's buildings.
@@ -91,6 +100,7 @@ export function createHud(state, now, opts) {
     row('!upgrade ' + starter, 'make a building stronger');
     row('!upgrade tools', 'better tools, bigger loads');
     row('!explore', 'scout the fog for new land');
+    if (state.econ?.guild) row('!deliver', 'haul for a Merchant Guild order');
     row('!me', 'find your bot · !wood 3 does 3');
     renderSources();
     $('howBuildTitle').textContent = 'Build in the ' + ERAS[state.era].name;
@@ -176,10 +186,54 @@ export function createHud(state, now, opts) {
     $('raceNote').textContent = r.finished ? r.name + ' lit their Fusion Spire first. BotWorld can still finish the race!'
       : r.met ? r.name + ' lies to the ' + way + ' with ' + r.builds + ' buildings. Claim the land between: !build outpost ' + way
       : 'An AI town far to the ' + way + ', past the fog, races BotWorld to the Future. !explore ' + way + ' to find it.';
+    renderGuild(r.name);
+  }
+
+  // A Merchant Guild order: both towns' bars, time left and who won.
+  function renderGuild(rivalName) {
+    const g = state.econ?.guild;
+    const box = $('guild');
+    const tally = $('guildTally');
+    const c = g?.open;
+    box.hidden = !c;
+    const played = g ? g.tally.town + g.tally.rival : 0;
+    tally.hidden = !played || !!c;
+    if (played) tally.textContent = '📜 Guild orders won: BotWorld ' + g.tally.town + ' · ' + rivalName + ' ' + g.tally.rival;
+    if (!c) return;
+    box.classList.toggle('won', c.winner === 'town');
+    box.classList.toggle('lost', c.winner === 'rival');
+    $('guildWhat').textContent = '📜 Guild order: ' + c.amount + ' ' + resEm(c.res) + ' ' + resLabel(c.res);
+    $('guildTime').textContent = c.winner ? '' : clockOf(c.endsAt - now()) + ' left';
+    const rows = [
+      { name: 'BotWorld', color: '#3b7ddd', n: c.town, win: c.winner === 'town' },
+      { name: c.rivalName || rivalName, color: '#d9534f', n: c.rival, win: c.winner === 'rival' },
+    ];
+    const list = $('guildRows');
+    list.textContent = '';
+    for (const x of rows) {
+      const li = el('li', 'race-row' + (x.win ? ' ahead' : ''));
+      const who = el('span', 'who');
+      const dot = el('i');
+      dot.style.background = x.color;
+      who.append(dot, el('b', null, x.name));
+      li.append(who, el('span', 'rera', x.n + ' / ' + c.amount));
+      const bar = el('span', 'bar');
+      const fill = el('span');
+      fill.style.width = Math.min(100, Math.round((100 * x.n) / c.amount)) + '%';
+      fill.style.background = x.color;
+      bar.append(fill);
+      li.append(bar);
+      list.append(li);
+    }
+    const paid = Object.entries(c.paid || {}).map(([r, n]) => n + ' ' + resEm(r)).join(' + ');
+    $('guildNote').textContent = c.winner === 'town' ? '🏆 BotWorld won it!' + (paid ? ' Paid ' + paid + ' and knowledge.' : '')
+      : c.winner === 'rival' ? (c.rivalName || rivalName) + ' won this one. The next order comes soon.'
+      : c.winner === 'none' ? 'Nobody filled it in time.'
+      : (c.haulers ? c.haulers + (c.haulers === 1 ? ' bot hauls' : ' bots haul') + ' crates for BotWorld. ' : '') + 'Type !deliver to haul crates to the Guild wagon. First to fill it gets paid!';
   }
 
   // --- What to do now: the town's next steps, from the server ---------------------------------
-  const STEP_ICON = { help: '🔨', gather: '📦', build: '🎯', explore: '🧭', wonder: '🏛️', upgrade: '⬆️' };
+  const STEP_ICON = { help: '🔨', gather: '📦', build: '🎯', explore: '🧭', wonder: '🏛️', upgrade: '⬆️', deliver: '📜' };
   function renderNext() {
     const plan = state.econ?.plan || [];
     const box = $('next');
@@ -188,7 +242,7 @@ export function createHud(state, now, opts) {
     list.textContent = '';
     plan.slice(0, 3).forEach((st, i) => {
       const li = el('li', 'step' + (i === 0 ? ' first' : ''));
-      const em = st.res && RESOURCES[st.res] && st.kind !== 'help' ? RESOURCES[st.res].emoji : st.item && ITEMS[st.item] && st.kind === 'help' ? ITEMS[st.item].emoji : STEP_ICON[st.kind] || '•';
+      const em = st.kind === 'deliver' ? STEP_ICON.deliver : st.res && RESOURCES[st.res] && st.kind !== 'help' ? RESOURCES[st.res].emoji : st.item && ITEMS[st.item] && st.kind === 'help' ? ITEMS[st.item].emoji : STEP_ICON[st.kind] || '•';
       const text = el('span', 'st-text', st.text);
       if (st.kind === 'help') {
         const p = (state.econ.projects || []).find((x) => x.id === st.id);
@@ -344,6 +398,8 @@ export function createHud(state, now, opts) {
       if (left <= 0) $('eventBar').hidden = true;
       else $('eventTime').textContent = clockOf(left);
     }
+    const c = state.econ?.guild?.open;
+    if (c && !c.winner) $('guildTime').textContent = clockOf(c.endsAt - now()) + ' left';
   }
 
   // --- Being built: town projects first, then homes ----------------------------------------
@@ -607,10 +663,7 @@ export function createHud(state, now, opts) {
   }
 
   function render() {
-    if (shownEra !== state.era) {
-      shownEra = state.era;
-      renderHowto();
-    }
+    syncHowto();
     renderStats();
     renderRes();
     renderEra();
@@ -628,7 +681,7 @@ export function createHud(state, now, opts) {
   setInterval(renderLeaders, 30e3);
   return {
     render,
-    renderEcon() { renderRes(); renderEra(); renderNext(); renderRace(); if (state.econ?.needs) renderHowtoNeeds(); },
+    renderEcon() { syncHowto(); renderRes(); renderEra(); renderNext(); renderRace(); if (state.econ?.needs) renderHowtoNeeds(); },
     toast,
     showMe,
     eraBanner,

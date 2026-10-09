@@ -287,6 +287,15 @@ code {
 .race-row .bar span { display: block; height: 100%; border-radius: 0.2rem; }
 .race-row.ahead b::after { content: ' 👑'; }
 .race-note { margin: 0.45rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
+/* A Merchant Guild order inside the race panel: both towns haul for it. */
+.guild { margin-top: 0.6rem; padding: 0.55rem 0.65rem 0.6rem; border-radius: 0.8rem; background: rgba(217, 149, 0, 0.12); border: 1px solid rgba(217, 149, 0, 0.35); }
+.guild-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; font: 600 0.85rem/1.2 var(--font-body); }
+.guild-time { flex: none; font: 500 0.75rem/1 var(--font-mono); color: var(--ink-soft); }
+.guild .race-row .rera { font-family: var(--font-mono); }
+.guild-note { margin: 0.4rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
+.guild.won { background: rgba(32, 144, 90, 0.12); border-color: rgba(32, 144, 90, 0.4); }
+.guild.lost { background: rgba(217, 83, 79, 0.1); border-color: rgba(217, 83, 79, 0.35); }
+.guild-tally { margin: 0.45rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
 .side .panel { position: static; padding: 0.85rem 0.95rem 0.9rem; }
 .side .panel h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
 .era-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.55rem; }

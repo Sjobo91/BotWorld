@@ -49,9 +49,19 @@ Cogsworth is an AI town about 27 tiles out, on the side of the world away from t
 * **The race.** Both towns race on era progress: the era, plus a third each for knowledge, the wonder and people towards the next one. The rival leans towards a close race: up to 45% faster when chat is ahead, up to 35% slower when chat is behind (times `limits.rivalDifficulty`).
 * **Fog.** The rival is hidden until chat's scouts reach its land; then the camera goes to look, and its buildings show on the map with red edges and red bots at work. Until then the **Race to the Future** panel says which way it lies.
 
+## Merchant Guild orders
+
+The economic battle between the two towns happens at the Guild's wagon on the landing pad.
+
+* **An order.** About every 75 minutes (`limits.contractEveryMin`), while someone in chat typed in the last 15 minutes and the town has a few buildings, the Merchant Guild posts an order: one good both towns know, newer goods more often and never the same twice in a row, about a tenth of the town's storage (at least 20). Both towns have 30 minutes (`limits.contractMin`) to fill it. A wagon with a gold canopy parks on the landing pad and the order shows in the race panel with both towns' bars.
+* **Hauling.** `!deliver` sends your bot on a 30 second trip with crates from the pad to the wagon; when it is back, each crate it carried fills a fortieth of the order (2 crates with stone tools, 8 with laser tools, so a trip fills 5% to 20%). `!deliver 3` lines up three trips. The townsfolk haul 1.5% a minute on their own. The goods come out of the town's stock: no bricks, no delivery (the plan box then says how to make some).
+* **The rival** hauls 1.5% a minute plus 2.5% a minute with a full crew (half that with a small one), times its lean towards a close race, out of its own stock. On its own it fills an order in about 20 to 35 minutes, so a chat that ignores the Guild loses, and one or two bots that keep hauling win.
+* **Winning.** The first town to fill the order wins, or, when time runs out, whoever delivered more. The Guild pays one and a half times the goods' worth (a good is worth 1 plus its era: wood 1, bricks 2, steel 4, chips 5) in the two goods the winner has least of, and its scholars share 30 minutes of knowledge. Every bot that hauled for a winning order gets 8 XP (and 3 per trip). The loser gets its crates back. The score of orders won stays in the race panel, and the Gazette reports the wins.
+* **Balance.** In the balance runs chat wins two orders in three with two regular viewers (127 of 187 over the game) and three in four with five (294 of 384). Cogsworth takes the orders chat is not around for.
+
 ## What chat sees
 
-* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, gather the goods a project waits for (`!wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
+* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. An open Guild order always comes first. Help the project that is being built, gather the goods a project waits for (`!wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
 * **Being built:** every project with its progress and helpers, and the homes going up.
 * **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs. The goods page shows both ways for every good: the command to gather it by hand, and the building that makes it all day.
 
@@ -80,14 +90,15 @@ This is what stretches the game to about two months: chat can speed it up, but e
 
 | Era starts | 2 viewers | Cogsworth | 5 viewers | Cogsworth |
 | --- | --- | --- | --- | --- |
-| 🌾 Village | day 9.2 | day 8.1 | day 9.2 | day 7.9 |
-| 🏰 Medieval Town | day 18.5 | day 16.8 | day 18.2 | day 16.6 |
-| 🏭 Industrial Age | day 28.5 | day 25.7 | day 27.3 | day 25.5 |
-| ⚡ Electric City | day 38.2 | day 35.2 | day 36.7 | day 34.4 |
-| ✨ Future | day 47.5 | day 44.9 | day 46.0 | day 43.7 |
-| Finale (Fusion Spire lit) | day 53.8 | 99.5% there | day 52.3 | 98.2% there |
+| 🌾 Village | day 9.2 | day 8.0 | day 9.6 | day 7.8 |
+| 🏰 Medieval Town | day 18.5 | day 16.8 | day 18.7 | day 16.6 |
+| 🏭 Industrial Age | day 28.1 | day 25.7 | day 28.0 | day 25.5 |
+| ⚡ Electric City | day 37.5 | day 34.9 | day 37.2 | day 34.7 |
+| ✨ Future | day 47.2 | day 44.1 | day 46.5 | day 43.9 |
+| Finale (Fusion Spire lit) | day 53.3 | day 53.2 | day 52.6 | 99.2% there |
+| Guild orders won | 127 of 187 | 60 | 294 of 384 | 90 |
 
-Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 750 buildings with two viewers and 1,300 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era one to three days before chat, and chat catches up at the very end and lights the Fusion Spire first, when Cogsworth is nearly there.
+Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 750 buildings with two viewers and 1,300 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era one to three days before chat, and chat catches up at the very end. With two viewers Cogsworth lit its Spire two and a half hours before chat, with five chat got there first while Cogsworth was 99% there.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 

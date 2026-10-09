@@ -212,6 +212,11 @@ function handle(ev) {
       if (ev.kind === 'help') hud.toast('help', '💡', '', ev.text);
       else if (ev.kind === 'project') hud.toast('done', '🎉', '', ev.text);
       else if (ev.kind === 'clear') hud.toast('done', '🏗️', '', ev.text);
+      else if (ev.kind === 'guild') {
+        // A Guild order was posted or settled: show it right away.
+        if (state.econ && ev.contract) { state.econ.guild = ev.contract; world?.setEconomy(state.econ); hud.renderEcon(); }
+        hud.toast(ev.result === 'town' ? 'done' : 'event', ev.result === 'town' ? '🏆' : ev.result === 'rival' ? '⚔️' : '📜', '', ev.text);
+      }
       else if (ev.kind === 'rival') hud.toast('event', '⚔️', '', ev.text);
       else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
       else if (ev.kind === 'wonder') {
@@ -275,6 +280,7 @@ function announceJob(userId, job) {
   const at = state.builds.get(job.buildId);
   const label = at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island';
   if (job.kind === 'explore') { hud.toast('job', '🧭', who, ' set off to explore the fog.'); return; }
+  if (job.kind === 'deliver') { hud.toast('job', '📜', who, ' is hauling ' + (RESOURCES[job.res] ? RESOURCES[job.res].emoji + ' ' + RESOURCES[job.res].label.toLowerCase() : 'goods') + ' to the Guild wagon.'); return; }
   if (job.kind === 'build') { hud.toast('job', '🔨', who, ' is helping build the ' + label + '.'); return; }
   if (job.kind === 'wonder') hud.toast('job', '📦', who, ' is hauling goods to the ' + label + '.');
   else if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
