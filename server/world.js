@@ -546,7 +546,7 @@ export class World {
     if (spare) plot = M.tileAt(this.map, spare.q, spare.r);
     if (!plot) {
       const why = M.siteOf(item).why;
-      if (this.explored()) return this.refuse(u, now, 'The town is full! Old buildings only make way for what it needs now (see the plan), or !upgrade a building to get more out of it.');
+      if (this.explored()) return this.refuse(u, now, 'The town is full! ' + (this.happy < E.CONTENT ? 'People want their parks: old buildings only make way for what the town needs now (see the plan).' : 'Nothing left that can make way for ' + withArticle(label(item)) + '.') + ' Or !upgrade a building to get more out of it.');
       return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left nearby. Type !explore to find more, or !upgrade a building to get more out of it!');
     }
     this.touchBuilder(u, now);
@@ -1643,15 +1643,16 @@ export class World {
   }
 
   // The town is full: a building it can spare makes way for a new one (see
-  // E.spareScorer). Decor gives way to newer decor; for what the town needs
-  // (need) old decor goes first, then a spare producer of goods the stores
-  // are full of. Homes, stores, power, knowledge, food and wonders stay.
+  // E.spareScorer). Decor gives way while people are content, or to what
+  // the town needs (need), which may also replace a spare producer of goods
+  // the stores are full of. Homes, stores, power, knowledge, food and
+  // wonders stay.
   spareFor(item, need = false) {
     const it = ITEMS[item];
     if (it.zone === 'far') return null;
     const theirs = this.rivalLand();
     const mine = theirs.size ? (n) => this.known(n) && !theirs.has(n.i) : this.known;
-    const spare = E.spareScorer(this.builds, this.state.stock, E.capacity(this.builds), it, need);
+    const spare = E.spareScorer(this.builds, this.state.stock, E.capacity(this.builds), it, { need, happy: this.happy });
     let best = null;
     let bestScore = Infinity;
     for (const b of this.builds) {

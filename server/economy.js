@@ -229,12 +229,14 @@ export function bestMaker(res, era) {
 }
 
 // When a town is full, which of its buildings may make way for a new one of
-// kind `it`: lower scores go first, null never. Decor gives way to newer
-// decor at any time. For what the town needs (`need`) older decor goes
-// first, then the commonest, then a spare producer (one of three or more)
-// of goods the stores are full of. Food makers always stay: people eat
-// every minute.
-export function spareScorer(builds, stock, cap, it, need = true) {
+// kind `it`: lower scores go first, null never. Newer decor may always
+// replace older decor. Other buildings may replace decor while people are
+// content (happy 80 or more), or when the town needs them (`need`): older
+// decor first, then the commonest. Only what the town needs may replace a
+// spare producer (one of three or more) of goods the stores are full of.
+// Food makers always stay: people eat every minute.
+export const CONTENT = 80;
+export function spareScorer(builds, stock, cap, it, { need = false, happy = 0 } = {}) {
   const count = {};
   for (const b of builds) count[b.item] = (count[b.item] || 0) + 1;
   const makes = Object.keys(it.recipe?.out || {});
@@ -243,7 +245,7 @@ export function spareScorer(builds, stock, cap, it, need = true) {
     const bt = ITEMS[b.item];
     const level = 3 * (b.level || 1);
     if (bt.kind === 'decor') {
-      if (it.kind === 'decor' ? bt.era >= it.era : !need) return null;
+      if (it.kind === 'decor' ? bt.era >= it.era : !need && happy < CONTENT) return null;
       return bt.era * 10 + (bt.comfort || 0) / 10 + level - count[b.item] / 4;
     }
     if (bt.kind !== 'producer' || !need || it.kind === 'decor' || count[b.item] < 3) return null;

@@ -451,7 +451,7 @@ export class Rival {
     const it = ITEMS[item];
     if (it.zone === 'far') return null;
     const town = this.w.ownLand();
-    const spare = E.spareScorer(this.builds, this.s.stock, E.capacity(this.builds), it, need);
+    const spare = E.spareScorer(this.builds, this.s.stock, E.capacity(this.builds), it, { need, happy: this.happy });
     const ore = M.siteOf(item).ore && (res === 'coal' || res === 'iron') ? res : null;
     let best = null;
     let bestScore = Infinity;

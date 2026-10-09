@@ -30,7 +30,7 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 
 * **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings fly a silver (level 2) or gold (level 3) pennant.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
-* **A full town makes room.** When no free spot is left, what the town needs right now (what the plan box asks for, a new viewer's home, homes when people wait to move in) takes the place of a building it can spare, with a notice on stream: decor from an older era first (a campfire in the Electric City), then the commonest decor, then a producer of goods the stores are full of (one of three or more). Newer decor may always replace older decor. Homes, stores, power plants, schools, food makers and wonders always stay; anything else waits for land, so `!upgrade` is the way to grow a full town.
+* **A full town makes room.** When no free spot is left, a new building takes the place of one the town can spare, with a notice on stream. While people are content (happiness 80 or more), old decor makes way for anything: decor from an older era first (a campfire in the Future), then the commonest. When they are not, only what the town needs right now (what the plan box asks for, a new viewer's home, homes when people wait to move in) may replace decor. What the town needs may also replace a spare producer of goods the stores are full of (one of three or more), and newer decor may always replace older decor. Homes, stores, power plants, schools, food makers and wonders always stay; `!upgrade` grows a full town further.
 
 ## Outposts and the whole world
 
@@ -45,7 +45,7 @@ Cogsworth is an AI town about 27 tiles out, on the side of the world away from t
 * A crew of 3 to 12 AI bots gathers what the town has least of and builds. About once an hour (at normal speed) it starts something: first whatever makes the goods its wonder and this era's buildings need, then food, homes, power, knowledge and happiness, then outposts (two more every era), upgrades and more of everything.
 * Its economy, wonders and eras follow the town's rules: production with workers, happiness, power and reach, food for its people, knowledge over `eraDays`, the era's wonder and the people goal.
 * **Land.** Tiles within two steps of a rival building are the rival's, and the town cannot build or gather there; the rival keeps out of the town's land the same way. Each side also keeps a home ground nobody else may build on: 13 tiles round the landing pad, 10 round Cogsworth's square. Both spread out over the map with their outposts and race for the forests, hills and ore deposits in between, and a full rival makes room the way the town does.
-* **How it plays.** Power comes first (buildings without it make nothing), it never adds makers of a good while the ones it has stand idle for lack of power or inputs, and mines go for the ore it lacks.
+* **How it plays.** Power comes first (buildings without it make nothing), and solar farms are at most half its power plants, since they make nothing at night. It never adds makers of a good while the ones it has stand idle for lack of power or inputs, mines go for the ore it lacks, it builds campfires, schools and labs until knowledge comes as fast as it can, and decor only while its people are not content.
 * **The race.** Both towns race on era progress: the era, plus a third each for knowledge, the wonder and people towards the next one. The rival leans towards a close race: up to 45% faster when chat is ahead, up to 35% slower when chat is behind (times `limits.rivalDifficulty`).
 * **Fog.** The rival is hidden until chat's scouts reach its land; then the camera goes to look, and its buildings show on the map with red edges and red bots at work. Until then the **Race to the Future** panel says which way it lies.
 
@@ -78,16 +78,16 @@ Three bars on screen, all three must be full:
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:
 
-| Era starts | 2 viewers | 5 viewers |
-| --- | --- | --- |
-| 🌾 Village | day 9.2 | day 9.2 |
-| 🏰 Medieval Town | day 18.5 | day 18.3 |
-| 🏭 Industrial Age | day 28.2 | day 27.4 |
-| ⚡ Electric City | day 37.7 | day 37.0 |
-| ✨ Future | day 48.3 | day 47.2 |
-| Finale (Fusion Spire lit) | day 55.0 | day 56.1 |
+| Era starts | 2 viewers | Cogsworth | 5 viewers | Cogsworth |
+| --- | --- | --- | --- | --- |
+| 🌾 Village | day 9.2 | day 8.1 | day 9.2 | day 7.9 |
+| 🏰 Medieval Town | day 18.5 | day 16.8 | day 18.2 | day 16.6 |
+| 🏭 Industrial Age | day 28.5 | day 25.7 | day 27.3 | day 25.5 |
+| ⚡ Electric City | day 38.2 | day 35.2 | day 36.7 | day 34.4 |
+| ✨ Future | day 47.5 | day 44.9 | day 46.0 | day 43.7 |
+| Finale (Fusion Spire lit) | day 53.8 | 99.5% there | day 52.3 | 98.2% there |
 
-Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands at about two months whether two or five regulars play; a busy chat builds a much bigger town on the way.
+Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 750 buildings with two viewers and 1,300 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era one to three days before chat, and chat catches up at the very end and lights the Fusion Spire first, when Cogsworth is nearly there.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 
