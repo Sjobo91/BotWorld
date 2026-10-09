@@ -211,6 +211,7 @@ function handle(ev) {
     case 'notice':
       if (ev.kind === 'help') hud.toast('help', '💡', '', ev.text);
       else if (ev.kind === 'project') hud.toast('done', '🎉', '', ev.text);
+      else if (ev.kind === 'clear') hud.toast('done', '🏗️', '', ev.text);
       else if (ev.kind === 'rival') hud.toast('event', '⚔️', '', ev.text);
       else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
       else if (ev.kind === 'wonder') {

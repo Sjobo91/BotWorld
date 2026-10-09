@@ -329,7 +329,7 @@ export class Rival {
       if (w && ITEMS[w.item] && ITEMS[w.item].era <= s.era && !wants.some((x) => x.item === w.item && x.res === w.res)) wants.push(w);
     };
     const maker = (r) => {
-      const k = E.makersOf(r, s.era).find((item) => this.plot(item, true, r));
+      const k = E.makersOf(r, s.era).find((item) => this.plot(item, true, r) || this.spareFor(item, r));
       return k ? { item: k, res: r } : null;
     };
     // Power first: buildings without it make nothing.
@@ -378,7 +378,7 @@ export class Rival {
     return E.makersOf('power', s.era).find((k) => {
       const inp = ITEMS[k].recipe?.in || {};
       const fed = Object.keys(inp).every((r) => this.makes(r) || (s.stock[r] || 0) > 30 || (RAW.includes(r) && this.knowsOre(r)));
-      return fed && this.plot(k, true);
+      return fed && (this.plot(k, true) || this.spareFor(k));
     }) || null;
   }
 
@@ -410,8 +410,15 @@ export class Rival {
     const it = ITEMS[item];
     if (!it || it.kind === 'wonder') return false;
     if (Object.entries(it.cost).some(([r, n]) => (s.stock[r] || 0) < n)) return false;
-    const t = this.plot(item, false, res);
+    let t = this.plot(item, false, res);
+    const spare = t ? null : this.spareFor(item, res);
+    if (spare) t = M.tileAt(this.map, spare.q, spare.r);
     if (!t) return false;
+    if (spare) {
+      this.builds.splice(this.builds.indexOf(spare), 1);
+      this.progress.delete(spare.id);
+      this.w.emit({ type: 'remove', id: spare.id });
+    }
     for (const [r, n] of Object.entries(it.cost)) s.stock[r] -= n;
     const b = { id: ++s.seq, item, rival: true, project: true, color: null, level: 1, q: t.q, r: t.r, status: 'building', startedAt: now, walkSec: 0, buildSec: it.buildSec, work: it.buildSec * LABOR, progress: 0, progressAt: now, built: false, cost: { ...it.cost } };
     b.rich = Math.round(M.richness(this.map, item, t) * 100) / 100;
@@ -433,6 +440,29 @@ export class Rival {
     Object.assign(b, { status: 'building', upgrade: { item: b.item, level: level + 1 }, work: Math.round(ITEMS[b.item].buildSec * LABOR * 0.5 * level), progress: 0, progressAt: now });
     this.changed(b);
     return true;
+  }
+
+  // A full rival makes room the way the town does: old decor, or a spare
+  // producer of goods its stores are full of, gives way.
+  spareFor(item, res = null) {
+    const it = ITEMS[item];
+    if (it.zone === 'far') return null;
+    const town = this.w.ownLand();
+    const spare = E.spareScorer(this.builds, this.s.stock, E.capacity(this.builds), it);
+    const ore = M.siteOf(item).ore && (res === 'coal' || res === 'iron') ? res : null;
+    let best = null;
+    let bestScore = Infinity;
+    for (const b of this.builds) {
+      if (b.item === item) continue;
+      const sc = spare(b);
+      if (sc == null || sc >= bestScore) continue;
+      const t = M.tileAt(this.map, b.q, b.r);
+      if (!t || !M.siteOk(this.map, item, t, (n) => this.known(n) && !town.has(n.i))) continue;
+      if (ore && !M.oresNear(this.map, t).includes(ore)) continue;
+      bestScore = sc;
+      best = b;
+    }
+    return best;
   }
 
   // Where the rival builds: its own known land, never on the town's land.

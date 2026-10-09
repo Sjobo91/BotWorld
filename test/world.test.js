@@ -714,6 +714,28 @@ test('what the town is stuck on may start even when three projects are going', (
   assert.match(say(w, { id: 'f', name: 'finn' }, '!build ' + food.item, T0 + 6000).message, /4 projects are being built already/);
 });
 
+test('a full town makes room: old decor gives way, stores and homes stay', () => {
+  const { w, events } = makeWorld();
+  let now = finish(w, alice, 'campfire', T0);
+  now = finish(w, bob, 'totem', now);
+  now = finish(w, carol, 'stockpile', now);
+  const fire = w.builds.find((b) => b.item === 'campfire');
+  // No free land left anywhere.
+  w.choosePlot = () => null;
+  assert.equal(w.hasSite('hut'), true, 'decor can make way');
+  rich(w);
+  const res = say(w, { id: 'd', name: 'dave' }, '!build hut', now);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(w.builds.some((b) => b.id === fire.id), false, 'the campfire made way');
+  assert.deepEqual([res.build.q, res.build.r], [fire.q, fire.r]);
+  assert.ok(events.some((e) => e.type === 'notice' && /old campfire .* makes way for a hut/.test(e.text)));
+  // Decor only gives way to newer decor, and stores never do.
+  const again = say(w, { id: 'e', name: 'erin' }, '!build campfire', now);
+  assert.equal(again.ok, false);
+  assert.match(again.message, /No free land left/);
+  assert.ok(w.builds.some((b) => b.item === 'totem') && w.builds.some((b) => b.item === 'stockpile'));
+});
+
 test('a restart catches up on homes, and projects carry on', () => {
   const { w } = makeWorld();
   rich(w);

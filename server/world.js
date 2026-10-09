@@ -411,9 +411,12 @@ export class World {
     if (mine) return this.refuse(u, now, 'You already have a home (#' + mine.id + '). Make it bigger with !upgrade, or help the town: !help');
     if (this.builds.filter((b) => b.home && b.status === 'queued').length >= this.limits.maxQueue) return this.refuse(u, now, 'So many new homes at once! Try again in a minute.');
     const item = houseFor(s.era);
-    const plot = this.choosePlot(item, { home: true, ownerId: u.id, salt: s.seq + 1 });
+    let plot = this.choosePlot(item, { home: true, ownerId: u.id, salt: s.seq + 1 });
+    const spare = plot ? null : this.spareFor(item);
+    if (spare) plot = M.tileAt(this.map, spare.q, spare.r);
     if (!plot) return this.refuse(u, now, 'No free land for a home right now. Type !explore to find more!');
     this.touchBuilder(u, now);
+    if (spare) this.makeWay(spare, item, now);
     const b = {
       id: ++s.seq,
       item,
@@ -538,12 +541,15 @@ export class World {
     if (own) return this.refuse(u, now, 'You started the ' + label(own.item) + ' (#' + own.id + '). Help finish it first: !help');
     const tooBig = this.tooBigForStorage(it.cost);
     if (tooBig) return this.refuse(u, now, tooBig);
-    const plot = this.choosePlot(item, { near: cmd.near, dir: cmd.dir, ownerId: u.id, salt: s.seq + 1 });
+    let plot = this.choosePlot(item, { near: cmd.near, dir: cmd.dir, ownerId: u.id, salt: s.seq + 1 });
+    const spare = plot ? null : this.spareFor(item);
+    if (spare) plot = M.tileAt(this.map, spare.q, spare.r);
     if (!plot) {
       const why = M.siteOf(item).why;
-      return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left nearby. Type !explore to find more!');
+      return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left. Type !explore to find more, or !upgrade a building to get more out of it!');
     }
     this.touchBuilder(u, now);
+    if (spare) this.makeWay(spare, item, now);
     const b = {
       id: ++s.seq,
       item,
@@ -789,7 +795,7 @@ export class World {
   // when the stores (or the buildings) change.
   reachMap() {
     const stores = this.stores();
-    const key = stores.map((b) => b.id || 0).join(',') + '|' + this.builds.length;
+    const key = stores.map((b) => b.id || 0).join(',') + '|' + this.builds.length + '|' + this.state.seq;
     if (this.reachCache?.key === key) return this.reachCache.map;
     const map = new Map();
     for (const b of this.builds) if (ITEMS[b.item].recipe) map.set(b.id, reachOf(b, stores));
@@ -1381,9 +1387,9 @@ export class World {
     }
   }
 
-  // Is there a known, free spot for this building?
+  // Is there a known, free spot for this building (or one it can take over)?
   hasSite(item) {
-    return !!this.choosePlot(item, { quick: true });
+    return !!this.choosePlot(item, { quick: true }) || !!this.spareFor(item);
   }
 
   // What the town is short of right now, with the building that helps
@@ -1618,6 +1624,35 @@ export class World {
       if (s < bestScore) { bestScore = s; best = t; }
     }
     return best;
+  }
+
+  // The town is full: a building it can spare makes way for a new one. Decor
+  // from an older era goes first (a campfire in the Electric City), then the
+  // commonest decor, then a spare producer of goods the stores are full of.
+  // Homes, stores, power, knowledge and wonders always stay.
+  spareFor(item) {
+    const it = ITEMS[item];
+    if (it.zone === 'far') return null;
+    const theirs = this.rivalLand();
+    const mine = theirs.size ? (n) => this.known(n) && !theirs.has(n.i) : this.known;
+    const spare = E.spareScorer(this.builds, this.state.stock, E.capacity(this.builds), it);
+    let best = null;
+    let bestScore = Infinity;
+    for (const b of this.builds) {
+      if (b.home || b.item === item) continue;
+      const sc = spare(b);
+      if (sc == null || sc >= bestScore) continue;
+      const t = M.tileAt(this.map, b.q, b.r);
+      if (!t || t.d <= WONDER_RING || theirs.has(t.i) || !M.siteOk(this.map, item, t, mine)) continue;
+      bestScore = sc;
+      best = b;
+    }
+    return best;
+  }
+
+  makeWay(old, item, now) {
+    this.removeBuild(old.id, now);
+    this.emit({ type: 'notice', kind: 'clear', text: 'The town is full: the old ' + label(old.item) + ' (#' + old.id + ') makes way for ' + withArticle(label(item)) + '.' });
   }
 
   // An outpost goes out to rich land where no store is near yet, a few

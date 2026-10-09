@@ -220,3 +220,26 @@ export function bestMaker(res, era) {
   }
   return best ? best.key : null;
 }
+
+// When a town is full, which of its buildings may make way for a new one of
+// kind `it`: lower scores go first, null never. Decor from an older era goes
+// first, then the commonest decor (decor only gives way to newer decor), then
+// a spare producer (one of three or more) of goods the stores are full of.
+export function spareScorer(builds, stock, cap, it) {
+  const count = {};
+  for (const b of builds) count[b.item] = (count[b.item] || 0) + 1;
+  const makes = Object.keys(it.recipe?.out || {});
+  return (b) => {
+    if (b.wonder || b.home || !b.built || b.status !== 'done') return null;
+    const bt = ITEMS[b.item];
+    const level = 3 * (b.level || 1);
+    if (bt.kind === 'decor') {
+      if (it.kind === 'decor' && bt.era >= it.era) return null;
+      return bt.era * 10 + (bt.comfort || 0) / 10 + level - count[b.item] / 4;
+    }
+    if (bt.kind !== 'producer' || it.kind === 'decor' || count[b.item] < 3) return null;
+    const outs = Object.keys(bt.recipe?.out || {});
+    if (!outs.length || outs.some((r) => makes.includes(r) || (stock[r] || 0) < cap * 0.9)) return null;
+    return 100 + bt.era * 10 + level + 5 * (b.rich || 1) - count[b.item] / 4;
+  };
+}
