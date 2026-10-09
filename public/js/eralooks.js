@@ -6,7 +6,7 @@
 // first one it keeps the look its own builder in buildings.js gives it. The
 // town's buildings follow the town's era, the rival's follow the rival's.
 import { ITEMS } from '../shared/catalog.js';
-import { three, mats, geo, mesh, mergeGeos, beamGeo, treeMesh, crenellations } from './meshes.js';
+import { three, mats, geo, mesh, mergeGeos, beamGeo, treeMesh, crenellations, benchMesh } from './meshes.js';
 
 let T = null;
 const V = (x, y, z) => new T.Vector3(x, y, z);
@@ -18,6 +18,8 @@ const cone = (r, h, n = 12) => new T.ConeGeometry(r, h, n);
 const sph = (r, w = 12, h = 8, ...rest) => new T.SphereGeometry(r, w, h, ...rest);
 const dome = (r) => new T.SphereGeometry(r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
 const blob = (r) => new T.IcosahedronGeometry(r, 1);
+// A box tipped back about x (solar panels, a sloping canopy), ready to merge.
+const tilted = (w, h, d, x, y, z, rx) => box(w, h, d).rotateX(rx).translate(x, y, z);
 // A ring lying flat (a torus turned onto the ground).
 const flatRing = (r, tube, arc = Math.PI * 2, n = 24) => new T.TorusGeometry(r, tube, 6, n, arc).rotateX(Math.PI / 2);
 // A gable roof: a triangular prism along x, h tall and d deep. Put it
@@ -672,6 +674,250 @@ function redBarnFarm(k) {
   return 0.38;
 }
 
+// --- Granary --------------------------------------------------------------------------------
+// Roman Empire: a horreum, a long storehouse of plaster under red tiles,
+// amphorae and sacks by its arched door.
+function horreum(k) {
+  k.part('hoYard', () => cyl(0.4, 0.4, 0.012, 6), mats.travertine, 0, 0.006, 0);
+  k.part('hoPlinth', () => box(0.56, 0.035, 0.28), mats.travertineDark, 0, 0.0175, -0.08);
+  k.part('hoHall', () => box(0.54, 0.2, 0.26), mats.plaster, 0, 0.1, -0.08);
+  k.part('hoRoof', () => gable(0.58, 0.11, 0.3), k.b.color ? k.trim : mats.terracotta, 0, 0.237, -0.08);
+  k.part('hoSlits', () => mergeGeos([-0.2, -0.1, 0.1, 0.2].map((x) => boxAt(0.018, 0.05, 0.01, x, 0.15, 0.052))), mats.black, 0, 0, 0);
+  k.part('hoDoor', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.052);
+  k.part('hoArch', () => new T.TorusGeometry(0.045, 0.012, 5, 10, Math.PI), mats.travertine, 0, 0.13, 0.055);
+  for (const [x, z, sc] of [[-0.16, 0.16, 1], [-0.1, 0.2, 0.9], [0.14, 0.18, 1], [0.2, 0.14, 0.85]]) {
+    const a = k.part('hoAmphora', () => sph(0.03, 8, 6).scale(1, 1.6, 1), mats.terracotta, x, 0.05 * sc, z);
+    a.scale.setScalar(sc);
+  }
+  for (const [x, z] of [[0.29, 0.04], [0.27, 0.2]]) k.part('grSack', () => sph(0.045, 8, 6), mats.straw, x, 0.04, z).scale.set(1, 0.85, 1);
+  return 0.32;
+}
+// Middle Ages: a tithe barn of stone with a steep roof and a porch, and a
+// cart of sacks outside.
+function titheBarn(k) {
+  const roof = k.b.color ? k.trim : mats.slate;
+  k.part('tbYard', () => cyl(0.4, 0.4, 0.012, 6), mats.soil, 0, 0.006, 0);
+  k.part('tbWalls', () => box(0.5, 0.17, 0.24), mats.stone, 0, 0.085, -0.08);
+  k.part('tbRoof', () => gable(0.54, 0.22, 0.28), roof, 0, 0.244, -0.08);
+  k.part('tbButtresses', () => mergeGeos([-0.17, 0.17].map((x) => boxAt(0.035, 0.12, 0.04, x, 0.06, 0.06))), mats.stoneDark, 0, 0, 0);
+  k.part('tbPorch', () => box(0.14, 0.15, 0.08), mats.stone, 0, 0.075, 0.08);
+  k.part('tbPorchRoof', () => gable(0.12, 0.08, 0.18).rotateY(Math.PI / 2), roof, 0, 0.177, 0.08);
+  k.part('tbDoors', () => box(0.09, 0.12, 0.012), mats.woodDark, 0, 0.06, 0.121);
+  k.part('tbSlits', () => mergeGeos([-0.22, 0.22].map((x) => boxAt(0.02, 0.06, 0.01, x, 0.11, 0.041))), mats.black, 0, 0, 0);
+  const cart = new T.Group();
+  cart.position.set(0.22, 0, 0.22);
+  cart.rotation.y = 0.4;
+  mesh(geo('tbCart', () => box(0.14, 0.04, 0.09)), mats.wood, 0, 0.06, 0, cart);
+  mesh(geo('tbWheels', () => mergeGeos([-1, 1].map((sd) => cyl(0.04, 0.04, 0.012, 10).rotateX(Math.PI / 2).translate(0, 0.04, sd * 0.05)))), mats.woodDark, 0, 0, 0, cart);
+  mesh(geo('tbCartSacks', () => mergeGeos([sph(0.03, 8, 6).translate(-0.03, 0.1, 0), sph(0.03, 8, 6).translate(0.03, 0.1, 0.01)])), mats.straw, 0, 0, 0, cart);
+  k.g.add(cart);
+  for (const [x, z] of [[-0.22, 0.16], [-0.15, 0.21]]) k.part('grSack', () => sph(0.045, 8, 6), mats.straw, x, 0.04, z).scale.set(1, 0.85, 1);
+  return 0.42;
+}
+
+// --- Campfire -------------------------------------------------------------------------------
+// Benches round a fire in the middle, facing it.
+function benchesRound(k, r, angles) {
+  for (const a of angles) {
+    const b = benchMesh();
+    b.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    b.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a));
+    b.scale.setScalar(0.7);
+    k.g.add(b);
+  }
+}
+// Industrial Revolution: an iron brazier on a little cobbled square.
+function brazierSquare(k) {
+  k.part('bzSquare', () => cyl(0.38, 0.38, 0.014, 8), mats.stoneDark, 0, 0.007, 0);
+  k.part('bzStand', () => mergeGeos([0, 1, 2].map((i) => beamGeo(V(Math.cos(i * 2.094) * 0.07, 0, Math.sin(i * 2.094) * 0.07), V(0, 0.13, 0), 0.012))), mats.ironwork, 0, 0, 0);
+  k.part('bzBowl', () => cyl(0.08, 0.05, 0.05, 10), mats.ironwork, 0, 0.145, 0);
+  fire(k, 0, 0.19, 0);
+  benchesRound(k, 0.28, [0.5, 2.6, 4.7]);
+  return 0.32;
+}
+// Modern Age: a fire pit, a kettle barbecue and a picnic table.
+function firePit(k) {
+  k.part('fpPatio', () => cyl(0.38, 0.38, 0.014, 6), mats.concrete, 0, 0.007, 0);
+  k.part('fpRing', () => cyl(0.13, 0.14, 0.06, 16), mats.granite, -0.06, 0.03, -0.05);
+  k.part('fpEmbers', () => cyl(0.1, 0.1, 0.01, 14), mats.furnace, -0.06, 0.062, -0.05);
+  fire(k, -0.06, 0.08, -0.05);
+  k.part('fpGrill', () => sph(0.05, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mats.black, 0.21, 0.14, -0.17);
+  k.part('fpGrillLid', () => sph(0.05, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.7, 1), mats.black, 0.21, 0.15, -0.17);
+  k.part('fpGrillLegs', () => mergeGeos([0, 1, 2].map((i) => beamGeo(V(0.21 + Math.cos(i * 2.094) * 0.05, 0, -0.17 + Math.sin(i * 2.094) * 0.05), V(0.21, 0.1, -0.17), 0.008))), mats.metal, 0, 0, 0);
+  smokeAt(k, 0.21, 0.2, -0.17, 2.6, false);
+  k.part('fpTable', () => mergeGeos([
+    boxAt(0.22, 0.015, 0.09, 0, 0.1, 0),
+    boxAt(0.22, 0.012, 0.04, 0, 0.06, 0.085),
+    boxAt(0.22, 0.012, 0.04, 0, 0.06, -0.085),
+    ...[-0.08, 0.08].map((x) => boxAt(0.015, 0.1, 0.17, x, 0.05, 0)),
+  ]), mats.wood, 0.14, 0, 0.19);
+  return 0.26;
+}
+// Future: a hologram fire that never needs wood, ringed by curved benches.
+function holoFire(k) {
+  k.part('hxPad', () => cyl(0.38, 0.38, 0.014, 6), mats.whiteGloss, 0, 0.007, 0);
+  k.part('hxBase', () => cyl(0.12, 0.13, 0.04, 18), mats.whiteGloss, 0, 0.034, 0);
+  k.part('hxRing', () => flatRing(0.12, 0.008, Math.PI * 2, 24), mats.neonCyan, 0, 0.056, 0);
+  const flame = new T.Group();
+  flame.position.y = 0.06;
+  mesh(geo('hxFlameA', () => cone(0.07, 0.22, 6).translate(0, 0.11, 0)), mats.holo, 0, 0, 0, flame);
+  mesh(geo('hxFlameB', () => cone(0.045, 0.16, 6).translate(0, 0.08, 0)), mats.neonPink, 0.02, 0, 0.01, flame);
+  k.g.add(flame);
+  k.anim.push({ kind: 'spinY', o: flame, speed: 1.6 });
+  k.anim.push({ kind: 'pulse', o: flame });
+  glowAt(k, mats.fireGlow, 0, 0.16, 0, 0.7);
+  for (let i = 0; i < 3; i++) {
+    const b = k.part('hxBench', () => flatRing(0.28, 0.026, Math.PI / 3, 10), mats.whiteGloss, 0, 0.06, 0);
+    b.rotation.y = i * ((Math.PI * 2) / 3) + 0.3;
+  }
+  return 0.3;
+}
+
+// --- Factory --------------------------------------------------------------------------------
+// The factory's gear sign turns in every era.
+function gearSign(k, m, x, y, z) {
+  const gear = k.part('gearSign', () => new T.TorusGeometry(0.045, 0.014, 6, 10), m, x, y, z);
+  k.anim.push({ kind: 'spinZ', o: gear, speed: 1.2 });
+}
+// Modern Age: an assembly plant with a loading dock, a lorry and solar
+// panels on the roof.
+function assemblyPlant(k) {
+  k.part('apYard', () => cyl(0.42, 0.42, 0.012, 6), mats.concreteDark, 0, 0.006, 0);
+  k.part('apHall', () => box(0.52, 0.2, 0.3), mats.wall2, 0, 0.1, -0.08);
+  k.part('apBand', () => box(0.522, 0.04, 0.302), mats.panelBlue, 0, 0.18, -0.08);
+  k.part('apDocks', () => mergeGeos([-0.12, 0.02].map((x) => boxAt(0.1, 0.11, 0.012, x, 0.065, 0.071))), mats.darkMetal, 0, 0, 0);
+  k.part('apSolar', () => mergeGeos([-0.17, 0, 0.17].map((x) => tilted(0.13, 0.01, 0.2, x, 0.225, -0.1, -0.3))), mats.panel, 0, 0, 0);
+  k.part('apExhaust', () => cyl(0.02, 0.022, 0.18, 8), mats.steel, 0.22, 0.29, -0.18);
+  smokeAt(k, 0.22, 0.39, -0.18, 2.4, false);
+  gearSign(k, k.trim, 0.17, 0.12, 0.074);
+  const lorry = new T.Group();
+  lorry.position.set(-0.12, 0, 0.21);
+  mesh(geo('apTrailer', () => box(0.1, 0.09, 0.2)), mats.white, 0, 0.065, 0, lorry);
+  mesh(geo('apCab', () => box(0.1, 0.08, 0.07)), mats.shipRed, 0, 0.06, 0.14, lorry);
+  mesh(geo('apCabGlass', () => box(0.102, 0.03, 0.02)), mats.glass, 0, 0.08, 0.17, lorry);
+  mesh(geo('apWheels', () => mergeGeos([[-1, -0.06], [1, -0.06], [-1, 0.06], [1, 0.06], [-1, 0.15], [1, 0.15]].map(([sd, z]) => cyl(0.022, 0.022, 0.015, 10).rotateZ(Math.PI / 2).translate(sd * 0.05, 0.022, z)))), mats.black, 0, 0, 0, lorry);
+  k.g.add(lorry);
+  return 0.4;
+}
+// Future: a clean white plant with glowing skylights; parts ride a belt
+// out of the door to a waiting drone.
+function cleanPlant(k) {
+  k.part('xfPad', () => cyl(0.42, 0.42, 0.014, 6), mats.concrete, 0, 0.007, 0);
+  k.part('xfHall', () => box(0.48, 0.18, 0.3), mats.whiteGloss, 0, 0.09, -0.08);
+  k.part('xfRoof', () => box(0.5, 0.02, 0.32), mats.whiteGloss, 0, 0.19, -0.08);
+  k.part('xfSkylights', () => mergeGeos([-0.15, 0, 0.15].map((x) => boxAt(0.1, 0.03, 0.2, x, 0.212, -0.08))), mats.glassBlue, 0, 0, 0);
+  k.part('xfStripe', () => box(0.485, 0.018, 0.305), mats.neonCyan, 0, 0.14, -0.08);
+  k.part('xfDoor', () => box(0.16, 0.11, 0.012), mats.glassBlue, -0.1, 0.055, 0.071);
+  gearSign(k, mats.neonCyan, 0.14, 0.09, 0.074);
+  k.part('xfBelt', () => mergeGeos([boxAt(0.08, 0.02, 0.24, -0.1, 0.04, 0.19), boxAt(0.012, 0.03, 0.012, -0.1, 0.015, 0.29)]), mats.darkMetal, 0, 0, 0);
+  k.part('xfParts', () => mergeGeos([0.12, 0.2, 0.28].map((z) => boxAt(0.045, 0.04, 0.045, -0.1, 0.07, z))), mats.whiteGloss, 0, 0, 0);
+  drone(k, 'box', 0.12, 0.18);
+  return 0.26;
+}
+
+// --- Steel mill -----------------------------------------------------------------------------
+// Modern Age: an electric arc furnace: a steel shed, a big blue duct to its
+// filter house, one slim stack letting off steam, coils of steel.
+function arcFurnace(k) {
+  k.part('afYard', () => cyl(0.42, 0.42, 0.012, 6), mats.concreteDark, 0, 0.006, 0);
+  k.part('afShed', () => box(0.48, 0.24, 0.3), mats.steel, -0.02, 0.12, -0.06);
+  k.part('afRoof', () => box(0.5, 0.02, 0.32), mats.darkMetal, -0.02, 0.25, -0.06);
+  k.part('afGlow', () => box(0.16, 0.1, 0.012), mats.furnace, -0.1, 0.06, 0.091);
+  k.part('afDuct', () => mergeGeos([cylAt(0.035, 0.035, 0.16, 0.12, 0.33, -0.12), cyl(0.035, 0.035, 0.2, 12).rotateZ(Math.PI / 2).translate(0.21, 0.41, -0.12), cylAt(0.035, 0.035, 0.24, 0.3, 0.29, -0.12)]), mats.panelBlue, 0, 0, 0);
+  k.part('afFilter', () => box(0.12, 0.18, 0.12), mats.wall2, 0.3, 0.09, -0.12);
+  k.part('afStack', () => cyl(0.022, 0.026, 0.62, 10), mats.steel, -0.2, 0.31, -0.16);
+  k.part('afStackBands', () => mergeGeos([0.48, 0.56].map((y) => cylAt(0.024, 0.024, 0.03, 0, y, 0, 10))), mats.shipRed, -0.2, 0, -0.16);
+  smokeAt(k, -0.2, 0.64, -0.16, 1.8, false);
+  for (const [x, z] of [[0.1, 0.2], [0.2, 0.18], [0.15, 0.27]]) k.part('afCoil', () => cyl(0.04, 0.04, 0.05, 14).rotateX(Math.PI / 2), mats.steel, x, 0.04, z);
+  return 0.66;
+}
+// Future: a white forge dome ringed with molten light, beams stacked
+// beside it, and no smoke at all.
+function lightForge(k) {
+  k.part('lgPad', () => cyl(0.42, 0.42, 0.014, 6), mats.concrete, 0, 0.007, 0);
+  k.part('lgDome', () => dome(0.2), mats.whiteGloss, -0.04, 0.014, -0.08);
+  k.part('lgMolten', () => flatRing(0.2, 0.014, Math.PI * 2, 32), mats.furnace, -0.04, 0.03, -0.08);
+  k.part('lgPort', () => box(0.08, 0.06, 0.04), mats.furnace, -0.04, 0.05, 0.11);
+  glowAt(k, mats.fireGlow, -0.04, 0.06, 0.13, 0.5);
+  k.part('lgVent', () => cyl(0.03, 0.04, 0.1, 12), mats.whiteGloss, -0.04, 0.25, -0.08);
+  k.part('lgVentRing', () => flatRing(0.032, 0.006), mats.neonCyan, -0.04, 0.3, -0.08);
+  k.part('lgBeams', () => mergeGeos([0, 1, 2].flatMap((row) => [0, 1].map((i) => boxAt(0.22, 0.03, 0.04, 0, 0.016 + row * 0.032, -0.025 + i * 0.05)))), mats.steel, 0.2, 0, 0.2);
+  return 0.32;
+}
+
+// --- Warehouse ------------------------------------------------------------------------------
+// Future: a logistics hub with a drone pad on the roof and crates riding a
+// belt out of the door.
+function logisticsHub(k) {
+  k.part('xwPad', () => cyl(0.42, 0.42, 0.012, 6), mats.concrete, 0, 0.006, 0);
+  k.part('xwHall', () => box(0.5, 0.2, 0.32), mats.whiteGloss, 0, 0.1, -0.06);
+  k.part('xwStripe', () => box(0.505, 0.02, 0.325), mats.neonCyan, 0, 0.17, -0.06);
+  k.part('xwDoors', () => mergeGeos([-0.14, 0.14].map((x) => boxAt(0.14, 0.13, 0.012, x, 0.065, 0.101))), k.trim, 0, 0, 0);
+  k.part('xwRoofPad', () => cyl(0.1, 0.1, 0.012, 20), mats.concreteDark, 0.1, 0.206, -0.08);
+  k.part('xwRoofRing', () => flatRing(0.08, 0.005, Math.PI * 2, 24), mats.neonCyan, 0.1, 0.214, -0.08);
+  drone(k, 'box', 0.0, -0.05);
+  k.part('xwBelt', () => box(0.07, 0.02, 0.22), mats.darkMetal, 0.14, 0.035, 0.22);
+  k.part('xwCrates', () => mergeGeos([0.16, 0.24, 0.31].map((z) => boxAt(0.05, 0.045, 0.05, 0.14, 0.068, z))), mats.whiteGloss, 0, 0, 0);
+  return 0.3;
+}
+
+// --- Station --------------------------------------------------------------------------------
+// Modern Age: a station of glass and steel under a long canopy, with a
+// departure board.
+function glassStation(k) {
+  k.part('platform', () => box(0.56, 0.05, 0.2), mats.concrete, 0, 0.025, 0.12);
+  k.part('gsHall', () => box(0.34, 0.24, 0.18), mats.glass, 0, 0.12, -0.1);
+  k.part('gsFrame', () => mergeGeos([...[-0.17, -0.06, 0.06, 0.17].map((x) => boxAt(0.012, 0.24, 0.012, x, 0.12, -0.009)), boxAt(0.35, 0.015, 0.012, 0, 0.24, -0.009)]), mats.steel, 0, 0, 0);
+  k.part('gsRoof', () => box(0.36, 0.02, 0.2), mats.white, 0, 0.25, -0.1);
+  k.part('gsCanopy', () => box(0.6, 0.015, 0.24), mats.white, 0, 0.28, 0.08);
+  k.part('gsColumns', () => mergeGeos([-0.24, 0, 0.24].map((x) => cylAt(0.008, 0.008, 0.23, x, 0.165, 0.18, 6))), mats.steel, 0, 0, 0);
+  k.part('gsBoard', () => box(0.12, 0.05, 0.01), mats.black, 0.1, 0.17, -0.002);
+  k.part('gsBoardText', () => mergeGeos([0.155, 0.17, 0.185].map((y) => boxAt(0.1, 0.006, 0.002, 0, y, 0))), mats.yellow, 0.1, 0, 0.004);
+  for (const sd of [-1, 1]) k.part('trackRail', () => box(0.6, 0.01, 0.01), mats.rail, 0, 0.005, 0.27 + sd * 0.03);
+  return 0.32;
+}
+// Future: a white platform under a wave of glass, edged with light.
+function lightStation(k) {
+  k.part('lsPlatform', () => box(0.56, 0.05, 0.2), mats.whiteGloss, 0, 0.025, 0.12);
+  k.part('lsEdge', () => box(0.56, 0.008, 0.012), mats.neonCyan, 0, 0.052, 0.215);
+  k.part('lsHall', () => cyl(0.14, 0.16, 0.16, 20), mats.whiteGloss, 0, 0.08, -0.13);
+  k.part('lsHallBand', () => flatRing(0.15, 0.01, Math.PI * 2, 28), mats.neonCyan, 0, 0.12, -0.13);
+  k.part('lsCanopy', () => dome(0.3).scale(1, 0.35, 0.6), clearGlass(0x9fd8ff, 0.4), 0, 0.22, 0.08);
+  k.part('lsCanopyRim', () => flatRing(0.3, 0.008, Math.PI * 2, 32).scale(1, 1, 0.6), mats.whiteGloss, 0, 0.22, 0.08);
+  k.part('lsColumns', () => mergeGeos([-0.26, 0.26].map((x) => cylAt(0.01, 0.01, 0.17, x, 0.135, 0.08, 6))), mats.whiteGloss, 0, 0, 0);
+  const board = k.part('lsBoard', () => box(0.12, 0.05, 0.006), mats.holo, -0.14, 0.17, 0.12);
+  k.anim.push({ kind: 'hover', o: board, y: 0.17 });
+  k.part('lsRail', () => box(0.6, 0.02, 0.04), mats.neonCyan, 0, 0.01, 0.27);
+  return 0.34;
+}
+
+// --- Water tower ----------------------------------------------------------------------------
+// Modern Age: a concrete water tower, a mushroom on one column.
+function mushroomTower(k) {
+  k.part('mtBase', () => cyl(0.1, 0.12, 0.04, 14), mats.concrete, 0, 0.02, 0);
+  k.part('mtColumn', () => cyl(0.045, 0.055, 0.42, 14), mats.concrete, 0, 0.25, 0);
+  k.part('mtCone', () => cone(0.2, 0.12, 20).rotateX(Math.PI), k.trim, 0, 0.52, 0);
+  k.part('mtDrum', () => cyl(0.21, 0.2, 0.08, 20), k.trim, 0, 0.62, 0);
+  k.part('mtCap', () => dome(0.21).scale(1, 0.25, 1), mats.concrete, 0, 0.66, 0);
+  k.part('mtRail', () => flatRing(0.214, 0.006, Math.PI * 2, 28), mats.metal, 0, 0.668, 0);
+  k.part('mtDoor', () => box(0.04, 0.07, 0.012), mats.door, 0, 0.075, 0.054);
+  return 0.74;
+}
+// Future: a glass sphere of water on a slim white stem, a ring of light
+// turning round it.
+function glassTower(k) {
+  k.part('gtBase', () => cyl(0.09, 0.11, 0.04, 16), mats.whiteGloss, 0, 0.02, 0);
+  k.part('gtStem', () => cyl(0.03, 0.045, 0.44, 14), mats.whiteGloss, 0, 0.26, 0);
+  k.part('gtWater', () => sph(0.15, 18, 12), mats.waterLight, 0, 0.6, 0);
+  k.part('gtGlass', () => sph(0.17, 18, 12), clearGlass(0xd8f4ff, 0.35), 0, 0.6, 0);
+  const spin = new T.Group();
+  const ring = mesh(geo('gtRing', () => flatRing(0.2, 0.009, Math.PI * 2, 32)), mats.neonCyan, 0, 0.6, 0, spin);
+  ring.rotation.z = 0.3;
+  k.g.add(spin);
+  k.anim.push({ kind: 'spinY', o: spin, speed: 0.9 });
+  return 0.78;
+}
+
 const LOOKS = {
   lighthouse: { 3: stoneLighthouse, 4: stripedLighthouse, 6: lightSpire },
   woodcutter: { 4: sawmill, 5: lumberyard, 6: treefarm },
@@ -684,6 +930,13 @@ const LOOKS = {
   outpost: { 3: blockhouse, 5: depot, 6: habitat },
   fountain: { 6: holoFountain },
   farm: { 3: thatchFarm, 4: redBarnFarm },
+  granary: { 2: horreum, 3: titheBarn },
+  campfire: { 4: brazierSquare, 5: firePit, 6: holoFire },
+  factory: { 5: assemblyPlant, 6: cleanPlant },
+  steelmill: { 5: arcFurnace, 6: lightForge },
+  warehouse: { 6: logisticsHub },
+  station: { 5: glassStation, 6: lightStation },
+  watertower: { 5: mushroomTower, 6: glassTower },
 };
 
 // The era whose look an item has in a town that has reached `era`: its own

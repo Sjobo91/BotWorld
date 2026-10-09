@@ -1,4 +1,4 @@
-// Plays BotWorld for months of pretend time in a few seconds, to see how
+// Plays BotWorld for weeks of pretend time in a few seconds, to see how
 // long each era takes for a given chat. Use it after changing numbers in
 // public/shared/catalog.js or the pace in botworld.config.json.
 //
@@ -90,6 +90,8 @@ const end = T0 + DAYS * 864e5;
 let lastDay = -1;
 const daily = [];
 const UNTIL_ERA = args.untilEra != null ? Number(args.untilEra) : Infinity;
+// A row of the table every few days: daily at a short pace, every 5 at 9.5.
+const TABLE_EVERY = Math.max(1, Math.round(world.pace.eraDays / 2));
 for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now += STEP) {
   for (const v of viewers) {
     if (now >= nextAct.get(v.id)) {
@@ -99,7 +101,7 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
   }
   world.tick(now);
   const day = Math.floor((now - T0) / 864e5);
-  if (day !== lastDay && day % 5 === 0 && world.econ) {
+  if (day !== lastDay && day % TABLE_EVERY === 0 && world.econ) {
     lastDay = day;
     const e = world.econ;
     daily.push({

@@ -44,10 +44,14 @@ export const DEFAULT_LIMITS = {
   autoEventEveryMin: 150,
 };
 // eraDays: how long an era takes at base speed. Schools and labs can make
-// knowledge up to 1.5x faster, and helpers speed up the wonder.
-export const DEFAULT_PACE = { eraDays: 9.5 };
+// knowledge up to 1.5x faster, and helpers speed up the wonder. 2 days an
+// era make a season of about two weeks; 9.5 one of about two months.
+export const DEFAULT_PACE = { eraDays: 2 };
 
 const ECON_STEP_SEC = 5;
+// How long a building that stood idle for want of an input counts as idle:
+// it gets a little now and then, so one economy step can miss it.
+const IDLE_MEMORY_MS = 3 * 60e3;
 const WALK_BASE_SEC = 3;
 const WALK_SEC_PER_RING = 1.5;
 // Bot-seconds of work a town project needs per second of its build time:
@@ -228,6 +232,7 @@ export class World {
     this.progress = new Map();
     this.fuel = new Map();
     this.stalled = {};
+    this.starved = {}; // buildings idle of late, by id: the inputs they wait for and when
     this.rates = {};
     this.handMade = {}; // goods gathered by hand since the last economy step
     this.happy = 50;
@@ -921,7 +926,7 @@ export class World {
 
   // A finished building that makes this good (or power) and can go up a level.
   upgradable(r) {
-    return this.builds.find((b) => !b.home && !b.wonder && b.status === 'done' && b.built && (b.level || 1) < BUILD_LEVELS && (r === 'power' ? ITEMS[b.item].power > 0 : ITEMS[b.item].recipe?.out?.[r])) || null;
+    return this.builds.find((b) => !b.home && !b.wonder && b.status === 'done' && b.built && (b.level || 1) < BUILD_LEVELS && !this.starved[b.id] && (r === 'power' ? ITEMS[b.item].power > 0 : ITEMS[b.item].recipe?.out?.[r] && (!b.ores || b.ores.includes(r)))) || null;
   }
 
   // The command that gathers this good by hand, if the town knows where.
@@ -1592,6 +1597,8 @@ export class World {
       this.handMade = {};
     }
     this.stalled = out.stalled;
+    for (const [id, goods] of Object.entries(out.starved)) this.starved[id] = { goods, at: now };
+    for (const [id, st] of Object.entries(this.starved)) if (now - st.at > IDLE_MEMORY_MS) delete this.starved[id];
     const needs = this.needs(cap, pw);
     const explored = M.exploredCount(this.map, this.bits);
     this.econ = {
@@ -1630,8 +1637,21 @@ export class World {
   }
 
   // Is there a known, free spot for this building (or one it can take over)?
-  hasSite(item) {
-    return !!this.choosePlot(item, { quick: true }) || !!this.spareFor(item, true);
+  // For a mine that should dig one ore (res), a spot by that ore.
+  hasSite(item, res = null) {
+    const ore = M.siteOf(item).ore && (res === 'coal' || res === 'iron') ? res : null;
+    return !!this.choosePlot(item, { quick: true, ore }) || !!this.spareFor(item, true, ore);
+  }
+
+  // What buildings of a kind stand idle for (steel mills waiting for coal):
+  // the input most of the idle ones miss, or null when none is idle.
+  idleFor(is) {
+    const miss = {};
+    for (const b of this.builds) {
+      const goods = this.starved[b.id]?.goods;
+      if (goods && is(b)) for (const r of goods) miss[r] = (miss[r] || 0) + 1;
+    }
+    return Object.keys(miss).sort((a, b) => miss[b] - miss[a])[0] || null;
   }
 
   // What the town needs now (the plan shows it): only that may take the
@@ -1654,13 +1674,19 @@ export class World {
   needs(cap, pw) {
     const s = this.state;
     const out = [];
-    const add = (r, why) => {
+    const add = (r, why, depth = 0) => {
       if (out.some((n) => n.res === r)) return;
       // The best maker that has a known spot, else the best one (and a hint to explore).
       const makers = r === 'power' ? E.powerMakers(this.builds, s.era) : E.makersOf(r, s.era);
       if (!makers.length) return;
-      const item = makers.find((k) => this.hasSite(k)) || makers[0];
-      out.push({ res: r, why, item, site: this.hasSite(item), where: M.siteOf(item).why || null });
+      const item = makers.find((k) => this.hasSite(k, r)) || makers[0];
+      // Another one would stand idle like the ones the town has (coal plants
+      // and steel mills without coal, factories without power): what they
+      // wait for is what the town needs.
+      const wait = this.idleFor((b) => b.item === item) || (ITEMS[item].power < 0 && pw.demand > pw.supply * 1.02 ? 'power' : null);
+      if (wait && depth < 3) return add(wait, why, depth + 1);
+      const where = (M.siteOf(item).ore && M.GATHER[r]?.land) || M.siteOf(item).why || null;
+      out.push({ res: r, why, item, site: this.hasSite(item, r), where });
     };
     if (pw.demand > pw.supply * 1.02) add('power', 'power');
     const food = s.stock.food || 0;
@@ -1683,11 +1709,15 @@ export class World {
       const name = ITEMS[p.item].label;
       if (p.status === 'building') add({ kind: 'help', id: p.id, item: p.item, text: 'Help build the ' + name, cmd: many ? '!help #' + p.id : '!help' });
       else if (p.waitingFor?.length) {
-        const r = p.waitingFor[0];
+        const want = p.waitingFor[0];
+        // Its makers stand idle for an input (steel mills without coal): fetch that.
+        const idle = this.idleFor((b) => !!ITEMS[b.item].recipe?.out?.[want]);
+        const r = idle && RESOURCES[idle] ? idle : want;
+        const text = 'The ' + name + ' needs ' + RESOURCES[want].label.toLowerCase() + (r !== want ? ', made with ' + RESOURCES[r].label.toLowerCase() : '');
         const hand = this.handCmd(r);
-        const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]);
-        if (hand) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: hand });
-        else if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: '!work ' + r });
+        const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r] && (!b.ores || b.ores.includes(r)));
+        if (hand) add({ kind: 'gather', id: p.id, item: p.item, res: r, text, cmd: hand });
+        else if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text, cmd: '!work ' + r });
         else add({ kind: 'build', item: RESOURCES[r].from, res: r, text: 'Nobody makes ' + RESOURCES[r].label.toLowerCase() + ' yet', cmd: '!build ' + RESOURCES[r].from });
       }
     }
@@ -1852,15 +1882,16 @@ export class World {
   // Where should this go? Explored land only, on the right ground. Homes
   // cluster near the middle, producers go where the forest, hills or ore are
   // richest, parks and statues near homes.
-  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false, dir = null } = {}) {
+  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false, dir = null, ore = null } = {}) {
     const at = new Map(this.builds.map((b) => [hexKey(b.q, b.r), b]));
     const it = ITEMS[item];
     if (it.zone === 'far') return this.outpostPlot(at, dir, salt, quick);
     const site = M.siteOf(item);
     const prod = isProducerLike(it) || !!site.near || !!site.ore;
     const stores = prod && it.kind !== 'storage' ? this.stores() : null;
-    // A new mine goes for the ore no mine digs yet.
-    const lacking = site.ore ? ['coal', 'iron'].filter((r) => !this.builds.some((b) => E.isUp(b) && b.ores?.includes(r))) : [];
+    // A new mine goes for the ore no mine digs yet, or the one the town is
+    // short of (ore: only a spot by that ore will do).
+    const lacking = site.ore ? ['coal', 'iron'].filter((r) => r === ore || !this.builds.some((b) => E.isUp(b) && b.ores?.includes(r)) || this.econ?.needs?.some((n) => n.res === r)) : [];
     let best = null;
     let bestScore = Infinity;
     const theirs = this.rivalLand();
@@ -1871,6 +1902,7 @@ export class World {
       if (isWonderPlot(t.q, t.r, era) || !this.known(t) || theirs.has(t.i)) continue;
       const key = hexKey(t.q, t.r);
       if (at.has(key) || (taken && taken.has(key)) || !M.siteOk(this.map, item, t, mine)) continue;
+      if (ore && site.ore && !M.oresNear(this.map, t).includes(ore)) continue;
       if (quick) return t;
       let s;
       if (prod) {
@@ -1903,7 +1935,7 @@ export class World {
   // the town needs (need), which may also replace a spare producer of goods
   // the stores are full of. Homes, stores, power, knowledge, food and
   // wonders stay.
-  spareFor(item, need = false) {
+  spareFor(item, need = false, ore = null) {
     const it = ITEMS[item];
     if (it.zone === 'far') return null;
     const theirs = this.rivalLand();
@@ -1917,6 +1949,7 @@ export class World {
       if (sc == null || sc >= bestScore) continue;
       const t = M.tileAt(this.map, b.q, b.r);
       if (!t || isWonderPlot(t.q, t.r, this.state.era) || theirs.has(t.i) || !M.siteOk(this.map, item, t, mine)) continue;
+      if (ore && !M.oresNear(this.map, t).includes(ore)) continue;
       bestScore = sc;
       best = b;
     }

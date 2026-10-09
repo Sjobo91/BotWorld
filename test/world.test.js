@@ -294,7 +294,8 @@ test('people move in, work, and producers make goods up to the storage limit', (
   assert.ok(w.state.population >= 10, 'population ' + w.state.population);
   assert.ok(w.state.stock.wood > 10, 'wood ' + w.state.stock.wood);
   run(w, now, 6 * 3600e3, 30e3);
-  assert.equal(Math.round(w.state.stock.wood), w.econ.cap);
+  // Full, give or take what the wonder takes now and then.
+  assert.ok(w.state.stock.wood <= w.econ.cap && w.state.stock.wood >= w.econ.cap - 2, 'wood ' + w.state.stock.wood + ' of ' + w.econ.cap);
 });
 
 test('a kiln turns stone and wood into bricks, and stalls without them', () => {
@@ -746,6 +747,41 @@ test('the town says what it needs and what to do next', () => {
   assert.equal(w.econ.projects.length, 1);
 });
 
+test('idle buildings point at what they wait for: a mine by coal, not more coal plants', () => {
+  const { w } = makeWorld();
+  w.state.era = 4;
+  w.ensureWonder(T0);
+  revealAll(w);
+  let now = finish(w, alice, 'apartments', T0);
+  now = finish(w, bob, 'apartments', now);
+  now = finish(w, carol, 'coalplant', now);
+  now = finish(w, alice, 'steelmill', now);
+  now = finish(w, bob, 'factory', now);
+  // The town's only mine digs iron, so nothing makes coal.
+  const taken = new Set(w.builds.map((b) => hexKey(b.q, b.r)));
+  const iron = w.map.tiles.find((t) => !taken.has(hexKey(t.q, t.r)) && t.d > 8 && M.siteOk(w.map, 'mine', t, w.known) && M.oresNear(w.map, t).join() === 'iron');
+  w.builds.push({ id: ++w.state.seq, item: 'mine', project: true, level: 1, q: iron.q, r: iron.r, status: 'done', built: true, ores: ['iron'] });
+  w.state.population = 64;
+  w.state.stock.food = 200;
+  w.state.stock.coal = 0;
+  now = run(w, now, 2 * 60e3);
+  const plant = w.builds.find((b) => b.item === 'coalplant');
+  assert.deepEqual(w.starved[plant.id].goods, ['coal'], 'the coal plant stands idle');
+  assert.ok(w.econ.power.supply < w.econ.power.demand, 'so the factory has no power');
+  const coal = w.econ.needs.find((n) => n.res === 'coal');
+  assert.ok(coal, 'the town needs coal: ' + JSON.stringify(w.econ.needs));
+  assert.equal(coal.item, 'mine');
+  assert.equal(coal.site, true);
+  assert.equal(coal.where, 'a coal deposit');
+  assert.ok(!w.econ.needs.some((n) => ['coalplant', 'steelmill', 'factory'].includes(n.item)), 'nothing that would stand idle too: ' + JSON.stringify(w.econ.needs));
+  const cmds = w.econ.plan.map((st) => st.cmd);
+  assert.ok(cmds.includes('!build mine'), cmds.join(', '));
+  assert.ok(!cmds.some((c) => /coalplant|steelmill|factory/.test(c)), cmds.join(', '));
+  const res = say(w, carol, '!build mine', now);
+  assert.equal(res.ok, true, res.message);
+  assert.ok(res.build.ores.includes('coal'), 'the new mine goes where it can dig coal: ' + res.build.ores);
+});
+
 test('outposts go out to rich land, and producers far from a store make less', () => {
   const { w } = makeWorld();
   revealAll(w);
@@ -817,17 +853,17 @@ test('the rival can be switched off', () => {
 test('the rival plays a little slower than a small, active chat and leans towards a close race', () => {
   const { w } = makeWorld();
   const r = w.rival;
-  // Level with chat it plays at its base pace: 85% at difficulty 1.
-  assert.ok(Math.abs(r.speed() - 0.85) < 1e-9);
+  // Level with chat it plays at its base pace: 75% at difficulty 1.
+  assert.ok(Math.abs(r.speed() - 0.75) < 1e-9);
   // Chat an era ahead: it hurries (45% faster). Chat an era behind: it waits (35% slower).
   w.state.era = 1;
-  assert.ok(Math.abs(r.speed() - 0.85 * 1.45) < 1e-9);
+  assert.ok(Math.abs(r.speed() - 0.75 * 1.45) < 1e-9);
   w.state.era = 0;
   r.s.era = 1;
-  assert.ok(Math.abs(r.speed() - 0.85 * 0.65) < 1e-9);
+  assert.ok(Math.abs(r.speed() - 0.75 * 0.65) < 1e-9);
   // The difficulty scales it.
   const easy = new World(freshState(T0, 1), { limits: { rivalDifficulty: 0.5 } });
-  assert.ok(Math.abs(easy.rival.speed() - 0.425) < 1e-9);
+  assert.ok(Math.abs(easy.rival.speed() - 0.4) < 1e-9);
 });
 
 test('what the town is stuck on may start even when three projects are going', () => {

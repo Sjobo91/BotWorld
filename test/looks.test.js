@@ -8,6 +8,10 @@ test('old buildings take the look of the era their town has reached', () => {
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((e) => lookEra('woodcutter', e)), [0, 0, 0, 0, 4, 5, 6]);
   // A pharos in Rome, a stone tower in the Middle Ages, the striped one until the Future, then a spire of light.
   assert.deepEqual([2, 3, 4, 5, 6].map((e) => lookEra('lighthouse', e)), [2, 3, 4, 4, 6]);
+  // The smoky factory turns into an assembly plant and then a clean white plant; the granary
+  // is a horreum in Rome and a tithe barn in the Middle Ages.
+  assert.deepEqual([4, 5, 6].map((e) => lookEra('factory', e)), [4, 5, 6]);
+  assert.deepEqual([1, 2, 3].map((e) => lookEra('granary', e)), [1, 2, 3]);
   // Buildings without later looks keep their own, and so does a building with no era given.
   assert.equal(lookEra('temple', 6), 2);
   assert.equal(lookEra('school', 2), 2);

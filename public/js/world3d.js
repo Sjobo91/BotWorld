@@ -272,6 +272,8 @@ export async function createWorld(stage, overlay, opts) {
     // The establishing shot stops growing at a size where buildings can still
     // be told apart; a city bigger than that is shown district by district.
     layout.viewR = Math.min(layout.extent, VIEW_RINGS);
+    // Every building chat owns, out to the farthest outpost: the wide shot.
+    layout.allR = Math.min(MAP_RADIUS, Math.max(layout.viewR, (ds.length ? ds[ds.length - 1] : 0) + 1.5));
     layout.knownR = knownFar;
     layout.townR = (Math.max(3, far - 1) * SQ3 + 1) * R;
     layout.railR = Math.max(3, far - 1.4) * SQ3 * R;
@@ -1008,12 +1010,41 @@ export async function createWorld(stage, overlay, opts) {
     renderer.shadowMap.needsUpdate = true;
   }
   // A new era: rebuild what looks different now (a log cabin becomes a
-  // sawmill, a pharos a striped lighthouse).
-  function refreshLooks(rival) {
+  // sawmill, a pharos a striped lighthouse). Live, the town rebuilds in a
+  // wave from the landing pad outwards, each building with a puff of dust;
+  // on a load or a reconnect it simply is the new era.
+  const restyles = [];
+  const itemOf = (v) => (v.b.pending ? 'wondersite' : v.b.item);
+  function restyle(v, celebrate) {
+    setBody(v, itemOf(v), v.b.level || 1, celebrate);
+    if (v.b.built && !v.b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
+  }
+  function queueRestyle(v) {
+    const p = v.root.position;
+    if (!restyles.some((r) => r.v === v)) restyles.push({ v, at: performance.now() + 700 + Math.hypot(p.x, p.z) * 260 });
+  }
+  function refreshLooks(rival, wave) {
     for (const v of builds.values()) {
       if (!v.body || !!v.b.rival !== rival) continue;
-      setBody(v, v.b.pending ? 'wondersite' : v.b.item, v.b.level || 1, false);
-      if (v.b.built && !v.b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
+      const item = itemOf(v);
+      if (v.key === item + ':' + (v.b.level || 1) + ':' + lookEra(item, eraOf(v.b))) continue;
+      if (wave && !still) queueRestyle(v);
+      else restyle(v, false);
+    }
+  }
+  function stepRestyles() {
+    if (!restyles.length) return;
+    const t = performance.now();
+    let n = 0;
+    for (let i = 0; i < restyles.length && n < 8; i++) {
+      const r = restyles[i];
+      if (t < r.at) continue;
+      restyles.splice(i--, 1);
+      const v = r.v;
+      if (builds.get(v.id) !== v || !v.body) continue;
+      restyle(v, true);
+      dust(v.root.position.x, v.root.position.y, v.root.position.z, 0.4);
+      n++;
     }
   }
   function clearBody(v) {
@@ -1092,9 +1123,13 @@ export async function createWorld(stage, overlay, opts) {
       v.root.rotation.y = Math.atan2(-p.x, -p.z);
     }
     const finished = live && prev && prev.status !== 'done' && b.status === 'done';
+    // A finished building that turns into its version of the new era (only
+    // a new era does that) rebuilds in the era's wave instead of all at once.
+    const evolved = live && prev && v.body && prev.built && b.built && !b.wonder && prev.item !== b.item && !still;
     // Houses being upgraded keep standing as they are until the new one is done.
     // A wonder chat has not chosen yet is a building site.
-    if (b.wonder || b.built || b.status === 'building') setBody(v, b.pending ? 'wondersite' : b.item, b.level || 1, finished && !!prev.upgrade);
+    if (evolved) queueRestyle(v);
+    else if (b.wonder || b.built || b.status === 'building') setBody(v, b.pending ? 'wondersite' : b.item, b.level || 1, finished && !!prev.upgrade);
     else clearBody(v);
     if (v.body && b.built && !b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
     setScaffold(v, b.status === 'building');
@@ -2708,14 +2743,14 @@ export async function createWorld(stage, overlay, opts) {
   }
   // How far out the camera may go: enough to see the whole town as it grows.
   function updateLimits() {
-    controls.maxDistance = opts.stream ? fitDistance() * 1.9 : Math.max(fitDistance() * 1.9, fitDistance(layout.knownR) * 1.3);
+    controls.maxDistance = opts.stream ? Math.max(fitDistance() * 1.9, fitDistance(layout.allR) * 1.1) : Math.max(fitDistance() * 1.9, fitDistance(layout.knownR) * 1.3);
   }
   // How far back the camera has to be to see the town (or rings tiles out).
   function fitDistance(rings) {
     const s = (rings || layout.viewR) * SQ3 * R + R;
     const dW = (s * view.f) / (view.visW / 2);
     const dH = ((s * Math.sin(elevation()) + 0.6) * view.f) / (view.visH / 2);
-    return Math.max(3, Math.min(80, Math.max(dW, dH) * 0.95));
+    return Math.max(3, Math.min(120, Math.max(dW, dH) * 0.95));
   }
   function frameCamera() {
     focus = null;
@@ -2796,10 +2831,24 @@ export async function createWorld(stage, overlay, opts) {
   }
   // In stream mode the camera directs itself: it flies to whatever chat just
   // did, and otherwise slowly tours the island.
-  const tour = { next: 0, i: 0, track: null, lastEvent: 0, prio: 0 };
+  const tour = { next: 0, i: 0, track: null, lastEvent: 0, prio: 0, wideNext: 0, wideUntil: 0 };
+  // Every couple of minutes the stream pulls back for a wide shot of the
+  // whole town, every building chat owns however far it has spread, and holds
+  // it while the camera slowly circles; small events wait until it is done.
+  const WIDE_EVERY = 150000;
+  const WIDE_HOLD = 12000;
+  function wideShot(t) {
+    tour.wideNext = t + WIDE_EVERY;
+    tour.wideUntil = t + WIDE_HOLD;
+    tour.next = t + WIDE_HOLD;
+    tour.track = null;
+    tour.prio = 0;
+    flyTo(0, 0, fitDistance(layout.allR), 3500);
+  }
   function interest(prio, x, z, want, track, hold) {
     if (!opts.stream || lapse) return;
     const t = performance.now();
+    if (t < tour.wideUntil && prio < 8) return;
     if (t - tour.lastEvent < 6000 && prio < tour.prio) return;
     tour.lastEvent = t;
     tour.prio = prio;
@@ -2811,6 +2860,10 @@ export async function createWorld(stage, overlay, opts) {
     if (!opts.stream || still || lapse) return;
     const t = performance.now();
     controls.autoRotate = !tour.track;
+    // The first wide shot a minute in, then every WIDE_EVERY; it waits for a
+    // flight to land and for a big moment (a new era, the finale) to end.
+    if (!tour.wideNext) tour.wideNext = t + 60000;
+    if (t >= tour.wideNext && !focus && !(tour.prio >= 8 && t < tour.next)) { wideShot(t); return; }
     if (t < tour.next) return;
     tour.next = t + 15000;
     tour.prio = 0;
@@ -2935,9 +2988,9 @@ export async function createWorld(stage, overlay, opts) {
   }
 
   // --- Eras -----------------------------------------------------------------------------------
-  function applyEra(e) {
+  function applyEra(e, wave) {
     era = Math.max(0, Math.min(ERAS.length - 1, e || 0));
-    refreshLooks(false);
+    refreshLooks(false, wave);
     mats.path.color.set(look().path);
     mats.bot.color.set(look().bot);
     rebuildLamps();
@@ -2966,6 +3019,7 @@ export async function createWorld(stage, overlay, opts) {
     for (const p of [...porters]) stepBot(p, t, dt);
     for (const n of rivalBots) stepBot(n, t, dt);
     stepBuilds(t, dt);
+    stepRestyles();
     stepTrain(dt);
     stepEvents(t, dt);
     stepGuild(t, dt);
@@ -3099,8 +3153,9 @@ export async function createWorld(stage, overlay, opts) {
     },
     setEconomy(econ) {
       const was = rivalEra();
+      const known = !!data.econ?.race?.rival;
       data.econ = econ;
-      if (rivalEra() !== was) refreshLooks(true);
+      if (rivalEra() !== was) refreshLooks(true, known);
       syncRivalBots();
     },
     produce(list) {
@@ -3152,7 +3207,7 @@ export async function createWorld(stage, overlay, opts) {
       else flyTo(target.x, target.z, Math.min(camera.position.distanceTo(controls.target), 7), 1400);
     },
     eraChanged(e) {
-      applyEra(e);
+      applyEra(e, true);
       fireworks(0, 0, 8);
       for (const b of bots.values()) if (b.mode !== 'arrive' && b.mode !== 'walk' && b.mode !== 'work') party(b);
       interest(9, 0, 0, fitDistance(), null, 14000);
@@ -3198,6 +3253,10 @@ export async function createWorld(stage, overlay, opts) {
     overview(rings) {
       flyTo(0, 0, fitDistance(rings), 800);
     },
+    // The stream's wide shot of every building chat owns, right now.
+    wide() {
+      wideShot(performance.now());
+    },
     debug() {
       return {
         era,
@@ -3208,6 +3267,7 @@ export async function createWorld(stage, overlay, opts) {
         knownR: layout.knownR,
         extent: layout.extent,
         viewR: layout.viewR,
+        allR: layout.allR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
         guild: guild.g ? { x: +guild.g.position.x.toFixed(2), z: +guild.g.position.z.toFixed(2), k: +guild.k.toFixed(2) } : null,

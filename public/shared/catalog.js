@@ -1,7 +1,7 @@
 // Everything chat can build, use and wear, era by era. Shared by the server
 // (the rules) and the page (the looks), so the two never disagree.
 //
-// The island starts with sticks and stones and, over a couple of months,
+// The island starts with sticks and stones and, over a couple of weeks,
 // works its way through the history of the world to a glowing future city:
 //   Stone Age > Ancient Egypt > Roman Empire > Middle Ages >
 //   Industrial Revolution > Modern Age > Future

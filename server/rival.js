@@ -7,7 +7,7 @@
 // gathers and builds, and about once an hour it starts something new (some
 // 20 buildings a day). It is a little slower than a small, active chat and
 // leans towards keeping the race close: it usually reaches a new era first,
-// an active chat wins the last sprint to the Future by about a day, and a
+// an active chat wins the last sprint to the Future by a few hours, and a
 // sleeping chat is not left hopelessly behind.
 import { ITEMS, ERAS, RESOURCES, BUILD_LEVELS, hashStr, houseFor, evolvedItem, itemsOfEra, otherWonder, wondersOf } from '../public/shared/catalog.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
@@ -20,9 +20,10 @@ const STEP_SEC = 5;
 const LABOR = 6;
 const RAW = ['wood', 'stone', 'food', 'marble', 'coal', 'iron'];
 // Its pace at difficulty 1, before leaning. At full pace it beat two and
-// five regulars to the Future in the balance races; at 0.85 they win by
-// about a day.
-const BASE_SPEED = 0.85;
+// five regulars to the Future in the balance races. At 0.75, two days an
+// era, five regulars win every time by a few hours, and two regulars win
+// about half the races; either way it is close.
+const BASE_SPEED = 0.75;
 
 // A home on the far side: land away from the sea, about 27 tiles out, with
 // forest, hills and berries around it.

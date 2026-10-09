@@ -112,12 +112,14 @@ function adjacencyBoost(b, boosters) {
 }
 
 // Runs every producer for dt seconds. Mutates stock, progress and fuel.
-// Returns what was made and used, and which buildings produced something.
+// Returns what was made and used, which buildings produced something, and
+// which stood still (starved: the inputs they wait for).
 export function produce(builds, stock, ctx, dt) {
   const made = {};
   const used = {};
   const pops = [];
   const stalled = {};
+  const starved = {};
   const boosters = builds.filter((o) => isUp(o) && itemOf(o)?.boost);
   for (const b of builds) {
     if (!isUp(b)) continue;
@@ -144,6 +146,7 @@ export function produce(builds, stock, ctx, dt) {
       const full = outKeys.length > 0 && outKeys.every((r) => (stock[r] || 0) >= ctx.cap);
       if (missing.length || full) {
         stalled[b.id] = missing.length ? 'needs ' + missing.join(', ') : 'storage full';
+        if (missing.length) starved[b.id] = missing;
         if (it.power > 0) ctx.fuel.set(b.id, false);
         prog = Math.min(prog, 1);
         break;
@@ -160,7 +163,7 @@ export function produce(builds, stock, ctx, dt) {
     }
     ctx.progress.set(b.id, prog);
   }
-  return { made, used, pops, stalled };
+  return { made, used, pops, stalled, starved };
 }
 
 // Moves goods from storage into the wonder, a little at a time, in step with

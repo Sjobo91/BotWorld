@@ -380,7 +380,8 @@ export function createHud(state, now, opts) {
       const li = el('li', 'need');
       const it = ITEMS[n.item];
       const why = {
-        power: 'More power!',
+        // Coal for idle coal plants, or more power plants.
+        power: n.res === 'power' ? 'More power!' : (RESOURCES[n.res]?.label || n.res) + ' for power!',
         hungry: 'People are hungry!',
         wonder: 'The wonder needs ' + resLabel(n.res),
         build: 'Builds wait for ' + resLabel(n.res),
@@ -493,6 +494,8 @@ export function createHud(state, now, opts) {
     }
     if (rows.length > max) list.append(el('li', 'more', '+' + (rows.length - max) + ' more'));
     $('queueEmpty').hidden = rows.length > 0;
+    // Nothing going: start what the town needs most, else this era's first producer.
+    if (!rows.length) $('queueCmd').textContent = state.econ?.plan?.find((st) => st.kind === 'build')?.cmd || $('howBuildCmd').textContent;
   }
 
   // --- Top builders this week ------------------------------------------------------------------
