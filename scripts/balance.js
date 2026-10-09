@@ -18,8 +18,8 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/
 const VIEWERS = Number(args.viewers || 5);
 const DAYS = Number(args.days || 90);
 const HOURS_ONLINE = Number(args.hours || 1.5); // per viewer per day
-const ACT_EVERY_MIN = Number(args.every || 4); // a command every few minutes while online
-const STEP = 30e3;
+const ACT_EVERY_MIN = Number(args.every || 1); // a command about every minute while online
+const STEP = 15e3;
 const SEED = Number(args.seed || 7);
 
 let seed = SEED;
@@ -33,6 +33,7 @@ const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
   if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale' });
+  if (e.type === 'notice' && e.kind === 'rival') log.push({ day: (now - T0) / 864e5, text: e.text });
 });
 
 const viewers = Array.from({ length: VIEWERS }, (_, i) => ({ id: 'v' + i, name: 'viewer' + i, start: rnd() * 24 }));
@@ -51,16 +52,21 @@ function choose(v) {
   if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * 3)));
   if (world.builds.some((b) => b.damaged && !b.repairBy) && rnd() < 0.5) return say('!repair');
   const job = s.jobs[v.id];
-  if (job && job.kind !== 'gather' && rnd() < 0.7) return null;
+  // Busy bots: chat sometimes lines up more, often just watches.
+  if (job && job.kind !== 'gather' && (rnd() < 0.6 || (s.queues[v.id] || []).length >= 2)) return null;
   const econ = world.econ || {};
   const plan = econ.plan || [];
+  // A Guild order on screen, racing the rival: chat hauls for it.
+  if (s.contract && !s.contract.winner && rnd() < 0.5) return say('!deliver ' + (1 + Math.floor(rnd() * 3)));
   const r = rnd();
   // Most of chat does what the "next step" box on screen says.
   if (r < 0.6 && plan.length) {
     const i = rnd() < 0.55 ? 0 : rnd() < 0.6 ? 1 : Math.floor(rnd() * plan.length);
     return say(plan[Math.min(i, plan.length - 1)].cmd);
   }
-  if (r < 0.72) return say('!explore');
+  if (r < 0.7) return say('!explore');
+  if (r < 0.74) return say('!upgrade tools');
+  if (r < 0.77) return say('!upgrade ' + pick(itemsOfEra(s.era).filter((k) => ITEMS[k].kind === 'producer') || ['woodcutter']));
   if (r < 0.8) return say('!upgrade');
   if (r < 0.92) {
     const era = s.era;
@@ -71,7 +77,7 @@ function choose(v) {
     return say('!build ' + pick(pool));
   }
   if (r < 0.96) return say('!help');
-  return say(pick(['!me', '!dance', '!hat cap', '!work']));
+  return say(pick(['!me', '!dance', '!hat cap', '!work', '!wood 3', '!stone 2', '!food']));
 }
 
 const nextAct = new Map(viewers.map((v) => [v.id, T0 + rnd() * ACT_EVERY_MIN * 60e3]));
@@ -108,7 +114,10 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
 
 console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
 console.table(daily);
-for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));
+const guild = world.state.contracts;
+if (guild && guild.n) console.log('Guild orders: ' + guild.n + ' posted, BotWorld won ' + guild.town + ', ' + (world.rival ? world.rival.s.name : 'the rival') + ' won ' + guild.rival);
 if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;
@@ -117,7 +126,7 @@ console.log('built:', JSON.stringify(byItem));
 // Save the grown island with every time moved so that the end of the run is now.
 if (args.save) {
   const shift = Date.now() - now;
-  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at']);
+  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at', 'progressAt', 'nextThink', 'lastStep', 'nextContractAt', 'endedAt']);
   const move = (o) => {
     if (Array.isArray(o)) return o.forEach(move);
     if (!o || typeof o !== 'object') return;

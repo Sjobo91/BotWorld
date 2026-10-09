@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, freshState, migrate, LABOR, TOWN_CREW } from '../server/world.js';
+import { World, freshState, migrate, reachOf, LABOR, TOWN_CREW } from '../server/world.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
 import { ITEMS, ERAS } from '../public/shared/catalog.js';
 import * as M from '../public/shared/terrain.js';
+import * as E from '../server/economy.js';
 
 const T0 = Date.UTC(2026, 9, 8, 12);
 const alice = { id: 'a', name: 'alice' };
@@ -11,8 +12,10 @@ const bob = { id: 'b', name: 'bob' };
 const carol = { id: 'c', name: 'carol' };
 const mod = { id: 'm', name: 'mod', mod: true };
 
+// Most tests are about other things than short jobs, so their bots keep
+// working for ten minutes per command, like a busy chat would.
 function makeWorld(opts = {}) {
-  const w = new World(freshState(T0, 1), opts);
+  const w = new World(freshState(T0, 1), { ...opts, limits: { shiftSec: 600, workShiftSec: 600, ...(opts.limits || {}) } });
   const events = [];
   w.on((e) => events.push(e));
   return { w, events };
@@ -166,7 +169,8 @@ test('a project waits for missing goods, !help then gathers them', () => {
   const res = say(w, carol, '!help', T0 + 201e3);
   assert.equal(res.ok, true);
   assert.match(res.message, /waiting for/);
-  assert.equal(w.state.jobs.c.kind, 'work');
+  assert.equal(w.state.jobs.c.kind, 'hand');
+  assert.equal(w.state.jobs.c.res, 'wood');
   w.state.stock.wood = 50;
   w.tick(T0 + 202e3);
   assert.equal(p.status, 'building');
@@ -178,6 +182,9 @@ test('!help with nothing to build hauls to the wonder', () => {
   assert.equal(res.ok, true);
   assert.equal(w.state.jobs.a.kind, 'wonder');
   assert.equal(say(w, bob, '!help wonder', T0).ok, true);
+  // Nobody builds the wonder alone: !build wonder hauls to it as well.
+  assert.equal(say(w, carol, '!build wonder', T0).ok, true);
+  assert.equal(w.state.jobs.c.kind, 'wonder');
 });
 
 test('producers need the right land, and richer land works faster', () => {
@@ -218,9 +225,12 @@ test('!explore sends a scout into the fog, reveals land and pays XP', () => {
   assert.equal(job.kind, 'explore');
   const t = M.tileAt(w.map, job.q, job.r);
   assert.ok(M.angleOf(t) < 0, 'north is up the map');
-  assert.match(say(w, alice, '!explore', T0 + 1000).message, /already out exploring/);
+  // Typed again while out: the next trip waits in line.
+  assert.match(say(w, alice, '!explore', T0 + 1000).message, /lined up one more job/);
   run(w, T0, job.until - T0 + 2000, 1000);
-  assert.equal(w.state.jobs.a, undefined);
+  assert.equal(w.state.jobs.a?.kind, 'explore');
+  assert.notEqual(w.state.jobs.a.startedAt, job.startedAt);
+  assert.equal(w.state.queues.a, undefined);
   assert.ok(M.exploredCount(w.map, w.bits) > before);
   assert.ok(w.known(t));
   assert.ok(w.state.builders.a.xp >= 6);
@@ -330,15 +340,18 @@ test('parks next to homes make people happier', () => {
   assert.ok(w.econ.happy > bare, bare + ' -> ' + w.econ.happy);
 });
 
-test('!work sends your bot to a producer and pays XP', () => {
+test('!work bricks sends your bot to a kiln and pays XP', () => {
   const { w, events } = makeWorld();
-  let now = finish(w, bob, 'woodcutter', T0);
-  const res = say(w, alice, '!work wood', now);
-  assert.equal(res.ok, true);
+  w.state.era = 1;
+  w.ensureWonder(T0);
+  assert.match(say(w, alice, '!work bricks', T0).message, /!build kiln/);
+  const now = finish(w, bob, 'kiln', T0);
+  const res = say(w, alice, '!work bricks', now);
+  assert.equal(res.ok, true, res.message);
   const job = w.state.jobs.a;
   assert.equal(job.kind, 'work');
-  assert.equal(w.builds.find((b) => b.id === job.buildId).item, 'woodcutter');
-  assert.equal(say(w, alice, '!work stone', now).ok, false);
+  assert.equal(w.builds.find((b) => b.id === job.buildId).item, 'kiln');
+  assert.equal(say(w, carol, '!work steel', now).ok, false);
   const xp = w.state.builders.a.xp;
   run(w, now, 11 * 60e3);
   assert.equal(w.state.jobs.a, undefined);
@@ -346,9 +359,140 @@ test('!work sends your bot to a producer and pays XP', () => {
   assert.ok(events.some((e) => e.type === 'job' && e.job === null));
 });
 
-test('!work explains what to build when nothing makes that resource', () => {
+test('!wood sends your bot on one trip into a forest, and it brings wood to town', () => {
+  const { w, events } = makeWorld();
+  w.state.stock.wood = 10;
+  const res = say(w, alice, '!wood', T0);
+  assert.equal(res.ok, true, res.message);
+  assert.match(res.message, /cut wood in a forest and brings back 2/);
+  const job = w.state.jobs.a;
+  assert.equal(job.kind, 'hand');
+  assert.equal(job.res, 'wood');
+  const t = M.tileAt(w.map, job.q, job.r);
+  assert.equal(t.t, 'forest');
+  assert.ok(M.isExplored(w.bits, t.i));
+  // Out, work, back: about half a minute for land near the town.
+  assert.equal(job.until, T0 + (2 * job.out + job.work) * 1000);
+  assert.ok(job.until - T0 < 60e3);
+  assert.ok(events.some((e) => e.type === 'job' && e.job?.kind === 'hand'));
+  const xp = w.state.builders.a.xp;
+  run(w, T0, job.until - T0 - 2000, 1000);
+  assert.equal(w.state.stock.wood, 10);
+  run(w, job.until - 2000, 3000, 1000);
+  assert.equal(w.state.stock.wood, 12);
+  assert.equal(w.state.builders.a.gathered, 2);
+  assert.equal(w.state.jobs.a, undefined);
+  assert.ok(w.state.builders.a.xp > xp);
+  assert.ok(events.some((e) => e.type === 'gathered' && e.userId === 'a' && e.n === 2));
+});
+
+test('jobs typed while the bot is busy wait in line, and !stop clears them', () => {
+  const { w, events } = makeWorld();
+  w.state.stock.wood = 0;
+  assert.equal(say(w, alice, '!wood 3', T0).ok, true);
+  assert.equal(w.state.queues.a.length, 2);
+  assert.match(say(w, alice, '!stone', T0 + 1000).message, /lined up one more job \(3 waiting\)/);
+  assert.ok(events.some((e) => e.type === 'queue' && e.userId === 'a' && e.n === 3));
+  say(w, alice, '!explore', T0 + 2000);
+  say(w, alice, '!help', T0 + 3000);
+  assert.match(say(w, alice, '!wood', T0 + 4000).message, /5 jobs lined up already/);
+  // Three wood trips, then the stone trip starts.
+  let now = T0 + 5000;
+  for (let i = 0; i < 400 && w.state.jobs.a?.res !== 'stone'; i++) now = run(w, now, 1000, 1000);
+  assert.equal(w.state.jobs.a.res, 'stone');
+  assert.equal(w.state.builders.a.gathered, 6);
+  assert.equal(w.state.queues.a.length, 2);
+  assert.match(say(w, alice, '!stop', now).message, /forgets 2 jobs/);
+  assert.equal(w.state.jobs.a, undefined);
+  assert.equal(w.state.queues.a, undefined);
+});
+
+test('help comes in short shifts, so chat keeps typing !help', () => {
+  const w = new World(freshState(T0, 1));
+  rich(w);
+  const p = say(w, bob, '!build woodcutter', T0).build;
+  assert.equal(say(w, alice, '!help', T0).ok, true);
+  assert.equal(w.state.jobs.a.until, T0 + 40e3);
+  let now = run(w, T0, 41e3, 1000);
+  assert.equal(w.state.jobs.a, undefined);
+  const after = p.progress;
+  assert.ok(after > 60 && after < p.work);
+  say(w, alice, '!help 2', now);
+  assert.equal(w.state.queues.a.length, 1);
+  now = run(w, now, 90e3, 1000);
+  assert.equal(p.status, 'done');
+});
+
+test('!upgrade tools needs a level, the era and some goods, and then carries more', () => {
+  const { w, events } = makeWorld();
+  assert.match(say(w, alice, '!upgrade tools', T0).message, /come with the Village/);
+  w.state.era = 1;
+  w.ensureWonder(T0);
+  assert.match(say(w, alice, '!upgrade tools', T0).message, /need level 3, you are level 1/);
+  w.touchBuilder(alice, T0).xp = 80;
+  w.state.stock.bricks = 0;
+  assert.match(say(w, alice, '!tools', T0).message, /bricks/);
+  rich(w);
+  const res = say(w, alice, '!upgrade tools', T0);
+  assert.equal(res.ok, true, res.message);
+  assert.match(res.message, /copper tools: it carries 3 per trip/);
+  assert.equal(w.state.builders.a.tool, 1);
+  assert.equal(w.state.stock.bricks, 94);
+  assert.ok(events.some((e) => e.type === 'tools' && e.tool === 1));
+  w.state.stock.wood = 0;
+  const job = say(w, alice, '!wood', T0) && w.state.jobs.a;
+  run(w, T0, job.until - T0 + 1000, 1000);
+  assert.equal(w.state.stock.wood, 3);
+});
+
+test('!upgrade woodcutter takes a town building to the next level, and it makes more', () => {
+  const { w, events } = makeWorld();
+  let now = finish(w, bob, 'woodcutter', T0);
+  const wc = w.builds.find((b) => b.item === 'woodcutter');
+  assert.equal(wc.status, 'done');
+  const made = (b) => {
+    const progress = new Map();
+    const stock = { wood: 0 };
+    E.produce([b], stock, { employment: 1, happyFactor: 1, global: 1, powerRatio: 1, helpers: () => 0, boosts: {}, progress, fuel: new Map(), cap: 1000 }, 600);
+    return stock.wood;
+  };
+  const before = made(wc);
+  rich(w);
+  const res = say(w, alice, '!upgrade woodcutter', now);
+  assert.equal(res.ok, true, res.message);
+  assert.match(res.message, /to level 2/);
+  assert.equal(wc.upgrade.level, 2);
+  w.economy(now, 0);
+  assert.ok(w.econ.projects.some((p) => p.id === wc.id && p.level === 2));
+  assert.match(say(w, carol, '!upgrade #' + wc.id, now).message, /being built right now/);
+  now = run(w, now, 400e3, 5000);
+  assert.equal(wc.level, 2);
+  assert.equal(wc.status, 'done');
+  assert.ok(wc.helpers.b > 0, 'the first builders are still credited');
+  assert.ok(events.some((e) => e.type === 'notice' && /now level 2/.test(e.text)));
+  assert.ok(made(wc) >= before * 1.4);
+  const home = say(w, carol, '!home', now).build;
+  run(w, now, 60e3, 5000);
+  assert.match(say(w, alice, '!upgrade #' + home.id, now + 60e3).message, /someone's own home/);
+  assert.match(say(w, alice, '!upgrade banana', now).message, /!upgrade tools/);
+});
+
+test('gathering by hand needs known land, the right era and room in storage', () => {
   const { w } = makeWorld();
-  assert.match(say(w, alice, '!work stone', T0).message, /!build quarry/);
+  assert.match(say(w, alice, '!coal', T0).message, /Medieval Town/);
+  assert.equal(say(w, alice, '!mine', T0).ok, true);
+  assert.equal(w.state.jobs.a.res, 'stone');
+  assert.ok(['hills', 'mountain'].includes(M.tileAt(w.map, w.state.jobs.a.q, w.state.jobs.a.r).t));
+  w.state.stock.stone = w.econ ? w.econ.cap : 100;
+  run(w, T0, 70e3);
+  assert.ok(w.state.stock.stone <= 100);
+  w.bits.fill(0);
+  assert.match(say(w, bob, '!wood', T0 + 80e3).message, /Nobody has found a forest yet/);
+  // Food comes from berries, or from fishing when no meadow is known.
+  revealAll(w);
+  assert.equal(say(w, carol, '!fish', T0 + 90e3).ok, true);
+  assert.equal(w.state.jobs.c.pose, 'fish');
+  assert.equal(w.state.jobs.c.res, 'food');
 });
 
 test('the wonder fills up, the era changes, and homes and huts grow into the new era', () => {
@@ -452,6 +596,107 @@ test('the merchant brings a fair gift, not a fortune', () => {
   assert.ok(total > 0 && total <= 2 * 30);
 });
 
+// A town with a few buildings and chat around, and a Guild order due now.
+function guildWorld() {
+  const { w, events } = makeWorld();
+  let now = T0;
+  for (const [u, item] of [[alice, 'woodcutter'], [bob, 'quarry'], [carol, 'gatherer'], [alice, 'campfire'], [bob, 'stockpile']]) now = finish(w, u, item, now);
+  rich(w);
+  say(w, alice, '!me', now);
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  return { w, events, now };
+}
+
+test('a Merchant Guild order: bots on !deliver haul for it, and the first town to fill it gets paid', () => {
+  const { w, events, now: t0 } = guildWorld();
+  const c = w.state.contract;
+  assert.ok(c, 'an order is posted');
+  assert.ok(['wood', 'stone', 'food'].includes(c.res), 'a good both towns know');
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && /Merchant Guild wants/.test(e.text)));
+  assert.equal(w.econ.plan[0].cmd, '!deliver', 'the plan says to deliver');
+  w.state.stock[c.res] = 100;
+  let now = t0;
+  const res = say(w, alice, '!deliver 3', now);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(w.state.jobs.a.kind, 'deliver');
+  assert.equal(w.state.queues.a.length, 2, 'two more trips lined up');
+  // One trip with stone tools (two crates) fills a twentieth of the order.
+  const before = w.state.contract.town;
+  now = run(w, now, 30e3);
+  assert.ok(w.state.contract.town - before >= c.amount * 0.05 - 1e-6, 'a trip counts');
+  const xp = w.state.builders.a.xp;
+  const knowledge = w.state.knowledge;
+  while (!w.state.contract.winner && now < t0 + 40 * 60e3) {
+    for (const u of [alice, bob]) if (!w.state.jobs[u.id]) say(w, u, '!deliver 5', now);
+    now = run(w, now, 30e3);
+    for (const r of Object.keys(w.state.stock)) w.state.stock[r] = Math.max(w.state.stock[r], 60);
+  }
+  assert.equal(w.state.contract.winner, 'town');
+  assert.equal(w.state.contracts.town, 1);
+  assert.ok(Object.keys(w.state.contract.paid).length > 0, 'paid in goods');
+  assert.ok(w.state.knowledge >= knowledge + 30, 'and some knowledge');
+  assert.ok(w.state.builders.a.xp >= xp + 8, 'haulers earn XP');
+  assert.equal(Object.values(w.state.jobs).some((j) => j.kind === 'deliver'), false, 'hauling stops');
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && e.result === 'town'));
+  // The order card goes away after a while, and the next one comes later.
+  now = run(w, now, 120e3);
+  assert.equal(w.state.contract, null);
+  assert.ok(w.state.nextContractAt > now);
+  assert.match(say(w, alice, '!deliver', now).message, /No Guild order right now/);
+});
+
+test('when chat does not haul, the rival fills the Guild order and chat gets its crates back', () => {
+  const { w, events, now: t0 } = guildWorld();
+  const c = w.state.contract;
+  const before = w.state.rival.knowledge;
+  let now = t0;
+  while (!w.state.contract.winner && now < t0 + 40 * 60e3) {
+    now = run(w, now, 30e3);
+    for (const r of Object.keys(w.state.stock)) w.state.stock[r] = Math.max(w.state.stock[r], 60);
+    for (const r of Object.keys(w.state.rival.stock)) w.state.rival.stock[r] = Math.max(w.state.rival.stock[r], 60);
+  }
+  assert.equal(w.state.contract.winner, 'rival');
+  assert.ok(c.town > 0 && c.rival > c.town, 'the townsfolk hauled a little, the rival more');
+  assert.equal(w.state.contracts.rival, 1);
+  assert.ok(w.state.rival.knowledge > before + 30);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'guild' && e.result === 'rival' && /crates come back/.test(e.text)));
+});
+
+test('the Guild needs chat around, goods to deliver and the rival', () => {
+  const { w } = makeWorld();
+  let now = T0;
+  for (const [u, item] of [[alice, 'woodcutter'], [bob, 'quarry'], [carol, 'gatherer'], [alice, 'campfire'], [bob, 'stockpile']]) now = finish(w, u, item, now);
+  // Nobody has typed for an hour: no order, it waits.
+  now += 3600e3;
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  assert.equal(w.state.contract, null);
+  assert.ok(w.state.nextContractAt > now);
+  // Chat is back: the order comes, but nothing to deliver means a hint.
+  say(w, alice, '!me', now);
+  w.state.nextContractAt = now;
+  now = run(w, now, 10e3);
+  const c = w.state.contract;
+  assert.ok(c);
+  w.state.stock[c.res] = 0;
+  assert.match(say(w, bob, '!deliver', now).message, /no .* to deliver\. Make some first/);
+  // Moderators can call the next order right away.
+  assert.equal(say(w, alice, '!deliver start', now).ok, false);
+  w.state.contract.winner = 'none';
+  w.state.contract.endedAt = now;
+  assert.equal(say(w, mod, '!deliver start', now).ok, true);
+  now = run(w, now, 10e3);
+  assert.ok(w.state.contract && !w.state.contract.winner && w.state.contract.id === c.id + 1);
+  // Without the rival there is no Guild.
+  const solo = makeWorld({ limits: { rival: false } }).w;
+  say(solo, alice, '!me', T0);
+  solo.state.nextContractAt = T0;
+  run(solo, T0, 60e3);
+  assert.equal(solo.state.contract, null);
+  assert.match(say(solo, alice, '!deliver', T0 + 60e3).message, /does not trade here/);
+});
+
 test('only moderators can remove builds or start events, and nobody can demolish town buildings', () => {
   const { w } = makeWorld();
   const b = say(w, alice, '!home', T0).build;
@@ -477,13 +722,153 @@ test('the town says what it needs and what to do next', () => {
   assert.ok(food);
   assert.ok(['gatherer', 'fisher'].includes(food.item));
   assert.equal(food.site, true);
+  assert.equal(w.econ.plan[0].cmd, '!food');
   assert.ok(w.econ.plan.some((s) => s.cmd === '!build ' + food.item));
-  assert.ok(w.econ.plan.some((s) => s.cmd === '!explore'));
   rich(w);
   say(w, alice, '!build woodcutter', T0);
   w.economy(T0 + 5000, 5);
   assert.equal(w.econ.plan[0].kind, 'help');
   assert.equal(w.econ.projects.length, 1);
+});
+
+test('outposts go out to rich land, and producers far from a store make less', () => {
+  const { w } = makeWorld();
+  revealAll(w);
+  rich(w);
+  const res = say(w, alice, '!build outpost', T0);
+  assert.equal(res.ok, true, res.message);
+  const o = res.build;
+  assert.ok(hexDist(o.q, o.r) >= 6, 'an outpost is far from the pad');
+  const north = say(w, bob, '!build outpost north', T0).build;
+  assert.ok(M.angleOf(M.tileAt(w.map, north.q, north.r)) < -0.7, 'north is up the map');
+  // A woodcutter far from any store works slower than one next to a store.
+  const near = { item: 'woodcutter', q: o.q, r: o.r + 1, built: true, rich: 1, level: 1 };
+  const far = { item: 'woodcutter', q: o.q + 9, r: o.r, built: true, rich: 1, level: 1 };
+  const made = (b, stores) => {
+    const stock = { wood: 0 };
+    E.produce([b], stock, { employment: 1, happyFactor: 1, global: 1, powerRatio: 1, helpers: () => 0, boosts: {}, reach: (x) => reachOf(x, stores), progress: new Map(), fuel: new Map(), cap: 1000 }, 600);
+    return stock.wood;
+  };
+  const stores = [{ q: 0, r: 0 }, o];
+  assert.ok(made(near, stores) > made(far, stores) * 1.5);
+  assert.ok(reachOf(far, stores) >= 0.4);
+});
+
+test('a rival AI town lives on the far side, builds by the same rules and keeps to its own land', () => {
+  const { w, events } = makeWorld();
+  const r = w.rival;
+  assert.ok(r, 'the rival is on by default');
+  const o = M.tileAt(w.map, r.s.origin.q, r.s.origin.r);
+  assert.ok(o.d >= 24, 'far from the town');
+  const off = Math.atan2(Math.sin(M.angleOf(o) - (w.map.seaAngle + Math.PI)), Math.cos(M.angleOf(o) - (w.map.seaAngle + Math.PI)));
+  assert.ok(Math.abs(off) < 1, 'on the side away from the sea');
+  // A day of the rival on its own.
+  for (const k of Object.keys(r.s.stock)) r.s.stock[k] = 100;
+  let now = run(w, T0, 864e5, 60e3);
+  assert.ok(r.builds.filter((b) => !b.wonder).length >= 5, 'the rival builds');
+  const town = w.ownLand();
+  for (const b of r.builds) {
+    const t = M.tileAt(w.map, b.q, b.r);
+    if (!b.wonder) assert.ok(!town.has(t.i), 'never on the town\'s land');
+  }
+  assert.ok(events.some((e) => e.type === 'build' && e.build.rival));
+  w.economy(now, 0);
+  assert.equal(w.econ.race.rival.name, 'Cogsworth');
+  assert.ok(w.econ.race.rival.progress.total > 0);
+  assert.ok(w.econ.race.you.total >= 0);
+  // The town never builds on the rival's land.
+  revealAll(w);
+  rich(w);
+  const land = r.land();
+  for (let i = 0; i < 3; i++) {
+    const res = say(w, { id: 'x' + i, name: 'x' + i }, '!build outpost west', now);
+    if (!res.ok) continue;
+    assert.ok(!land.has(M.tileAt(w.map, res.build.q, res.build.r).i));
+  }
+  // Meeting them is news.
+  assert.equal(r.s.met, false);
+  w.checkMet([o]);
+  assert.equal(r.s.met, true);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'rival' && /found Cogsworth/.test(e.text)));
+});
+
+test('the rival can be switched off', () => {
+  const w = new World(freshState(T0, 1), { limits: { rival: false } });
+  assert.equal(w.rival, null);
+  w.economy(T0, 0);
+  assert.equal(w.econ.race, null);
+});
+
+test('what the town is stuck on may start even when three projects are going', () => {
+  const { w } = makeWorld();
+  rich(w);
+  for (const [u, item] of [[alice, 'hut'], [bob, 'campfire'], [carol, 'totem']]) assert.equal(say(w, u, '!build ' + item, T0).ok, true);
+  w.state.stock.food = 0;
+  w.economy(T0 + 5000, 5);
+  const food = w.econ.needs.find((n) => n.res === 'food');
+  assert.ok(food, 'the town is hungry');
+  assert.ok(w.econ.plan.some((st) => st.cmd === '!build ' + food.item), 'the plan still says what to build');
+  rich(w);
+  w.state.stock.food = 0;
+  assert.match(say(w, { id: 'd', name: 'dave' }, '!build stockpile', T0 + 6000).message, /3 projects are being built already/);
+  const res = say(w, { id: 'e', name: 'erin' }, '!build ' + food.item, T0 + 6000);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.build.urgent, true);
+  assert.equal(w.projects().length, 4);
+  assert.match(say(w, { id: 'f', name: 'finn' }, '!build ' + food.item, T0 + 6000).message, /4 projects are being built already/);
+});
+
+test('a full town makes room: old decor gives way, stores and homes stay', () => {
+  const { w, events } = makeWorld();
+  let now = finish(w, alice, 'campfire', T0);
+  now = finish(w, bob, 'totem', now);
+  now = finish(w, carol, 'stockpile', now);
+  const fire = w.builds.find((b) => b.item === 'campfire');
+  // No free land left anywhere.
+  w.choosePlot = () => null;
+  assert.equal(w.hasSite('hut'), true, 'decor can make way');
+  rich(w);
+  const res = say(w, { id: 'd', name: 'dave' }, '!build hut', now);
+  assert.equal(res.ok, true, res.message);
+  assert.equal(w.builds.some((b) => b.id === fire.id), false, 'the campfire made way');
+  assert.deepEqual([res.build.q, res.build.r], [fire.q, fire.r]);
+  assert.ok(events.some((e) => e.type === 'notice' && /old campfire .* makes way for a hut/.test(e.text)));
+  // Decor only gives way to newer decor, stores never do, and only what the
+  // town needs may take the place of decor.
+  const again = say(w, { id: 'e', name: 'erin' }, '!build campfire', now);
+  assert.equal(again.ok, false);
+  assert.match(again.message, /No free land left/);
+  assert.equal(w.needed('stockpile'), false);
+  w.happy = 50;
+  assert.match(say(w, { id: 'f', name: 'finn' }, '!build stockpile', now).message, /No free land left|People want their parks/);
+  assert.ok(w.builds.some((b) => b.item === 'totem') && w.builds.some((b) => b.item === 'stockpile'));
+  // While people are content, decor makes way for anything.
+  w.happy = 95;
+  const store = say(w, { id: 'g', name: 'gina' }, '!build stockpile', now);
+  assert.equal(store.ok, true, store.message);
+  assert.equal(w.builds.some((b) => b.item === 'totem'), false);
+});
+
+test('what may make way: old decor first, spare producers of full goods, never food, stores or homes', () => {
+  const b = (id, item, extra = {}) => ({ id, item, built: true, status: 'done', level: 1, ...extra });
+  const builds = [b(1, 'campfire'), b(2, 'statue'), b(3, 'farm'), b(4, 'farm'), b(5, 'farm'), b(6, 'quarry'), b(7, 'quarry'), b(8, 'quarry'), b(9, 'kiln'), b(10, 'stockpile'), b(11, 'hut', { home: true })];
+  const stock = { food: 1000, stone: 1000, bricks: 1000, wood: 10 };
+  const need = E.spareScorer(builds, stock, 1000, ITEMS.steelmill, { need: true });
+  const score = Object.fromEntries(builds.map((x) => [x.id, need(x)]));
+  assert.ok(score[1] < score[2], 'a campfire goes before a statue');
+  assert.ok(score[2] < score[6], 'decor goes before producers');
+  assert.equal(score[3], null, 'food makers stay');
+  assert.equal(score[9], null, 'the only kiln stays');
+  assert.equal(score[10], null, 'stores stay');
+  assert.equal(score[11], null, 'homes stay');
+  // Without a need, decor gives way only while people are content, and
+  // producers never; newer decor may always replace older decor.
+  const unhappy = E.spareScorer(builds, stock, 1000, ITEMS.steelmill, { happy: 50 });
+  assert.ok(builds.every((x) => unhappy(x) == null));
+  const content = E.spareScorer(builds, stock, 1000, ITEMS.steelmill, { happy: 90 });
+  assert.ok(content(builds[0]) != null && content(builds[5]) == null);
+  const fountain = E.spareScorer(builds, stock, 1000, ITEMS.fountain, { happy: 50 });
+  assert.ok(fountain(builds[0]) != null && fountain(builds[1]) == null);
 });
 
 test('a restart catches up on homes, and projects carry on', () => {

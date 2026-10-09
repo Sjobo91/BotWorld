@@ -2,11 +2,11 @@
 // and one bot per viewer that walks to its plot, hammers, hauls goods to the
 // wonder, chats and sleeps. Each era changes how the island itself looks.
 // The server decides everything; this file only makes it look alive.
-import { ITEMS, ERAS, RESOURCES, hashStr } from '../shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, TOOLS, hashStr } from '../shared/catalog.js';
 import { DIRS, hexDist } from '../shared/hex.js';
-import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS } from '../shared/terrain.js';
+import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GATHER, findPath, walkable } from '../shared/terrain.js';
 import { sunAt, seasonAt } from '../shared/sun.js';
-import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat } from './meshes.js';
+import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat, NATURE } from './meshes.js';
 import { buildingMesh } from './buildings.js';
 import { createAudio } from './audio.js';
 
@@ -21,11 +21,16 @@ const MAX_BOTS = 60;
 const RING2 = [];
 for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr)) === 2) RING2.push([dq, dr]);
 const WALK = 0.42;
+const RIVAL_COLOR = '#d9534f';
 const CHAT_EMOJI = ['☕', '💬', '😄', '🔨', '🎉', '🤔', '👍', '🍕', '🌻', '✨', '🏠', '📦'];
 const LINES = {
   hello: ['Hi! I am {name}.', 'Hello there!', 'Nice island, right?', 'I build what {name} asks for.'],
   work: ['Tap, tap, tap!', 'Almost there!', 'This is going to look great.', 'Hammer time!'],
   job: ['Hard work!', 'Every bit helps.', 'For the village!', 'Heave ho!'],
+  chop: ['Timber!', 'Chop, chop!', 'Nice logs here.', 'Wood for the town!'],
+  mine: ['Clink, clink!', 'Rock solid.', 'Heavy stuff!', 'Found a good vein!'],
+  pick: ['So many berries!', 'One for the basket, one for me.', 'Yum!'],
+  fish: ['Come on, fishy...', 'A bite!', 'Patience...'],
   done: ['Done!', 'Ta-da!', 'Looks good!', 'Another one!'],
   sleep: ['Zzz…', 'Five more minutes…', 'Dreaming of bricks.'],
   poke: ['Hey, I am busy!', 'That tickles!', 'I am getting dizzy…'],
@@ -39,11 +44,12 @@ const POI_DEFS = {
 const RES_COLORS = { wood: '#8a5a3b', stone: '#9aa1aa', food: '#e0a040', bricks: '#b5583b', coal: '#2b2b2e', iron: '#7d8794', steel: '#aab4c0', parts: '#c9a227', chips: '#2bb3b3' };
 const WATER_JOBS = new Set(['farm', 'gatherer', 'garden', 'greenhouse', 'vertifarm']);
 const FISH_JOBS = new Set(['fisher', 'harbor']);
+// leaf: broad trees, leaf2: birches and blossom, ever: firs (always green).
 const SEASON_LOOK = {
-  spring: { leaf: '#7ccf6a', leaf2: '#f2a7c3', grass: '#7fcf6a', tiles: ['#93d77c', '#a5df8f', '#7dc56a'] },
-  summer: { leaf: '#5fae5a', leaf2: '#4a9852', grass: '#6bb35d', tiles: ['#8ccd74', '#9fd889', '#74bb63'] },
-  autumn: { leaf: '#e08a2e', leaf2: '#c4532d', grass: '#9cb55a', tiles: ['#a9bd66', '#b9c977', '#93a854'] },
-  winter: { leaf: '#e9eef2', leaf2: '#cfd8de', grass: '#dfe8ec', tiles: ['#e4ecef', '#eef3f5', '#d6e0e4'] },
+  spring: { leaf: '#7ccf6a', leaf2: '#f2a7c3', ever: '#3f8a4c', grass: '#7fcf6a', tiles: ['#93d77c', '#a5df8f', '#7dc56a'] },
+  summer: { leaf: '#5fae5a', leaf2: '#8ccc66', ever: '#3f8a4c', grass: '#6bb35d', tiles: ['#8ccd74', '#9fd889', '#74bb63'] },
+  autumn: { leaf: '#e08a2e', leaf2: '#e8bf3f', ever: '#3c8047', grass: '#9cb55a', tiles: ['#a9bd66', '#b9c977', '#93a854'] },
+  winter: { leaf: '#e9eef2', leaf2: '#cfd8de', ever: '#a7c4ae', grass: '#dfe8ec', tiles: ['#e4ecef', '#eef3f5', '#d6e0e4'] },
 };
 
 export async function createWorld(stage, overlay, opts) {
@@ -64,9 +70,10 @@ export async function createWorld(stage, overlay, opts) {
   const still = !opts.stream && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const low = opts.quality === 'low';
   const audio = createAudio();
-  const data = { builders: new Map(), jobs: new Map(), econ: null, event: null };
+  const data = { builders: new Map(), jobs: new Map(), queues: new Map(), econ: null, event: null };
   mats.path = std(0xdccfb2);
   mats.mountain = std(0x8c867f);
+  mats.hill = std(0xa59a7c);
   mats.snow = std(0xf3f6f8);
   mats.bush = std(0x4f8f45);
   mats.berry = std(0xd23a55);
@@ -271,14 +278,118 @@ export async function createWorld(stage, overlay, opts) {
     // Node numbers changed: every bot finds its feet again and carries on.
     for (const p of [...porters]) removePorter(p);
     for (const b of bots.values()) { const walking = b.mode === 'walk' || b.mode === 'job'; resnap(b); if (walking || full) b.timer = 0.05; }
+    for (const b of rivalBots) { resnap(b); b.timer = 0.05; }
     syncTrain();
     updateView();
     renderer.shadowMap.needsUpdate = true;
   }
 
   // Tiles next to a building are town: their edges are roads.
+  // How much of a producer's goods reach town (the server works it out the
+  // same way): full within 4 tiles of a store, a tenth less per tile beyond.
+  let storeCache = { frame: -1, list: [] };
+  function reachAt(b) {
+    if (storeCache.frame !== frame) storeCache = { frame, list: [{ q: 0, r: 0 }].concat([...builds.values()].filter((v) => isStore(v.b) && !v.b.damaged).map((v) => v.b)) };
+    let d = Infinity;
+    for (const s of storeCache.list) d = Math.min(d, hexDist(s.q - b.q, s.r - b.r));
+    return d <= 4 ? 1 : Math.max(0.4, 1 - 0.1 * (d - 4));
+  }
+  // --- The rival's own bots, in red, busy in their town ---------------------------------------
+  const rivalBots = [];
+  function syncRivalBots() {
+    const rv = data.econ?.race?.rival;
+    const home = rv && layout.index.get(rv.origin.q + ',' + rv.origin.r);
+    const want = home && known[home.i] && nav.nodes.length ? Math.min(low ? 3 : 6, 2 + Math.floor((rv.builds || 0) / 10)) : 0;
+    while (rivalBots.length > want) botGroup.remove(rivalBots.pop().parts.g);
+    while (rivalBots.length < want) {
+      const parts = botMesh(RIVAL_COLOR);
+      parts.antenna.visible = true;
+      const node = nearestNode(home.x, home.z);
+      const n = nav.nodes[node];
+      const b = newWalker('rival' + rivalBots.length, { name: rv.name, lastSeen: now(), hat: 'none', color: RIVAL_COLOR }, parts, { node, x: n.x, y: n.y, z: n.z });
+      b.npc = true;
+      botGroup.add(parts.g);
+      rivalBots.push(b);
+    }
+  }
+  // A rival bot walks to one of its town's buildings and works or looks there.
+  function npcDecide(b) {
+    const list = [...builds.values()].filter((v) => v.b.rival && v.root.visible && !v.b.wonder);
+    if (!list.length) { startAct(b, 'look', 3); return; }
+    const busy = list.filter((v) => v.b.status === 'building');
+    const v = busy.length && rand() < 0.6 ? pick(busy) : pick(list);
+    const s = workSpot(v.b, b.haulSalt);
+    if (!s || !goSpot(b, s, (x) => startAct(x, 'look', 2 + rand() * 4, s.yaw))) startAct(b, 'look', 3);
+  }
+  // --- Roads out to the outposts, and carts on them ---------------------------------------------
+  const roads = { set: new Set(), paths: [], key: '' };
+  function isStore(b) { return b.built && ITEMS[b.item]?.kind === 'storage'; }
+  function updateRoads() {
+    if (!layout.map) return;
+    const outposts = [...builds.values()].filter((v) => v.b.item === 'outpost' && v.b.built);
+    const key = outposts.map((v) => v.id).join(',') + '|' + known.reduce((a, b) => a + b, 0);
+    if (key === roads.key) return;
+    roads.key = key;
+    roads.set = new Set();
+    roads.paths = [];
+    const center = layout.index.get('0,0');
+    const ok = (t) => !!known[t.i] && walkable(t);
+    for (const v of outposts) {
+      const from = layout.index.get(v.b.q + ',' + v.b.r);
+      if (!from) continue;
+      // To the nearest store closer to the middle, else the landing pad.
+      let to = center;
+      let best = Infinity;
+      for (const o of builds.values()) {
+        if (o === v || !isStore(o.b)) continue;
+        const t = layout.index.get(o.b.q + ',' + o.b.r);
+        if (!t || t.d >= from.d) continue;
+        const d = hexDist(t.q - from.q, t.r - from.r);
+        if (d < best) { best = d; to = t; }
+      }
+      const path = findPath(layout.map, layout.map.tiles[from.i], layout.map.tiles[to.i], ok, 4000);
+      if (!path) continue;
+      const tiles = path.map((m) => layout.tiles[m.i]);
+      for (const t of tiles) roads.set.add(t.i);
+      roads.paths.push({ id: v.id, tiles, next: rand() * 15 });
+    }
+  }
+  const carts = [];
+  function cartMesh() {
+    const g = new T.Group();
+    mesh(geo('cartBed', () => new T.BoxGeometry(0.16, 0.05, 0.1)), mats.wood, 0, 0.07, 0, g);
+    mesh(geo('cartLoad', () => new T.BoxGeometry(0.12, 0.06, 0.08)), mats.crate2 || mats.wood, 0, 0.12, 0, g);
+    for (const s of [-1, 1]) mesh(geo('cartWheel', () => new T.CylinderGeometry(0.035, 0.035, 0.015, 10).rotateX(Math.PI / 2)), mats.woodDark, 0, 0.035, s * 0.06, g);
+    const mule = mesh(geo('cartMule', () => new T.BoxGeometry(0.1, 0.07, 0.05)), mats.trunk, 0.15, 0.09, 0, g);
+    mesh(geo('cartMuleHead', () => new T.BoxGeometry(0.04, 0.05, 0.04)), mats.trunk, 0.06, 0.04, 0, mule);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  function stepCarts(dt) {
+    if (lapse) return;
+    for (const p of roads.paths) {
+      p.next -= dt;
+      if (p.next > 0 || carts.length >= (low ? 3 : 8) || p.tiles.length < 2) continue;
+      p.next = 18 + rand() * 14;
+      const g = cartMesh();
+      world.add(g);
+      // From the outpost into town, along the tile middles.
+      carts.push({ g, pts: p.tiles.map((t) => ({ x: t.x, z: t.z, y: LAND[t.t].top })), i: 0, k: 0 });
+    }
+    for (let n = carts.length - 1; n >= 0; n--) {
+      const c = carts[n];
+      const a = c.pts[c.i];
+      const b = c.pts[c.i + 1];
+      if (!b) { world.remove(c.g); carts.splice(n, 1); continue; }
+      const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      c.k += (dt * 0.35) / len;
+      if (c.k >= 1) { c.k = 0; c.i++; continue; }
+      c.g.position.set(a.x + (b.x - a.x) * c.k, a.y + (b.y - a.y) * c.k, a.z + (b.z - a.z) * c.k);
+      c.g.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+    }
+  }
   function townSet() {
-    const s = new Set();
+    const s = new Set(roads.set);
     for (const t of layout.tiles) if (t.d <= 2) s.add(t.i);
     for (const v of builds.values()) {
       const c = layout.index.get(v.b.q + ',' + v.b.r);
@@ -338,6 +449,8 @@ export async function createWorld(stage, overlay, opts) {
     baseMesh.setColorAt(t.i, k >= 1 ? base : base.clone().lerp(fog, 1 - k));
     let c = t.d === 1 ? TILE_COLORS.plaza.clone() : seasonColor(t).clone();
     const b = at.get(t.i);
+    // The road out to an outpost: a worn trail across the land.
+    if (roads.set.has(t.i) && !b && !water) c.lerp(mats.path.color, 0.45);
     if (b && b.status === 'building' && !b.built && !b.wonder) c = TILE_COLORS.dirt.clone();
     topMesh.setColorAt(t.i, k >= 1 ? c : c.lerp(fog, 1 - k));
   }
@@ -351,6 +464,11 @@ export async function createWorld(stage, overlay, opts) {
       if (!t) continue;
       at.set(t.i, v.b);
       if (v.b.home) homes.set(t.i, (data.builders.get(v.b.ownerId) || {}).color || '#3b7ddd');
+      // The rival's land has red edges, and stays hidden in the fog.
+      if (v.b.rival) {
+        homes.set(t.i, RIVAL_COLOR);
+        v.root.visible = !!known[t.i];
+      }
     }
     for (const t of layout.tiles) {
       drawTile(t, town, homes, at);
@@ -390,59 +508,68 @@ export async function createWorld(stage, overlay, opts) {
     decor.meshes = [];
     decor.byTile.clear();
     const kinds = {
-      trunk: { g: () => new T.CylinderGeometry(0.025, 0.035, 0.16, 5).translate(0, 0.08, 0), m: mats.trunk, list: [] },
-      pine: { g: () => new T.ConeGeometry(0.15, 0.4, 7).translate(0, 0.34, 0), m: mats.leaf2, list: [] },
-      crown: { g: () => new T.DodecahedronGeometry(0.15, 0).translate(0, 0.28, 0), m: mats.leaf, list: [] },
-      rock: { g: () => new T.DodecahedronGeometry(0.1, 0), m: mats.rock, list: [] },
-      peak: { g: () => new T.ConeGeometry(R * 0.82, 0.8, 7).translate(0, 0.4, 0), m: mats.mountain, list: [] },
-      snow: { g: () => new T.ConeGeometry(R * 0.3, 0.3, 7).translate(0, 0.66, 0), m: mats.snow, list: [] },
-      bush: { g: () => new T.DodecahedronGeometry(0.075, 0).translate(0, 0.06, 0), m: mats.bush, list: [] },
+      trunk: { g: NATURE.trunk, m: mats.trunk, list: [] },
+      oak: { g: NATURE.oakTop, m: mats.leaf, list: [] },
+      fir: { g: NATURE.firTop, m: mats.evergreen, list: [] },
+      birchTrunk: { g: NATURE.birchTrunk, m: mats.birch, list: [] },
+      birch: { g: NATURE.birchTop, m: mats.leaf2, list: [] },
+      rock: { g: NATURE.boulder, m: mats.rock, list: [] },
+      mound: { g: NATURE.mound, m: mats.hill, list: [] },
+      massif: { g: NATURE.massif, m: mats.mountain, list: [] },
+      snow: { g: NATURE.snowCap, m: mats.snow, list: [] },
+      bush: { g: NATURE.bush, m: mats.bush, list: [] },
       berry: { g: () => new T.SphereGeometry(0.022, 5, 4), m: mats.berry, list: [] },
       coal: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.coalOre, list: [] },
       iron: { g: () => new T.DodecahedronGeometry(0.06, 0), m: mats.ironOre, list: [] },
       column: { g: () => new T.CylinderGeometry(0.035, 0.04, 1, 6).translate(0, 0.5, 0), m: mats.ruin, list: [] },
       slab: { g: () => new T.BoxGeometry(0.13, 0.22, 0.045).translate(0, 0.11, 0), m: mats.ruin, list: [] },
-      reed: { g: () => new T.ConeGeometry(0.018, 0.16, 4).translate(0, 0.08, 0), m: mats.leaf2, list: [] },
+      reed: { g: NATURE.reed, m: mats.leaf2, list: [] },
     };
-    const add = (t, kind, x, y, z, s, sy, ry) => {
-      kinds[kind].list.push({ t, x, y, z, s, sy: sy || s, ry: ry || 0 });
+    const add = (t, kind, x, y, z, s, sy, ry, tint) => {
+      kinds[kind].list.push({ t, x, y, z, s, sy: sy || s, ry: ry || 0, tint });
+    };
+    // A tree of one of three kinds, each a little different in size and green.
+    const tree = (t, r, x, y, z, s, firs) => {
+      const pick = r();
+      const tint = 0.86 + r() * 0.24;
+      const ry = r() * 6;
+      if (pick < firs) { add(t, 'trunk', x, y, z, s * 0.8, s * 0.8, ry); add(t, 'fir', x, y, z, s, s, ry, tint); }
+      else if (pick < firs + 0.18) { add(t, 'birchTrunk', x, y, z, s, s, ry); add(t, 'birch', x, y, z, s, s, ry, tint); }
+      else { add(t, 'trunk', x, y, z, s, s, ry); add(t, 'oak', x, y, z, s, s, ry, tint); }
     };
     for (const t of layout.tiles) {
       const r = rng(hashStr('d' + layout.seed + ':' + t.i));
       const top = LAND[t.t].top;
       const jit = (a) => (r() - 0.5) * a;
       if (t.t === 'forest') {
-        for (let j = 0; j < 3; j++) {
-          const x = t.x + jit(0.62);
-          const z = t.z + jit(0.62);
-          const s = 0.8 + r() * 0.5;
-          add(t, 'trunk', x, top, z, s);
-          add(t, r() < 0.55 ? 'pine' : 'crown', x, top, z, s, s, r() * 6);
-        }
+        // Forests far out and up in the hills hold more firs.
+        const firs = Math.min(0.6, 0.25 + t.d * 0.01);
+        for (let j = 0; j < 4; j++) tree(t, r, t.x + jit(0.66), top, t.z + jit(0.66), 0.85 + r() * 0.45, firs);
       } else if (t.t === 'grass' && t.d > 3 && r() < 0.07) {
-        const x = t.x + jit(0.4);
-        const z = t.z + jit(0.4);
-        add(t, 'trunk', x, top, z, 0.9);
-        add(t, 'crown', x, top, z, 0.9, 0.9, r() * 6);
+        tree(t, r, t.x + jit(0.4), top, t.z + jit(0.4), 0.95, 0.2);
       } else if (t.t === 'hills') {
-        const n = 2 + Math.floor(r() * 2);
-        for (let j = 0; j < n; j++) add(t, 'rock', t.x + jit(0.6), top + 0.03, t.z + jit(0.6), 0.8 + r() * 0.9, 0.6 + r() * 0.5, r() * 6);
+        add(t, 'mound', t.x + jit(0.2), top, t.z + jit(0.2), 1 + r() * 0.3, 0.8 + r() * 0.5, r() * 6);
+        const n = 2 + Math.floor(r() * 3);
+        for (let j = 0; j < n; j++) add(t, 'rock', t.x + jit(0.7), top + 0.02, t.z + jit(0.7), 0.7 + r() * 0.9, 0.6 + r() * 0.6, r() * 6);
       } else if (t.t === 'mountain') {
-        const s = 0.85 + r() * 0.4;
-        add(t, 'peak', t.x + jit(0.1), top, t.z + jit(0.1), 1, s, r() * 6);
-        add(t, 'snow', t.x, top, t.z, 1, s, 0);
+        const s = 0.95 + r() * 0.25;
+        const sy = 0.85 + r() * 0.5;
+        const ry = r() * 6;
+        add(t, 'massif', t.x + jit(0.08), top, t.z + jit(0.08), s, sy, ry);
+        if (sy > 0.95) add(t, 'snow', t.x, top, t.z, s, sy, ry);
+        for (let j = 0; j < 2; j++) add(t, 'rock', t.x + jit(0.8), top, t.z + jit(0.8), 0.8 + r() * 0.6, 0.7, r() * 6);
       } else if (t.t === 'meadow') {
         for (let j = 0; j < 3; j++) {
           const x = t.x + jit(0.6);
           const z = t.z + jit(0.6);
-          add(t, 'bush', x, top, z, 0.9 + r() * 0.5);
-          add(t, 'berry', x + 0.03, top + 0.1, z + 0.02, 1);
-          add(t, 'berry', x - 0.04, top + 0.08, z - 0.01, 1);
+          add(t, 'bush', x, top, z, 0.9 + r() * 0.5, 0, r() * 6, 0.9 + r() * 0.2);
+          add(t, 'berry', x + 0.03, top + 0.09, z + 0.02, 1);
+          add(t, 'berry', x - 0.04, top + 0.07, z - 0.01, 1);
         }
       } else if (t.t === 'sand' && r() < 0.3) {
-        add(t, 'rock', t.x + jit(0.5), top + 0.02, t.z + jit(0.5), 0.6, 0.4, r() * 6);
+        add(t, 'rock', t.x + jit(0.5), top + 0.01, t.z + jit(0.5), 0.6, 0.45, r() * 6);
       } else if (t.t === 'river' && r() < 0.5) {
-        for (let j = 0; j < 3; j++) add(t, 'reed', t.x + jit(0.8), top, t.z + jit(0.8), 1);
+        for (let j = 0; j < 4; j++) add(t, 'reed', t.x + jit(0.8), top, t.z + jit(0.8), 1, 0.8 + r() * 0.5, r() * 6);
       }
       if (t.f === 'coal' || t.f === 'iron') {
         for (let j = 0; j < 3; j++) add(t, t.f, t.x + jit(0.5), top + 0.04, t.z + jit(0.5), 0.8 + r() * 0.6, 0.7, r() * 6);
@@ -457,10 +584,13 @@ export async function createWorld(stage, overlay, opts) {
       if (!kd.list.length) continue;
       const im = new T.InstancedMesh(geo('decor:' + name, kd.g), kd.m, kd.list.length);
       im.castShadow = name !== 'reed' && name !== 'berry';
-      im.receiveShadow = name === 'peak';
+      im.receiveShadow = name === 'massif' || name === 'mound';
+      const tinted = kd.list.some((e) => e.tint);
       kd.list.forEach((e, idx) => {
         e.mesh = im;
         e.idx = idx;
+        // Every tree and bush a slightly different green.
+        if (tinted) im.setColorAt(idx, tmpC.setRGB(e.tint || 1, e.tint ? Math.min(1.1, e.tint * 1.04) : 1, e.tint ? e.tint * 0.94 : 1));
         if (!decor.byTile.has(e.t.i)) decor.byTile.set(e.t.i, []);
         decor.byTile.get(e.t.i).push(e);
       });
@@ -904,7 +1034,7 @@ export async function createWorld(stage, overlay, opts) {
     if (b.status === 'done') return 1;
     if (b.status !== 'building') return 0;
     // Town projects: work done so far, plus what the helpers did since.
-    if (b.project && !b.evolving && !b.upgrade && b.work) {
+    if (b.project && !b.evolving && b.work) {
       const extra = b.rate && b.progressAt ? (b.rate * Math.max(0, now() - b.progressAt)) / 1000 : 0;
       return Math.max(0, Math.min(1, ((b.progress || 0) + extra) / b.work));
     }
@@ -919,6 +1049,7 @@ export async function createWorld(stage, overlay, opts) {
       v = { id: b.id, b, root: new T.Group(), body: null, key: '', h: 0.4, anim: [], scaffold: null, stake: null, flag: null, label: null, grow: 1, puff: 0, doneAt: 0, drop: 0, damaged: false, smoke: 0, shown: 0.05 };
       v.root.position.set(p.x, t && !isWater(t) ? LAND[t.t].top : TILE_TOP, p.z);
       v.root.rotation.y = Math.atan2(-p.x, -p.z);
+      if (b.rival) v.root.visible = !!(t && known[t.i]);
       buildGroup.add(v.root);
       builds.set(b.id, v);
     }
@@ -1014,6 +1145,7 @@ export async function createWorld(stage, overlay, opts) {
     return b;
   }
   function removeBot(b) {
+    if (b.beacon) removeBeacon(b);
     releasePoi(b);
     unpair(b);
     removeBubble(b);
@@ -1055,8 +1187,18 @@ export async function createWorld(stage, overlay, opts) {
     botGroup.remove(p.parts.g);
     porters.delete(p);
   }
+  const toolMats = [];
+  function toolMat(tier) {
+    if (!toolMats[tier]) {
+      const t = TOOLS[tier] || TOOLS[0];
+      toolMats[tier] = new T.MeshStandardMaterial({ color: t.color, metalness: tier >= 2 ? 0.6 : 0.1, roughness: tier >= 2 ? 0.35 : 0.8, emissive: tier === TOOLS.length - 1 ? t.color : 0x000000, emissiveIntensity: tier === TOOLS.length - 1 ? 0.6 : 0, flatShading: true });
+    }
+    return toolMats[tier];
+  }
   function refreshLook(b) {
     const p = b.parts;
+    const tier = b.builder.tool || 0;
+    if (b.tool !== tier && p.hammer.children[1]) { p.hammer.children[1].material = toolMat(tier); b.tool = tier; }
     if (b.hat !== b.builder.hat) {
       if (p.hat) p.head.remove(p.hat);
       p.hat = b.builder.hat && b.builder.hat !== 'none' ? hatMesh(b.builder.hat, b.builder.color) : null;
@@ -1064,7 +1206,8 @@ export async function createWorld(stage, overlay, opts) {
       p.antenna.visible = !p.hat || b.builder.hat === 'flowers' || b.builder.hat === 'headphones';
       b.hat = b.builder.hat;
     }
-    if (b.tag && b.tag.el.textContent !== b.builder.name) { b.tag.el.textContent = b.builder.name; b.tag.w = 0; }
+    const tagText = b.builder.name + (data.queues.get(b.id) ? ' ⏳' + data.queues.get(b.id) : '');
+    if (b.tag && b.tag.el.textContent !== tagText) { b.tag.el.textContent = tagText; b.tag.w = 0; }
   }
   function resnap(b) {
     releasePoi(b);
@@ -1129,9 +1272,11 @@ export async function createWorld(stage, overlay, opts) {
   // What should this bot do now? Its own build first, then its job, then rest.
   function decide(b) {
     if (b.porter) { removePorter(b); return; }
+    if (b.npc) { npcDecide(b); return; }
     if (b.mode === 'arrive') return;
     b.act = null;
     b.after = null;
+    b.gatherUntil = 0;
     const own = jobOf(b.id);
     if (own && own.b.status === 'building') {
       const s = workSpot(own.b);
@@ -1177,6 +1322,14 @@ export async function createWorld(stage, overlay, opts) {
       carry(b, null);
       return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw: Math.atan2(t.x - nd.x, t.z - nd.z) }, (x) => { x.mode = 'job'; x.jobPose = 'scout'; x.yawTarget = Math.atan2(t.x - nd.x, t.z - nd.z); }, deadline, WALK * 1.6);
     }
+    if (job.kind === 'hand') return gatherTrip(b, job);
+    if (job.kind === 'deliver') {
+      const drop = guildDrop(b.haulSalt);
+      if (!drop) return false;
+      if (b.carrying) return goSpot(b, drop, (x) => { carry(x, null); dust(x.x, x.y, x.z, 0.3); startAct(x, 'look', 0.8, drop.yaw); });
+      const pad = padSpot(b.haulSalt);
+      return pad ? goSpot(b, pad, (x) => { carry(x, job.res); startAct(x, 'look', 0.6, pad.yaw); }) : false;
+    }
     const v = builds.get(job.buildId);
     if (!v) return false;
     if (job.kind === 'wonder') {
@@ -1194,6 +1347,52 @@ export async function createWorld(stage, overlay, opts) {
     if (!s) return false;
     const pose = job.kind === 'repair' ? 'hammer' : WATER_JOBS.has(v.b.item) ? 'water' : FISH_JOBS.has(v.b.item) ? 'fish' : 'hammer';
     return goSpot(b, s, (x) => { x.mode = 'job'; x.jobPose = pose; x.yawTarget = s.yaw; });
+  }
+  // Gathering by hand, one trip in step with the server: walk out to the
+  // land, work there, carry the crate to the nearest store. The goods count
+  // when the server says the trip is done.
+  function gatherTrip(b, job) {
+    const drop = dropSpot(b);
+    const outEnd = job.startedAt + (job.out || 0) * 1000;
+    const workEnd = outEnd + (job.work || 8) * 1000;
+    if (b.dropped === job.startedAt) {
+      // Crate delivered: wait by the store for the next job.
+      startAct(b, 'look', 1.2, drop ? drop.yaw : b.yaw);
+      return true;
+    }
+    if (b.carrying || now() >= workEnd) {
+      if (!b.carrying) carry(b, job.res);
+      if (!drop) return false;
+      return goSpot(b, drop, (x) => {
+        carry(x, null);
+        x.dropped = job.startedAt;
+        dust(x.x, x.y, x.z, 0.25);
+        startAct(x, 'look', 1.2, drop.yaw);
+      }, job.until);
+    }
+    const t = layout.index.get(job.q + ',' + job.r);
+    if (!t) return false;
+    let node = -1;
+    for (let k = 0; k < 6 && node < 0; k++) node = cornerNode(t, (k + b.haulSalt) % 6);
+    if (node < 0) node = nearestNode(t.x, t.z);
+    const nd = nav.nodes[node];
+    const yaw = Math.atan2(t.x - nd.x, t.z - nd.z);
+    return goSpot(b, { node, x: nd.x, z: nd.z, y: nd.y, yaw }, (x) => {
+      x.mode = 'job';
+      x.jobPose = job.pose || 'chop';
+      x.yawTarget = yaw;
+      x.gatherUntil = workEnd;
+    }, outEnd);
+  }
+  function dropSpot(b) {
+    let best = null;
+    let bd = Infinity;
+    for (const o of builds.values()) {
+      if (!o.b.built || o.b.damaged || ITEMS[o.b.item]?.kind !== 'storage') continue;
+      const d = Math.hypot(o.root.position.x - b.x, o.root.position.z - b.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return (best && workSpot(best.b, b.haulSalt)) || padSpot(b.haulSalt);
   }
   function freePois() {
     return beachPois.concat(buildPois).filter((p) => !poiUser.has(p.id) && (!p.night || sky.night > 0.5));
@@ -1349,10 +1548,17 @@ export async function createWorld(stage, overlay, opts) {
         if (rand() < dt * 0.05) showBubble(b, pick(LINES.work), 2600);
         break;
       }
-      case 'job':
-        if (!data.jobs.has(b.id) || jobOf(b.id)?.b.status === 'building') { decide(b); break; }
-        if (rand() < dt * 0.03) showBubble(b, pick(LINES.job), 2200);
+      case 'job': {
+        const job = data.jobs.get(b.id);
+        if (!job || jobOf(b.id)?.b.status === 'building') { decide(b); break; }
+        if (job.kind === 'hand') {
+          if (b.gatherUntil && now() >= b.gatherUntil) { carry(b, job.res); decide(b); break; }
+          if ((b.jobPose === 'chop' || b.jobPose === 'mine') && b.struck && !b.chipped) chips(b);
+          b.chipped = b.struck;
+        }
+        if (rand() < dt * 0.03) showBubble(b, pick(LINES[job.kind === 'hand' ? b.jobPose : 'job'] || LINES.job), 2200);
         break;
+      }
       case 'wait': {
         const job = jobOf(b.id);
         if (!job || job.b.status !== 'queued' || data.jobs.has(b.id)) decide(b);
@@ -1410,8 +1616,9 @@ export async function createWorld(stage, overlay, opts) {
     p.legL.rotation.set(0, 0, 0);
     p.legR.rotation.set(0, 0, 0);
     const jobPose = b.mode === 'job' ? b.jobPose : null;
-    p.hammer.visible = b.mode === 'work' || jobPose === 'hammer';
-    p.cup.visible = b.act === 'drink';
+    const swing = jobPose === 'hammer' || jobPose === 'chop' || jobPose === 'mine';
+    p.hammer.visible = b.mode === 'work' || swing;
+    p.cup.visible = b.act === 'drink' || jobPose === 'pick';
     p.rod.visible = b.act === 'fish' || jobPose === 'fish';
     p.can.visible = b.act === 'water' || jobPose === 'water';
     p.dizzy.visible = false;
@@ -1424,8 +1631,14 @@ export async function createWorld(stage, overlay, opts) {
       p.armR.rotation.x = w * 0.5;
       lift = Math.abs(w) * 0.012;
       if (b.speed > WALK * 1.6) p.inner.rotation.x = 0.15;
-    } else if (b.mode === 'work' || jobPose === 'hammer') {
-      lift = hammerPose(b, p, t, data.event?.key === 'builderRush' ? 2.6 : 1.5);
+    } else if (b.mode === 'work' || swing) {
+      lift = hammerPose(b, p, t, data.event?.key === 'builderRush' && !jobPose ? 2.6 : jobPose === 'mine' ? 1.2 : 1.5);
+    } else if (jobPose === 'pick') {
+      // Bent over a bush, picking with one hand, basket in the other.
+      p.inner.rotation.x = 0.35;
+      p.armR.rotation.x = -0.6;
+      p.armL.rotation.x = still ? -1.1 : -0.9 - Math.max(0, Math.sin(t * 3 + b.phase)) * 0.6;
+      p.head.rotation.x = 0.2;
     } else if (jobPose === 'water') {
       p.armR.rotation.x = -1.1;
       p.can.rotation.x = still ? 0.6 : 0.4 + Math.sin(t * 3) * 0.3;
@@ -1631,6 +1844,7 @@ export async function createWorld(stage, overlay, opts) {
     const L = SEASON_LOOK[s];
     mats.leaf.color.set(L.leaf);
     mats.leaf2.color.set(L.leaf2);
+    mats.evergreen.color.set(L.ever);
     mats.grass.color.set(L.grass);
     decorShown.clear();
     refreshTiles();
@@ -1779,6 +1993,48 @@ export async function createWorld(stage, overlay, opts) {
     particles.push({ pts, vel, life: o.life, age: 0, gravity: o.gravity != null ? o.gravity : 3, drag: o.drag || 0, grow: o.grow || 0 });
   }
   const highlights = [];
+  // A floating arrow and a column of light over one bot, so a viewer can find
+  // their own bot on the shared stream.
+  const BEACON_SEC = 20;
+  function addBeacon(b, color) {
+    if (b.beacon) removeBeacon(b);
+    const g = new T.Group();
+    const mat = new T.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+    const arrow = mesh(new T.ConeGeometry(0.055, 0.12, 4), mat, 0, 0, 0, g);
+    arrow.rotation.x = Math.PI;
+    const beamMat = new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, blending: T.AdditiveBlending });
+    mesh(new T.CylinderGeometry(0.03, 0.03, 1.6, 8, 1, true), beamMat, 0, 0.9, 0, g);
+    g.position.y = 0.66;
+    b.parts.g.add(g);
+    b.beacon = { g, mat, beamMat, t: 0 };
+    b.tag.el.classList.add('me');
+    b.tag.el.style.borderColor = color;
+    b.tag.w = 0;
+  }
+  function removeBeacon(b) {
+    const k = b.beacon;
+    b.parts.g.remove(k.g);
+    k.g.traverse((o) => o.geometry?.dispose());
+    k.mat.dispose();
+    k.beamMat.dispose();
+    b.beacon = null;
+    b.tag.el.classList.remove('me');
+    b.tag.el.style.borderColor = '';
+    b.tag.w = 0;
+  }
+  function stepBeacons(dt) {
+    for (const b of bots.values()) {
+      const k = b.beacon;
+      if (!k) continue;
+      k.t += dt;
+      if (k.t > BEACON_SEC) { removeBeacon(b); continue; }
+      const fade = Math.min(1, (BEACON_SEC - k.t) / 2);
+      k.g.children[0].position.y = 0.04 * Math.sin(k.t * 4);
+      k.g.rotation.y += dt * 2;
+      k.mat.opacity = fade;
+      k.beamMat.opacity = 0.35 * fade;
+    }
+  }
   function stepHighlights(dt) {
     for (let i = highlights.length - 1; i >= 0; i--) {
       const h = highlights[i];
@@ -1829,6 +2085,14 @@ export async function createWorld(stage, overlay, opts) {
     if (still) return;
     burst({ x, y: y + 0.05, z, count: Math.round(40 * k), colors: ['#d8cbb0', '#c2b59a', '#efe6d2'], speed: 0.6, life: 1.4, size: 0.07, gravity: -0.2, drag: 1.5, spread: 0.4, up: 0.4, grow: 0.04 });
   }
+  // Wood chips or bits of stone where a gathering bot strikes.
+  function chips(b) {
+    if (still || distVol(b) < 0.2) return;
+    const x = b.x + Math.sin(b.yaw) * 0.14;
+    const z = b.z + Math.cos(b.yaw) * 0.14;
+    const colors = b.jobPose === 'mine' ? ['#8c8f94', '#b3b6ba', '#6f7378'] : ['#c79a5b', '#a8783f', '#e2c08c'];
+    burst({ x, y: b.y + 0.12, z, count: 6, colors, speed: 0.5, life: 0.7, size: 0.035, gravity: 3, spread: 0.05, up: 1.2 });
+  }
   function smoke(x, y, z, dark) {
     if (still) return;
     burst({ x, y, z, count: 10, colors: dark ? ['#5d636e', '#7a808a', '#454a52'] : ['#e9ecef', '#d6dbe0', '#f6f7f8'], speed: 0.1, life: 3, size: 0.12, gravity: -0.3, spread: 0.06, up: 1, grow: 0.1 });
@@ -1859,6 +2123,66 @@ export async function createWorld(stage, overlay, opts) {
     for (let i = 0; i < 3; i++) mesh(geo('mCrate', () => new T.BoxGeometry(0.1, 0.08, 0.1)), mats.wood, 0.08 - i * 0.07, 0.15, 0.35 - i * 0.12, g);
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     return g;
+  }
+  // --- The Merchant Guild's wagon: on the landing pad while an order is open ------------------
+  const guild = { g: null, k: 0, flag: null };
+  // On the pad's camera side, between the ship and the edge, along the ring
+  // and clear of the ramp and the pick-up spots.
+  function guildPlace() {
+    const a = 1.01;
+    return { x: Math.cos(a) * R * 0.7, z: Math.sin(a) * R * 0.7, yaw: -Math.PI / 2 - a };
+  }
+  // Haulers set their crates down at either end of the wagon.
+  function guildDrop(salt) {
+    const node = cornerNode(layout.tiles[0], salt % 2);
+    if (node < 0) return null;
+    const nd = nav.nodes[node];
+    const p = guildPlace();
+    const k = 0.45 + ((salt >> 1) % 2) * 0.1;
+    const x = nd.x + (p.x - nd.x) * k;
+    const z = nd.z + (p.z - nd.z) * k;
+    return { node, x, z, y: TILE_TOP, yaw: Math.atan2(p.x - x, p.z - z) };
+  }
+  function makeGuildWagon() {
+    const g = new T.Group();
+    const gold = trimMat('#e2a72e');
+    const plum = trimMat('#6b3fa0');
+    mesh(geo('gwBed', () => new T.BoxGeometry(0.24, 0.05, 0.13)), mats.wood, 0, 0.08, 0, g);
+    // A barrel-top canopy in Guild gold, plum trim at both ends.
+    mesh(geo('gwTop', () => new T.CylinderGeometry(0.068, 0.068, 0.2, 14, 1, false, 0, Math.PI).rotateZ(Math.PI / 2)), gold, -0.01, 0.105, 0, g);
+    for (const x of [-0.11, 0.09]) mesh(geo('gwRim', () => new T.TorusGeometry(0.068, 0.008, 6, 14, Math.PI)), plum, x, 0.105, 0, g).rotation.y = Math.PI / 2;
+    for (const [x, z] of [[-0.08, -0.07], [-0.08, 0.07], [0.08, -0.07], [0.08, 0.07]]) mesh(geo('gwWheel', () => new T.CylinderGeometry(0.042, 0.042, 0.016, 12).rotateX(Math.PI / 2)), mats.woodDark, x, 0.042, z, g);
+    // A mule in front, and crates waiting by the side.
+    const mule = mesh(geo('cartMule', () => new T.BoxGeometry(0.1, 0.07, 0.05)), mats.trunk, 0.2, 0.09, 0, g);
+    mesh(geo('cartMuleHead', () => new T.BoxGeometry(0.04, 0.05, 0.04)), mats.trunk, 0.06, 0.04, 0, mule);
+    for (const [x, y, z] of [[-0.03, 0.03, 0.12], [0.04, 0.03, 0.12], [0.005, 0.085, 0.12]]) mesh(geo('gwCrate', () => new T.BoxGeometry(0.055, 0.055, 0.055)), mats.wood, x, y, z, g);
+    mesh(geo('gwPole', () => new T.CylinderGeometry(0.006, 0.006, 0.26, 6)), mats.woodDark, 0.11, 0.21, -0.055, g);
+    guild.flag = mesh(geo('gwFlag', () => new T.BoxGeometry(0.09, 0.055, 0.004).translate(0.045, 0, 0)), plum, 0.11, 0.31, -0.055, g);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return g;
+  }
+  function stepGuild(t, dt) {
+    const want = data.econ?.guild?.open ? 1 : 0;
+    // A new map was built: the old wagon went with the old world.
+    if (guild.g && guild.g.parent !== world) guild.g = null;
+    if (want && !guild.g) {
+      const p = guildPlace();
+      guild.g = makeGuildWagon();
+      guild.g.position.set(p.x, TILE_TOP, p.z);
+      guild.g.rotation.y = p.yaw;
+      guild.k = 0;
+      world.add(guild.g);
+      dust(p.x, TILE_TOP, p.z, 0.6);
+    }
+    if (!guild.g) return;
+    guild.k += (want - guild.k) * Math.min(1, dt * 3);
+    guild.g.scale.setScalar(Math.max(0.001, guild.k));
+    if (guild.flag) guild.flag.rotation.y = Math.sin(t * 2.4) * 0.35;
+    if (!want && guild.k < 0.02) {
+      world.remove(guild.g);
+      guild.g = null;
+      guild.flag = null;
+    }
   }
   function stepEvents(t, dt) {
     const key = data.event?.key;
@@ -2130,7 +2454,14 @@ export async function createWorld(stage, overlay, opts) {
     let title;
     let sub;
     let bar = null;
-    if (b.wonder) {
+    if (b.rival) {
+      const rv = data.econ?.race?.rival;
+      const name = rv?.name || data.rivalName || 'Rival';
+      title = name + ': ' + item.label + (b.level > 1 ? ' ' + '★'.repeat(b.level - 1) : '');
+      if (b.wonder) { sub = 'their wonder · ' + (b.status === 'done' ? 'finished' : (rv ? rv.wonder : 0) + '%'); if (b.status !== 'done' && rv) bar = rv.wonder / 100; }
+      else if (b.status === 'building') { sub = b.upgrade ? 'going up a level' : 'being built'; bar = progressOf(b); }
+      else sub = 'rival land · the race is on';
+    } else if (b.wonder) {
       const pr = progressOf(b);
       title = item.label + (b.status === 'done' ? '' : ' ' + Math.floor(pr * 100) + '%');
       const short = data.econ?.wonder?.id === b.id ? data.econ.wonder.short : [];
@@ -2142,12 +2473,17 @@ export async function createWorld(stage, overlay, opts) {
     } else if (b.project && b.status !== 'done' && !b.evolving) {
       // A town project: how far along, who helps, what it waits for.
       const pr = progressOf(b);
-      title = item.label + ' ' + Math.floor(pr * 100) + '% #' + b.id;
+      title = item.label + (b.upgrade ? ' → level ' + b.upgrade.level : '') + ' ' + Math.floor(pr * 100) + '% #' + b.id;
       let helpers = 0;
       for (const j of data.jobs.values()) if (j.buildId === b.id && j.kind === 'build') helpers++;
-      if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · !work ' + b.waitingFor[0];
+      if (b.status === 'queued' && b.waitingFor?.length) sub = 'needs ' + b.waitingFor.map(resName).join(', ') + ' · ' + (GATHER[b.waitingFor[0]] ? '!' : '!work ') + b.waitingFor[0];
       else sub = (helpers ? helpers + (helpers === 1 ? ' helper' : ' helpers') : 'nobody helping yet') + ' · !help #' + b.id;
       bar = pr;
+    } else if (b.project && b.status === 'done' && !b.home) {
+      title = item.label + (b.level > 1 ? ' ' + '★'.repeat(b.level - 1) : '') + ' #' + b.id;
+      const founder = data.builders.get(b.founderId);
+      const reach = item.recipe ? reachAt(b) : 1;
+      sub = reach < 1 ? 'far from a store: ' + Math.round(reach * 100) + '% · !build outpost' : (b.level < 3 ? '!upgrade #' + b.id + ' · ' : 'top level · ') + (founder ? 'started by ' + founder.name : 'town');
     } else if (b.home && b.status === 'done') {
       title = (bd ? bd.name + "'s home" : item.label) + (b.level > 1 ? ' · level ' + b.level : '');
       sub = item.label + ' #' + b.id;
@@ -2193,12 +2529,18 @@ export async function createWorld(stage, overlay, opts) {
   }
   const pops = [];
   function addPop(v, out) {
-    if (pops.length >= (low ? 4 : 8)) return;
+    popAt(v.root.position.x, v.root.position.y + v.h + 0.1, v.root.position.z, out);
+  }
+  function popAt(x, y, z, out) {
+    popText(x, y, z, Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  '));
+  }
+  function popText(x, y, z, text, kind) {
+    if (pops.length >= (low ? 6 : 12)) return;
     const e = document.createElement('div');
-    e.className = 'pop';
-    e.textContent = Object.entries(out).map(([r, n]) => '+' + Math.round(n) + ' ' + (RESOURCES[r] ? RESOURCES[r].emoji : '')).join('  ');
+    e.className = 'pop' + (kind ? ' ' + kind : '');
+    e.textContent = text;
     overlay.append(e);
-    pops.push({ el: e, x: v.root.position.x, y: v.root.position.y + v.h + 0.1, z: v.root.position.z, t0: performance.now() });
+    pops.push({ el: e, x, y, z, t0: performance.now() });
   }
   const v3 = new T.Vector3();
   function project(x, y, z) {
@@ -2242,6 +2584,7 @@ export async function createWorld(stage, overlay, opts) {
     }).sort((a, b) => b.rank - a.rank || a.d - b.d);
     let doneShown = 0;
     for (const { v, active, d } of order) {
+      if (!v.root.visible) { if (v.label) setShown(v.label, false); continue; }
       const wantDone = !active && camDist < 5.5 && d < 3.2 && doneShown < 10;
       const wonderDone = v.b.wonder && v.b.status === 'done' && camDist > 5.5;
       if (lapse || wonderDone || (!active && !wantDone && !v.b.wonder)) { if (v.label) setShown(v.label, false); continue; }
@@ -2263,10 +2606,10 @@ export async function createWorld(stage, overlay, opts) {
     }
     // Nametags under the bots.
     const showTags = camDist < 8.5 && !lapse;
-    const near = [...bots.values()].sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
+    const near = [...bots.values()].sort((a, b) => !!b.beacon - !!a.beacon || Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
     near.forEach((b, i) => {
       const L = b.tag;
-      if (!showTags || i > 24 || b.bubble || b.mode === 'arrive') { setShown(L, false); return; }
+      if (!(showTags || (b.beacon && !lapse)) || i > 24 || b.bubble || b.mode === 'arrive') { setShown(L, false); return; }
       const p = project(b.x, b.y - 0.02, b.z);
       let vis = p.vis;
       if (vis) {
@@ -2340,6 +2683,7 @@ export async function createWorld(stage, overlay, opts) {
     if (len > max) { t.x *= max / len; t.z *= max / len; }
   }
   let focus = null;
+  let zoomGoal = null; // where the mouse wheel is taking the camera
   function flyTo(x, z, want, dur, track) {
     const offset = camera.position.clone().sub(controls.target);
     // Never fly with a camera sitting on its target: look from the usual angle.
@@ -2347,6 +2691,7 @@ export async function createWorld(stage, overlay, opts) {
       const el = elevation();
       offset.set(Math.sin(0.72) * Math.cos(el), Math.sin(el), Math.cos(0.72) * Math.cos(el)).multiplyScalar(Math.max(3, want || 8));
     }
+    zoomGoal = null;
     focus = { from: controls.target.clone(), to: new T.Vector3(x, 0, z), offset, want, start: performance.now(), dur: still ? 0 : dur, track: track || null };
   }
   function stepFocus(dt) {
@@ -2369,6 +2714,28 @@ export async function createWorld(stage, overlay, opts) {
       controls.target.add(delta);
       camera.position.add(delta);
     }
+  }
+  // Wheel zoom of our own. The one in OrbitControls (three r160) divides by the
+  // whole part of devicePixelRatio, which is 0 when the browser is zoomed out
+  // below 100%, and then every notch jumps to the nearest or farthest view.
+  stage.addEventListener('wheel', (e) => {
+    if (!controls.enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+    if (!px) return;
+    focus = null;
+    const from = zoomGoal ?? camera.position.distanceTo(controls.target);
+    const notches = Math.max(-3, Math.min(3, px / 100));
+    zoomGoal = Math.max(controls.minDistance, Math.min(controls.maxDistance, from * Math.pow(1.12, notches)));
+  }, { capture: true, passive: false });
+  function stepZoom(dt) {
+    if (zoomGoal == null) return;
+    const offset = camera.position.clone().sub(controls.target);
+    const d = offset.length();
+    const next = still ? zoomGoal : d + (zoomGoal - d) * Math.min(1, dt * 14);
+    camera.position.copy(controls.target).add(offset.setLength(next));
+    if (Math.abs(next - zoomGoal) < 0.005) zoomGoal = null;
   }
   // In stream mode the camera directs itself: it flies to whatever chat just
   // did, and otherwise slowly tours the island.
@@ -2397,7 +2764,10 @@ export async function createWorld(stage, overlay, opts) {
     const done = all.filter((v) => v.b.built && !v.b.wonder);
     const walkers = [...bots.values()].filter((b) => b.mode === 'walk' || b.mode === 'work' || b.mode === 'job' || b.mode === 'act');
     const wonder = all.find((v) => v.b.wonder && v.b.item === ERAS[era].wonder);
-    const step = tour.i % 5;
+    const step = tour.i % 6;
+    const rv = data.econ?.race?.rival;
+    const rvTile = rv?.met ? layout.index.get(rv.origin.q + ',' + rv.origin.r) : null;
+    if (step === 5 && rvTile && known[rvTile.i]) { flyTo(rvTile.x, rvTile.z, 9, 3200); return; }
     if (step === 0 || (!busy.length && !done.length && !walkers.length)) flyTo(0, 0, fitDistance(), 2600);
     else if (step === 1 && busy.length) { const v = pick(busy); flyTo(v.root.position.x, v.root.position.z, 9, 2400); }
     else if (step === 2 && walkers.length) { const b = pick(walkers); flyTo(b.x, b.z, 8, 2400, b); }
@@ -2525,18 +2895,23 @@ export async function createWorld(stage, overlay, opts) {
     stepTimelapse();
     stepTour();
     stepFocus(dt);
+    stepZoom(dt);
     controls.update();
     skyTimer -= dt;
     if (skyTimer <= 0) { skyTimer = 4; updateSky(); }
     updateWeather(dt);
     for (const b of [...bots.values()]) stepBot(b, t, dt);
     for (const p of [...porters]) stepBot(p, t, dt);
+    for (const n of rivalBots) stepBot(n, t, dt);
     stepBuilds(t, dt);
     stepTrain(dt);
     stepEvents(t, dt);
+    stepGuild(t, dt);
     stepCritters(t, dt);
     stepParticles(dt);
     stepHighlights(dt);
+    stepBeacons(dt);
+    stepCarts(dt);
     stepReveals(dt);
     if (frame % 3 === 0) { followSun(false); updateFog(); renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
@@ -2552,6 +2927,7 @@ export async function createWorld(stage, overlay, opts) {
 
   function afterBuildsChanged() {
     if (!world) return;
+    updateRoads();
     updateTownSize();
     rebuildLamps();
     refreshTiles();
@@ -2574,6 +2950,8 @@ export async function createWorld(stage, overlay, opts) {
         if (fresh.length) revealTiles(fresh, false);
       }
       data.jobs = new Map(Object.entries(extra.jobs || {}));
+      data.queues = new Map(Object.entries(extra.queues || {}));
+      if (extra.rivalName) data.rivalName = extra.rivalName;
       data.econ = extra.econ || data.econ;
       if (extra.era != null && extra.era !== era) applyEra(extra.era);
       data.finale = !!extra.finished;
@@ -2618,6 +2996,37 @@ export async function createWorld(stage, overlay, opts) {
       for (const v of builds.values()) if (v.b.ownerId === builder.id && v.label) v.label.w = 0;
       if (joined) interest(1, 0, 0, 7, null, 6000);
     },
+    // Chat's scouts found the rival town: go and have a look.
+    rivalMet(r) {
+      if (!r?.origin) return;
+      const p = hexToWorld(r.origin.q, r.origin.r);
+      if (opts.stream) interest(8, p.x, p.z, 9, null, 14000);
+      else flyTo(p.x, p.z, 9, 2200);
+    },
+    // Jobs waiting in line for a bot: shown next to its name.
+    setQueue(userId, n) {
+      if (n) data.queues.set(userId, n);
+      else data.queues.delete(userId);
+      const b = bots.get(userId);
+      if (b) refreshLook(b);
+    },
+    // A gathering trip is done: the goods show over the bot.
+    gathered(ev) {
+      const b = bots.get(ev.userId);
+      if (!b || !ev.n) return;
+      popAt(b.x, b.y + 0.55, b.z, { [ev.res]: ev.n });
+    },
+    xp(userId, n) {
+      const b = bots.get(userId);
+      if (!b || !(n > 0) || b.mode === 'arrive') return;
+      popText(b.x + 0.12, b.y + 0.42, b.z, '+' + n + ' ⭐', 'xp');
+    },
+    toolsChanged(userId) {
+      const b = bots.get(userId);
+      if (!b) return;
+      refreshLook(b);
+      sparkle(b.x, b.y + 0.3, b.z);
+    },
     setJob(userId, job) {
       if (job) data.jobs.set(userId, job);
       else data.jobs.delete(userId);
@@ -2628,6 +3037,7 @@ export async function createWorld(stage, overlay, opts) {
     },
     setEconomy(econ) {
       data.econ = econ;
+      syncRivalBots();
     },
     produce(list) {
       const camDist = camera.position.distanceTo(controls.target);
@@ -2658,20 +3068,23 @@ export async function createWorld(stage, overlay, opts) {
       if (scout && ev.found?.length) showBubble(scout, 'Look what I found!', 3000);
       if (at && ev.userId) interest(ev.found?.length ? 4 : 2, at.x, at.z, ev.found?.length ? 7 : 8, null, 9000);
     },
-    // !me: the camera visits your home, which glows in your colour.
+    // !me: a beacon in your colour over your bot, a glowing ring around your
+    // home, and the camera goes to see your bot.
     highlight(userId) {
       const v = homeOf(userId);
-      const bot = bots.get(userId);
-      const target = v ? v.root.position : bot ? { x: bot.x, z: bot.z } : null;
+      const b = bots.get(userId);
+      const bot = b && b.mode !== 'arrive' ? b : null;
+      const target = bot ? { x: bot.x, z: bot.z } : v ? v.root.position : null;
       if (!target) return;
+      const color = (data.builders.get(userId) || {}).color || '#3b7ddd';
       if (v) {
-        const color = (data.builders.get(userId) || {}).color || '#3b7ddd';
-        const ring = mesh(new T.TorusGeometry(R * 0.95, 0.03, 6, 48), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }), target.x, PATH_TOP + 0.04, target.z, fxGroup);
+        const ring = mesh(new T.TorusGeometry(R * 0.95, 0.03, 6, 48), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }), v.root.position.x, PATH_TOP + 0.04, v.root.position.z, fxGroup);
         ring.rotation.x = Math.PI / 2;
         highlights.push({ ring, t: 0 });
-        sparkle(target.x, v.h + 0.3, target.z);
+        sparkle(v.root.position.x, v.h + 0.3, v.root.position.z);
       }
-      if (opts.stream) interest(5, target.x, target.z, 5.5, null, 9000);
+      if (bot) addBeacon(bot, color);
+      if (opts.stream) interest(5, target.x, target.z, 5.5, bot, 9000);
       else flyTo(target.x, target.z, Math.min(camera.position.distanceTo(controls.target), 7), 1400);
     },
     eraChanged(e) {
@@ -2726,6 +3139,7 @@ export async function createWorld(stage, overlay, opts) {
         knownR: layout.knownR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
+        guild: guild.g ? { x: +guild.g.position.x.toFixed(2), z: +guild.g.position.z.toFixed(2), k: +guild.k.toFixed(2) } : null,
         season,
       };
     },

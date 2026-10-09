@@ -7,7 +7,7 @@
 //     speed = jobs filled x happiness x power x helping bots x events x boosts
 //   residents eat, power plants burn coal, the era's wonder takes deliveries
 //   and knowledge grows (faster with campfires, schools and labs)
-import { ITEMS, RESOURCES, homePop } from '../public/shared/catalog.js';
+import { ITEMS, RESOURCES, homePop, levelMult } from '../public/shared/catalog.js';
 import { daylight } from '../public/shared/sun.js';
 import { hexBetween } from '../public/shared/hex.js';
 
@@ -16,7 +16,10 @@ export const FOOD_PER_POP_MIN = 0.05;
 // Later eras farm and store food better, so each resident needs less.
 export const foodPerPop = (era) => FOOD_PER_POP_MIN * [1, 0.9, 0.8, 0.65, 0.5, 0.4][Math.min(5, era)];
 export const START_STOCK = { wood: 70, stone: 45, food: 40 };
-export const RESERVE = 0.2; // wonders leave this share of storage for normal builds
+// Wonders leave this share of storage for normal builds (at most
+// RESERVE_MAX of each good, so a town with huge stores still feeds them).
+export const RESERVE = 0.2;
+export const RESERVE_MAX = 250;
 export const MAX_HELPERS = 3; // bots that can help at one building
 export const WONDER_SPEED_PER_HELPER = 0.6;
 export const MOVE_IN_HAPPINESS = 30; // below this nobody moves in
@@ -27,7 +30,7 @@ export const isUp = (b) => !!b.built && !b.damaged;
 
 export function capacity(builds) {
   let extra = 0;
-  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'storage') extra += itemOf(b).storage;
+  for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'storage') extra += itemOf(b).storage * levelMult(b.level);
   return BASE_CAP + extra;
 }
 
@@ -38,7 +41,7 @@ export function comfortOf(b) {
 }
 
 // People living in one house: your own home is small, the town's homes are big.
-export const popOf = (b) => (b.home ? homePop(b.level) : itemOf(b)?.pop || 0);
+export const popOf = (b) => (b.home ? homePop(b.level) : Math.round((itemOf(b)?.pop || 0) * levelMult(b.level)));
 export function popCapacity(builds) {
   let n = 0;
   for (const b of builds) if (isUp(b) && itemOf(b)?.kind === 'house') n += popOf(b);
@@ -59,7 +62,7 @@ export function power(builds, now, fuel, geo = {}) {
     const it = itemOf(b);
     if (!it?.power) continue;
     if (it.power > 0) {
-      let p = it.power;
+      let p = it.power * levelMult(b.level);
       if (it.solar) p *= daylight(now, geo.lat, geo.lon);
       if (it.recipe?.in && fuel.get(b.id) === false) p = 0;
       supply += p;
@@ -129,8 +132,9 @@ export function produce(builds, stock, ctx, dt) {
     for (const r of Object.keys(out)) ev = Math.max(ev, ctx.boosts[r] || 1);
     m *= ev;
     m *= adjacencyBoost(b, boosters);
-    // A good spot (a woodcutter in a big forest) works faster than a poor one.
-    m *= b.rich || 1;
+    // A good spot (a woodcutter in a big forest) works faster than a poor one,
+    // and every upgrade adds half again.
+    m *= (b.rich || 1) * levelMult(b.level) * (ctx.reach ? ctx.reach(b) : 1);
     let prog = (ctx.progress.get(b.id) || 0) + (dt / 60) * m;
     while (prog >= 1) {
       const inp = it.recipe.in || {};
@@ -168,7 +172,7 @@ export function deliverToWonder(w, stock, { fraction, cap }) {
     const have = w.delivered[r] || 0;
     if (have >= n) continue;
     const want = Math.min(n - have, n * fraction);
-    const take = Math.min(want, Math.max(0, (stock[r] || 0) - cap * RESERVE));
+    const take = Math.min(want, Math.max(0, (stock[r] || 0) - Math.min(cap * RESERVE, RESERVE_MAX)));
     if (take < want * 0.5) short.push(r);
     if (take > 0) { stock[r] -= take; w.delivered[r] = have + take; }
   }
@@ -184,7 +188,7 @@ export function wonderProgress(w) {
 
 export function knowledgeBoost(builds) {
   let k = 0;
-  for (const b of builds) if (isUp(b) && itemOf(b)?.knowledge) k += itemOf(b).knowledge;
+  for (const b of builds) if (isUp(b) && itemOf(b)?.knowledge) k += itemOf(b).knowledge * levelMult(b.level);
   return Math.min(0.5, k);
 }
 
@@ -203,6 +207,13 @@ export function makersOf(res, era) {
   }
   return out.sort((a, b) => b.era - a.era || b.amount - a.amount).map((m) => m.key);
 }
+// Power plants to build, the best first. Solar farms make nothing at night,
+// so they stop being an option once they are half of the plants.
+export function powerMakers(builds, era) {
+  const plants = builds.filter((b) => ITEMS[b.item]?.power > 0);
+  const solar = plants.filter((b) => ITEMS[b.item].solar).length;
+  return makersOf('power', era).filter((k) => !ITEMS[k].solar || solar * 2 < plants.length);
+}
 // The best building of this era (or earlier) that makes a resource, or
 // electricity when res is 'power'.
 export function bestMaker(res, era) {
@@ -215,4 +226,31 @@ export function bestMaker(res, era) {
     if (!best || it.era > best.era || (it.era === best.era && amount > best.amount)) best = { key: k, era: it.era, amount };
   }
   return best ? best.key : null;
+}
+
+// When a town is full, which of its buildings may make way for a new one of
+// kind `it`: lower scores go first, null never. Newer decor may always
+// replace older decor. Other buildings may replace decor while people are
+// content (happy 80 or more), or when the town needs them (`need`): older
+// decor first, then the commonest. Only what the town needs may replace a
+// spare producer (one of three or more) of goods the stores are full of.
+// Food makers always stay: people eat every minute.
+export const CONTENT = 80;
+export function spareScorer(builds, stock, cap, it, { need = false, happy = 0 } = {}) {
+  const count = {};
+  for (const b of builds) count[b.item] = (count[b.item] || 0) + 1;
+  const makes = Object.keys(it.recipe?.out || {});
+  return (b) => {
+    if (b.wonder || b.home || !b.built || b.status !== 'done') return null;
+    const bt = ITEMS[b.item];
+    const level = 3 * (b.level || 1);
+    if (bt.kind === 'decor') {
+      if (it.kind === 'decor' ? bt.era >= it.era : !need && happy < CONTENT) return null;
+      return bt.era * 10 + (bt.comfort || 0) / 10 + level - count[b.item] / 4;
+    }
+    if (bt.kind !== 'producer' || !need || it.kind === 'decor' || count[b.item] < 3) return null;
+    const outs = Object.keys(bt.recipe?.out || {});
+    if (!outs.length || outs.includes('food') || outs.some((r) => makes.includes(r) || (stock[r] || 0) < cap * 0.9)) return null;
+    return 100 + bt.era * 10 + level + 5 * (b.rich || 1) - count[b.item] / 4;
+  };
 }

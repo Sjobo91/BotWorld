@@ -13,15 +13,57 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 
 ## Homes and town projects
 
-* **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` flies the camera to it. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
-* **Everything else is built together.** `!build farm` starts a town project, at most three at a time. It needs its goods first, then work: every bot that types `!help` adds one share of work per second, and the townsfolk always add a little, so a project also finishes when chat is asleep. A hut takes one bot about two minutes and four bots half a minute. Helpers earn XP for the time they put in, and the finished building is credited to its builders.
+* **Your own home.** `!home` builds one home per viewer, near the middle of town. It has a rim and a flag in the viewer's colour, so everyone can see whose it is, and `!me` puts an arrow and a column of light in your colour over your bot for 20 seconds and flies the camera to it. Everyone on a stream sees the same picture, so this is how a viewer finds their own bot. `!upgrade` makes it bigger (three levels), and every new era turns it into that era's kind of home (hut, cottage, townhouse, apartments, skyscraper, arcology).
+* **Everything else is built together.** `!build farm` starts a town project, at most three at a time (what the town is stuck on, the wonder's goods, food, power or a good a project waits for, may start as a fourth). It needs its goods first, then work: every bot that types `!help` adds one share of work per second, and the townsfolk always add a little, so a project also finishes when chat is asleep. A hut takes one bot about two minutes and four bots half a minute. Helpers earn XP for the time they put in, and the finished building is credited to its builders.
+* **Short jobs.** Every command keeps a bot busy for about half a minute and then shows what it did, so chat keeps typing and sees progress. `!help` is a 40 second shift on a project (one share of work per second), `!work bricks` 60 seconds at a building, `!explore` a trip into the fog. Typed while the bot is busy, jobs wait in line, up to 5 (`!wood 3` lines up three, `!stop` clears the line). Every job pays a little XP, which pops up over the bot.
+* **Gathering by hand.** `!wood`, `!stone` and `!food` (and `!coal` and `!iron` from the Medieval Town) send your bot on one trip to the nearest known land of the right kind: a forest, rocky hills, a berry meadow (or the water with `!fish`), a coal or iron deposit. It walks out, works there 8 seconds and carries the crate back to the nearest store; the trip takes about half a minute near town and longer far out. Chat always has something useful to do, even before the first woodcutter stands. Buildings make more and keep going while chat sleeps. Goods made from other goods (bricks, steel, parts, chips) come only from their building; `!work bricks` sends your bot to help at a kiln.
+* **Tools.** A bot starts with stone tools and carries 2 goods per trip. `!upgrade tools` buys the next set from the town storage once the viewer is high enough and the era has the material:
+
+| Tools | Level | Era | Costs | Per trip | Building speed |
+| --- | --- | --- | --- | --- | --- |
+| Stone | 1 | Stone Age | | 2 | 1x |
+| Copper | 3 | Village | 6 bricks, 6 wood | 3 | 1.25x |
+| Iron | 6 | Medieval Town | 8 iron | 4 | 1.5x |
+| Steel | 10 | Industrial Age | 8 steel | 5 | 1.75x |
+| Power | 15 | Electric City | 8 parts | 6 | 2x |
+| Laser | 20 | Future | 6 chips | 8 | 2.5x |
+
+* **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings fly a silver (level 2) or gold (level 3) pennant.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills, gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
+* **A full town makes room.** When no free spot is left, a new building takes the place of one the town can spare, with a notice on stream. While people are content (happiness 80 or more), old decor makes way for anything: decor from an older era first (a campfire in the Future), then the commonest. When they are not, only what the town needs right now (what the plan box asks for, a new viewer's home, homes when people wait to move in) may replace decor. What the town needs may also replace a spare producer of goods the stores are full of (one of three or more), and newer decor may always replace older decor. Homes, stores, power plants, schools, food makers and wonders always stay; `!upgrade` grows a full town further.
+
+## Outposts and the whole world
+
+* **Outposts** (`!build outpost`, or `!build outpost north`) are small stores far out: the server puts them on rich, known land at least 6 tiles from any other store, a little further each time, and they reveal the land within 4 tiles.
+* **Reach.** A producer within 4 tiles of a store (the landing pad, a stockpile, barn, warehouse or outpost) works at full speed; every tile further takes a tenth off, down to 40%. New producers prefer spots near a store, gatherers drop their loads at the nearest one, and the plan box suggests an outpost when producers are far from one.
+* **Roads and carts.** A worn road runs from every outpost to the nearest store closer to the middle, and mule carts travel along it.
+
+## The rival town
+
+Cogsworth is an AI town about 27 tiles out, on the side of the world away from the sea. It plays by the same rules as chat, from the same catalog:
+
+* A crew of 3 to 12 AI bots gathers what the town has least of and builds. About once an hour (at normal speed) it starts something: first whatever makes the goods its wonder and this era's buildings need, then food, homes, power, knowledge and happiness, then outposts (two more every era), upgrades and more of everything.
+* Its economy, wonders and eras follow the town's rules: production with workers, happiness, power and reach, food for its people, knowledge over `eraDays`, the era's wonder and the people goal.
+* **Land.** Tiles within two steps of a rival building are the rival's, and the town cannot build or gather there; the rival keeps out of the town's land the same way. Each side also keeps a home ground nobody else may build on: 13 tiles round the landing pad, 10 round Cogsworth's square. Both spread out over the map with their outposts and race for the forests, hills and ore deposits in between, and a full rival makes room the way the town does.
+* **How it plays.** Power comes first (buildings without it make nothing), and solar farms are at most half its power plants, since they make nothing at night. It never adds makers of a good while the ones it has stand idle for lack of power or inputs, mines go for the ore it lacks, it builds campfires, schools and labs until knowledge comes as fast as it can, and decor only while its people are not content.
+* **The race.** Both towns race on era progress: the era, plus a third each for knowledge, the wonder and people towards the next one. The rival leans towards a close race: up to 45% faster when chat is ahead, up to 35% slower when chat is behind (times `limits.rivalDifficulty`).
+* **Fog.** The rival is hidden until chat's scouts reach its land; then the camera goes to look, and its buildings show on the map with red edges and red bots at work. Until then the **Race to the Future** panel says which way it lies.
+
+## Merchant Guild orders
+
+The economic battle between the two towns happens at the Guild's wagon on the landing pad.
+
+* **An order.** About every 75 minutes (`limits.contractEveryMin`), while someone in chat typed in the last 15 minutes and the town has a few buildings, the Merchant Guild posts an order: one good both towns know, newer goods more often and never the same twice in a row, about a tenth of the town's storage (at least 20). Both towns have 30 minutes (`limits.contractMin`) to fill it. Moderators can call the next order right away with `!deliver start`. A wagon with a gold canopy parks on the landing pad and the order shows in the race panel with both towns' bars.
+* **Hauling.** `!deliver` sends your bot on a 30 second trip with crates from the pad to the wagon; when it is back, each crate it carried fills a fortieth of the order (2 crates with stone tools, 8 with laser tools, so a trip fills 5% to 20%). `!deliver 3` lines up three trips. The townsfolk haul 1.5% a minute on their own. The goods come out of the town's stock: no bricks, no delivery (the plan box then says how to make some).
+* **The rival** hauls 1.5% a minute plus 2.5% a minute with a full crew (half that with a small one), times its lean towards a close race, out of its own stock. On its own it fills an order in about 20 to 35 minutes, so a chat that ignores the Guild loses, and one or two bots that keep hauling win.
+* **Winning.** The first town to fill the order wins, or, when time runs out, whoever delivered more. The Guild pays one and a half times the goods' worth (a good is worth 1 plus its era: wood 1, bricks 2, steel 4, chips 5) in the two goods the winner has least of, and its scholars share 30 minutes of knowledge. Every bot that hauled for a winning order gets 8 XP (and 3 per trip). The loser gets its crates back. The score of orders won stays in the race panel, and the Gazette reports the wins.
+* **Balance.** In the balance runs chat wins two orders in three with two regular viewers (127 of 187 over the game) and three in four with five (294 of 384). Cogsworth takes the orders chat is not around for.
 
 ## What chat sees
 
-* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. Help the project that is being built, fetch the goods a project waits for (`!work wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
+* **What to do now:** the top of the screen always shows the next steps with the command to type, worked out by the server. An open Guild order always comes first. Help the project that is being built, gather the goods a project waits for (`!wood`), start what the town needs (`!build quarry`), explore when the right land is missing, haul to the wonder, build more homes when people need room, or explore the fog.
 * **Being built:** every project with its progress and helpers, and the homes going up.
-* **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs.
+* **The how-to card** takes turns showing the commands, where every good comes from (which building makes it and what land it needs) and this era's buildings with their costs. The goods page shows both ways for every good: the command to gather it by hand, and the building that makes it all day.
 
 ## The arc
 
@@ -41,21 +83,22 @@ Lighting the Fusion Spire is the finale. After that the town keeps going in the 
 Three bars on screen, all three must be full:
 
 1. **People.** Homes give room (your own home 3 to 5 people, a town hut 6, an arcology 140). People move in while there is food and the town is not miserable, and they eat food every minute.
-2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time and always leaves a fifth of the storage room for normal builds. Bots on `!help wonder` carry crates to it and make it go faster.
+2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time and always leaves a fifth of the storage room (at most 250 of each good) for normal builds. Bots on `!help wonder` carry crates to it and make it go faster. Nobody builds a wonder alone, so `!build wonder` (or its name, like `!build cathedral`) does the same.
 3. **Knowledge.** Grows with time: an era takes `eraDays` (default 11) days at base speed. Campfires, schools and labs make it up to 50% faster, meteor showers and old tablets add hours at once.
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:
 
-| Era starts | 2 viewers | 5 viewers | 30 viewers |
-| --- | --- | --- | --- |
-| 🌾 Village | day 9.6 | day 8.6 | day 5.9 |
-| 🏰 Medieval Town | day 19.0 | day 17.4 | day 11.8 |
-| 🏭 Industrial Age | day 28.0 | day 26.1 | day 17.7 |
-| ⚡ Electric City | day 38.0 | day 35.2 | day 23.9 |
-| ✨ Future | day 48.0 | day 44.6 | day 30.3 |
-| Finale (Fusion Spire lit) | day 55.3 | day 50.9 | day 36.7 |
+| Era starts | 2 viewers | Cogsworth | 5 viewers | Cogsworth |
+| --- | --- | --- | --- | --- |
+| 🌾 Village | day 9.2 | day 8.0 | day 9.6 | day 7.8 |
+| 🏰 Medieval Town | day 18.5 | day 16.8 | day 18.7 | day 16.6 |
+| 🏭 Industrial Age | day 28.1 | day 25.7 | day 28.0 | day 25.5 |
+| ⚡ Electric City | day 37.5 | day 34.9 | day 37.2 | day 34.7 |
+| ✨ Future | day 47.2 | day 44.1 | day 46.5 | day 43.9 |
+| Finale (Fusion Spire lit) | day 53.3 | day 53.2 | day 52.6 | 99.2% there |
+| Guild orders won | 127 of 187 | 60 | 294 of 384 | 90 |
 
-Each pretend viewer is online an hour and a half a day and types a command every few minutes. A busy chat of 30 fills the knowledge bar faster (schools, labs, tablets) and gets there in about five weeks; a small, loyal chat takes about two months.
+Each pretend viewer is online an hour and a half a day and types a command about every minute. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 750 buildings with two viewers and 1,300 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era one to three days before chat, and chat catches up at the very end. With two viewers Cogsworth lit its Spire two and a half hours before chat, with five chat got there first while Cogsworth was 99% there.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, huts become cottages, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 
@@ -63,7 +106,7 @@ When an era starts, older buildings that have a modern version rebuild themselve
 
 Every 5 seconds the server runs one step:
 
-* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power, scaled by how good their spot is. Helpers sent with `!work` add speed. Happy towns work faster.
+* **Producers** make goods once a minute at full speed, if they have workers (people), the goods they need (a kiln eats stone and wood to make bricks) and power, scaled by how good their spot is. Helpers sent with `!work bricks` (and so on) add speed. Goods gathered by hand go straight into storage. Happy towns work faster.
 * **Storage** limits every good (start 100, stockpiles, barns and warehouses add room). A full store stops its producers.
 * **Power** (from the Industrial Age) comes from coal plants (burn coal), wind turbines, solar farms (only by day, following the real sun) and fusion. Factories, skyscrapers and labs need it.
 * **Happiness** comes from parks, gardens, fountains, statues, stadiums and other decor near homes, and drops when people are hungry or the power is out.

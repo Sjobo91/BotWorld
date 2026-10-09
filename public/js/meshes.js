@@ -17,6 +17,48 @@ export function geo(name, make) {
 export function std(color, extra) {
   return new T.MeshStandardMaterial(Object.assign({ color, roughness: 0.8, metalness: 0, flatShading: true }, extra || {}));
 }
+// One geometry from several, each already moved into place. Used for the
+// round tree tops and rock piles, so each is a single instanced mesh.
+export function mergeGeos(list) {
+  const parts = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  const out = new T.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    if (!parts.every((p) => p.attributes[name])) continue;
+    const size = parts[0].attributes[name].itemSize;
+    const arr = new Float32Array(parts.reduce((n, p) => n + p.attributes[name].array.length, 0));
+    let o = 0;
+    for (const p of parts) { arr.set(p.attributes[name].array, o); o += p.attributes[name].array.length; }
+    out.setAttribute(name, new T.BufferAttribute(arr, size));
+  }
+  return out;
+}
+const blobAt = (r, x, y, z, sx = 1, sy = 1, sz = 1, detail = 1) => new T.IcosahedronGeometry(r, detail).scale(sx, sy, sz).translate(x, y, z);
+const rockAt = (r, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0) => new T.DodecahedronGeometry(r, 0).rotateY(ry).scale(sx, sy, sz).translate(x, y, z);
+// Nature, round and chunky: no cones.
+export const NATURE = {
+  // A broad leafy tree: three round clumps.
+  oakTop: () => mergeGeos([blobAt(0.14, 0, 0.3, 0, 1, 0.85, 1), blobAt(0.1, 0.09, 0.26, 0.04, 1, 0.85, 1), blobAt(0.1, -0.07, 0.27, -0.05, 1, 0.85, 1), blobAt(0.08, 0.01, 0.4, -0.02, 1, 0.9, 1)]),
+  // An evergreen like a cypress: tall and round, never pointy.
+  firTop: () => mergeGeos([blobAt(0.12, 0, 0.26, 0, 1, 1.15, 1), blobAt(0.095, 0, 0.42, 0, 1, 1.2, 1), blobAt(0.06, 0, 0.55, 0, 1, 1.2, 1)]),
+  // A slim birch: small light top on a white trunk.
+  birchTop: () => mergeGeos([blobAt(0.09, 0, 0.36, 0, 1, 1.25, 1), blobAt(0.065, 0.05, 0.3, 0.02, 1, 1, 1)]),
+  trunk: () => new T.CylinderGeometry(0.022, 0.034, 0.22, 6).translate(0, 0.11, 0),
+  birchTrunk: () => new T.CylinderGeometry(0.014, 0.02, 0.3, 5).translate(0, 0.15, 0),
+  bush: () => mergeGeos([blobAt(0.07, 0, 0.05, 0, 1, 0.75, 1), blobAt(0.05, 0.05, 0.04, 0.02, 1, 0.75, 1)]),
+  // A mountain as a pile of big rocks, with room for snow on top.
+  massif: () => mergeGeos([
+    rockAt(0.36, 0, 0.2, 0, 1.15, 0.75, 1.1, 0.3),
+    rockAt(0.26, 0.22, 0.14, 0.12, 1, 0.8, 1, 1.1),
+    rockAt(0.24, -0.2, 0.13, -0.14, 1, 0.75, 1, 2.2),
+    rockAt(0.22, -0.06, 0.42, 0.04, 1, 0.9, 1, 0.8),
+    rockAt(0.16, 0.12, 0.36, -0.12, 1, 0.85, 1, 1.7),
+  ]),
+  snowCap: () => mergeGeos([rockAt(0.16, -0.06, 0.58, 0.04, 1.1, 0.45, 1.1, 0.8), rockAt(0.1, 0.12, 0.47, -0.12, 1.1, 0.4, 1.1, 1.7)]),
+  // Rocky hills: a low grassy mound.
+  mound: () => blobAt(0.3, 0, 0, 0, 1, 0.38, 1, 1),
+  boulder: () => rockAt(0.09, 0, 0.04, 0, 1, 0.7, 1),
+  reed: () => new T.CylinderGeometry(0.006, 0.009, 0.18, 4).translate(0, 0.09, 0),
+};
 export function mesh(g, m, x, y, z, parent) {
   const o = new T.Mesh(g, m);
   o.position.set(x, y, z);
@@ -69,6 +111,8 @@ function setupMaterials() {
     trunk: std(0x8a5a3b),
     leaf: std(0x5fae5a),
     leaf2: std(0x4a9852),
+    evergreen: std(0x3f8a4c),
+    birch: std(0xeeeae0),
     rock: std(0x9aa1aa),
     soil: std(0x7a5a3c),
     crop: std(0xd9b44a),
@@ -211,15 +255,11 @@ export function addWindows(g, radius, y, count, skipFront) {
     count--;
   }
 }
-export function treeMesh(pine) {
+export function treeMesh(fir) {
   const g = new T.Group();
-  mesh(geo('trunk', () => new T.CylinderGeometry(0.03, 0.04, 0.2, 5)), mats.trunk, 0, 0.1, 0, g);
-  if (pine) {
-    mesh(geo('cone1', () => new T.ConeGeometry(0.2, 0.32, 7)), mats.leaf2, 0, 0.32, 0, g);
-    mesh(geo('cone2', () => new T.ConeGeometry(0.15, 0.26, 7)), mats.leaf, 0, 0.5, 0, g);
-  } else {
-    mesh(geo('crown', () => new T.DodecahedronGeometry(0.2, 0)), mats.leaf, 0, 0.36, 0, g);
-  }
+  mesh(geo('n:trunk', NATURE.trunk), mats.trunk, 0, 0, 0, g);
+  mesh(geo(fir ? 'n:firTop' : 'n:oakTop', fir ? NATURE.firTop : NATURE.oakTop), fir ? mats.evergreen : mats.leaf, 0, 0, 0, g);
+  g.scale.setScalar(1.2);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
 }

@@ -61,6 +61,7 @@ code {
   font: 700 0.68rem/1.2 var(--font-body);
   white-space: nowrap;
 }
+.nametag.me { font-size: 0.95rem; border-width: 2px; z-index: 2; box-shadow: var(--shadow); }
 .blabel {
   display: flex;
   align-items: center;
@@ -127,6 +128,7 @@ code {
   white-space: nowrap;
   will-change: transform, opacity;
 }
+.pop.xp { color: #ffe27a; font-size: 0.72rem; }
 
 /* --- Title and ticker ---------------------------------------------------------- */
 .title { position: absolute; top: 1.1rem; left: var(--edge); display: grid; gap: 0.4rem; justify-items: start; pointer-events: none; }
@@ -276,6 +278,24 @@ code {
 
 /* The right column: era, queue, leaderboard. */
 .side { position: absolute; top: 1.1rem; right: var(--edge); width: 22.5rem; display: grid; gap: 0.6rem; }
+.race-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.race-row { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.5rem; align-items: center; font: 600 0.82rem/1.2 var(--font-body); }
+.race-row .who { display: flex; gap: 0.35rem; align-items: center; }
+.race-row .who i { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; }
+.race-row .rera { color: var(--ink-soft); font-weight: 500; font-size: 0.75rem; }
+.race-row .bar { grid-column: 1 / -1; height: 0.4rem; border-radius: 0.2rem; background: var(--line); overflow: hidden; }
+.race-row .bar span { display: block; height: 100%; border-radius: 0.2rem; }
+.race-row.ahead b::after { content: ' 👑'; }
+.race-note { margin: 0.45rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
+/* A Merchant Guild order inside the race panel: both towns haul for it. */
+.guild { margin-top: 0.6rem; padding: 0.55rem 0.65rem 0.6rem; border-radius: 0.8rem; background: rgba(217, 149, 0, 0.12); border: 1px solid rgba(217, 149, 0, 0.35); }
+.guild-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; font: 600 0.85rem/1.2 var(--font-body); }
+.guild-time { flex: none; font: 500 0.75rem/1 var(--font-mono); color: var(--ink-soft); }
+.guild .race-row .rera { font-family: var(--font-mono); }
+.guild-note { margin: 0.4rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
+.guild.won { background: rgba(32, 144, 90, 0.12); border-color: rgba(32, 144, 90, 0.4); }
+.guild.lost { background: rgba(217, 83, 79, 0.1); border-color: rgba(217, 83, 79, 0.35); }
+.guild-tally { margin: 0.45rem 0 0; font: 500 0.72rem/1.3 var(--font-body); color: var(--ink-soft); }
 .side .panel { position: static; padding: 0.85rem 0.95rem 0.9rem; }
 .side .panel h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
 .era-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.55rem; }

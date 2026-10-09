@@ -15,7 +15,7 @@ npm install
 npm run demo
 ```
 
-Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the town grow without being live. The bar at the bottom lets you type commands yourself as any name.
+Open **http://localhost:3000**. `demo` invents pretend viewers who build things, so you can watch the town grow without being live. The bar at the bottom lets you type commands yourself as any name. If the panels look tiny, the browser is zoomed out: press Ctrl and 0 to go back to 100%.
 
 Want to see a later era right away? Grow a world in pretend time and open it:
 
@@ -57,19 +57,31 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | --- | --- |
 | `!home` | Your bot lands and builds your own home, with a flag and a rim in your colour |
 | `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
-| `!help` | Your bot helps build the project that needs it most. `!help #12` for a certain one |
-| `!help wonder` | Haul goods to the era's wonder |
-| `!work wood` | Help make one good: `wood`, `stone`, `food`, `bricks`, `coal`, `iron`, `steel`, `parts`, `chips` |
+| `!help` | Your bot helps build the project that needs it most for 40 seconds. `!help #12` for a certain one |
+| `!help wonder` | Haul goods to the era's wonder (`!build wonder` does the same: the whole chat builds it together) |
+| `!deliver` | One trip with crates to the Merchant Guild's wagon while a Guild order is open (also `!trade`, `!deliver 3`) |
+| `!wood` | One trip: your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
+| `!stone` | One trip to break stone in the rocky hills (also `!mine`) |
+| `!food` | One trip to pick berries in a meadow, or `!fish` by the water |
+| `!coal`, `!iron` | From the Medieval Town: dig ore at a deposit the scouts found |
+| `!wood 3` | Do it three times in a row (works for every job, up to 5) |
+| `!work bricks` | Help at a building that makes a good from other goods: `bricks`, `steel`, `parts`, `chips` |
 | `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
+| `!build outpost` | Start an outpost out in the world, near rich land (`!build outpost west` picks the way). Producers near a store work at full speed |
+| `!upgrade woodcutter` | Start a town project that takes a building up a level (also `!upgrade #12`). Three levels, each makes 50% more |
+| `!upgrade tools` | Better tools for your bot: a bigger load on every trip and faster building. Needs a level, the right era and a few goods |
 | `!upgrade` | Make your home bigger (three levels per era) |
+| `!stop` | Your bot stops and forgets the jobs lined up |
 | `!repair` | Fix a building broken by a storm or blackout |
 | `!vote 1` or `!1` | Vote in a chat vote |
-| `!me` | Show your card and fly the camera to your home |
+| `!me` | Show your card, put a beacon in your colour over your bot and fly the camera to it |
 | `!hat tophat` | Dress your bot (more hats unlock as you level up) |
 | `!dance` | Your bot throws a little party |
 | `!commands` | Shows the commands on screen |
 
-Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
+Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now), `!deliver start` (a Merchant Guild order now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
+
+Every job is short (about half a minute), so chat can keep typing and see what it did: the goods pop up over the bot when it comes back, and so does every bit of XP. Typed while the bot is busy, jobs wait in line (the number shows next to its name).
 
 On screen, the **What to do now** box always says the next step for chat, with the command to type, and the how-to card takes turns showing the commands, where every good comes from and this era's buildings.
 
@@ -78,7 +90,12 @@ On screen, the **What to do now** box always says the next step for chat, with t
 In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)):
 
 * **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
-* **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge.
+* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot on a trip to chop, mine or pick on the right land, and it carries the load back to the nearest store: 2 goods with stone tools, up to 8 with laser tools. There is always something useful to do, even before the first woodcutter stands.
+* **The whole world.** Outposts take the town out over the map. Producers more than 4 tiles from a store (the pad, a stockpile, barn, warehouse or outpost) make a tenth less per extra tile, so chat builds outposts near the forests, hills and ore far away. Roads with little mule carts run from every outpost back to town.
+* **The rival.** Cogsworth, an AI town on the far side of the world, plays by the same rules: it gathers, builds, upgrades, sends out outposts and climbs the eras. Land near its buildings is its own, so both towns race for the forests and ore deposits in between. The **Race to the Future** panel shows how far each town is towards the next era (knowledge, wonder and people); chat finds Cogsworth by exploring (it is shown on the map once found). The rival leans towards a close race: it speeds up a little when chat is far ahead and slows down when chat is behind.
+* **Merchant Guild orders.** About once an hour, while chat is around, the Guild wants a load of one good (say 240 bricks) within 30 minutes, and both towns race to fill it. Every `!deliver` is a bot's trip to the Guild's wagon on the landing pad, worth a twentieth of the order per crate it carries; the townsfolk haul a little on their own, and so do Cogsworth's porters. The first town to fill it (or whoever is further along when time runs out) gets paid one and a half times the goods' worth in what it has least of, plus 30 minutes of knowledge; the loser gets its crates back.
+* **Upgrades.** Every town building can go up to level 3 (`!upgrade woodcutter`), which makes 50% more per level and shows as pennants on the building. Bots get better tools with `!upgrade tools` as their viewer levels up.
+* **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge. When every spot is taken, old decor makes way for new buildings while people are content (a campfire goes before a statue), and what the town needs may also replace a spare producer of goods the stores are full of; homes, stores and food makers always stay, and `!upgrade` grows the rest.
 * **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
 * **People** move into homes when there is food and the town is not miserable. Parks, fountains, statues and stadiums make them happier, and happy towns work faster.
 * **Power** from the Industrial Age: coal plants, wind turbines, solar farms (only by day) and fusion. Factories and skyscrapers stop without it.
@@ -138,7 +155,9 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Days per era | `--era-days=11`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 11 (about 2 months in all) |
 | Where the world is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
-| Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `workMinutes`, `helpMinutes` and more | see `server/world.js` |
+| Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `queueMax`, `shiftSec` and more | see `server/world.js` |
+| The rival town | `limits.rival` (`false` turns it off), `limits.rivalDifficulty` (1 is normal, 0.7 easier, 1.3 harder) | on, 1 |
+| Merchant Guild orders | `limits.contracts` (`false` turns them off; they need the rival), `limits.contractEveryMin`, `limits.contractMin`, `limits.deliverSec` | on, about every 75 min, 30 min to fill, 30 s a trip |
 
 Page options: `?stream=1` broadcast view (press Esc, or the button that shows when you move the mouse, to leave it), `&sound=1` start with sound, `&quality=low` no shadows, `&time=21:30` pretend it is that time of day.
 
@@ -146,7 +165,7 @@ Page options: `?stream=1` broadcast view (press Esc, or the button that shows wh
 
 ```
 Twitch chat ──> server/twitch.js ──> server/commands.js ──> server/world.js ──> data/world.json
-                                                           (economy.js, gazette.js)
+                                                           (economy.js, rival.js, guild.js, gazette.js)
                                                                  │
                                                        events over /events (SSE)
                                                                  ▼

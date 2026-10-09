@@ -65,6 +65,9 @@ export const ITEMS = {
   fisher: { era: 0, label: 'Fishing hut', emoji: '🎣', kind: 'producer', cost: { wood: 10 }, buildSec: 20, zone: 'coast', workers: 1, recipe: { out: { food: 3 } }, evolve: 'harbor' },
   campfire: { era: 0, label: 'Campfire', emoji: '🔥', kind: 'decor', cost: { wood: 5 }, buildSec: 10, zone: 'any', comfort: 6, knowledge: 0.05 },
   stockpile: { era: 0, label: 'Stockpile', emoji: '📦', kind: 'storage', cost: { wood: 12 }, buildSec: 15, zone: 'inner', storage: 60, evolve: 'barn' },
+  // Outposts take the town out into the world: a store far from the middle,
+  // so producers out there work at full speed and gatherers walk less.
+  outpost: { era: 0, label: 'Outpost', emoji: '⛺', kind: 'storage', cost: { wood: 20, stone: 8 }, buildSec: 30, zone: 'far', storage: 20, reveal: 4 },
   totem: { era: 0, label: 'Totem', emoji: '🗿', kind: 'decor', cost: { wood: 6, stone: 14 }, buildSec: 25, zone: 'inner', comfort: 14, evolve: 'statue' },
   // --- Village ---------------------------------------------------------------
   cottage: { era: 1, label: 'Cottage', emoji: '🏠', kind: 'house', cost: { wood: 16, bricks: 10 }, buildSec: 25, zone: 'any', pop: 10, evolve: 'townhouse' },
@@ -225,6 +228,22 @@ export function titleFor(level) {
 // Every viewer has one home of their own. It grows with !upgrade (levels 1
 // to 3) and turns into the new kind of home whenever a new era starts.
 export const HOME_LEVELS = 3;
+// Town buildings can be upgraded twice; every level makes 50% more
+// (goods, power, storage room, people or knowledge).
+export const BUILD_LEVELS = 3;
+export const levelMult = (level) => 1 + 0.5 * ((level || 1) - 1);
+// Better tools for a viewer's bot (!upgrade tools): a bigger load on every
+// trip and faster building. Each needs a viewer level, the era its material
+// comes from, and a few goods from the town.
+export const TOOLS = [
+  { key: 'stone', label: 'Stone tools', level: 1, era: 0, cost: {}, load: 2, build: 1, color: '#9b9a94' },
+  { key: 'copper', label: 'Copper tools', level: 3, era: 1, cost: { bricks: 6, wood: 6 }, load: 3, build: 1.25, color: '#c97a3c' },
+  { key: 'iron', label: 'Iron tools', level: 6, era: 2, cost: { iron: 8 }, load: 4, build: 1.5, color: '#5a616b' },
+  { key: 'steel', label: 'Steel tools', level: 10, era: 3, cost: { steel: 8 }, load: 5, build: 1.75, color: '#cfd6de' },
+  { key: 'power', label: 'Power tools', level: 15, era: 4, cost: { parts: 8 }, load: 6, build: 2, color: '#f2b705' },
+  { key: 'laser', label: 'Laser tools', level: 20, era: 5, cost: { chips: 6 }, load: 8, build: 2.5, color: '#38e0ff' },
+];
+export const toolsOf = (builder) => TOOLS[Math.max(0, Math.min(TOOLS.length - 1, builder?.tool || 0))];
 export const homePop = (level) => 2 + (level || 1);
 
 export const PALETTE = Object.values(COLORS).filter((c) => c !== COLORS.white && c !== COLORS.black);
@@ -248,6 +267,13 @@ export function resolveItem(word) {
   if (r !== 'house' && ITEMS[r].kind === 'wonder') return null;
   return r;
 }
+// "wonder", or a wonder's own name ("cathedral", "stone circle"): the whole
+// chat builds those together, so !build wonder means !help wonder.
+const WONDER_WORDS = new Set(['wonder', 'wonders']);
+for (const [k, it] of Object.entries(ITEMS)) {
+  if (it.kind === 'wonder') WONDER_WORDS.add(k).add(it.label.toLowerCase().replace(/\s+/g, ''));
+}
+export const isWonderWord = (word) => WONDER_WORDS.has(String(word || '').toLowerCase().replace(/\s+/g, ''));
 export const resolveColor = (word) => lookup(word, COLORS, COLOR_ALIASES);
 export const resolveHat = (word) => lookup(word, HATS, HAT_ALIASES);
 export const resolveResource = (word) => lookup(word, RESOURCES, { wonder: 'wonder', bread: 'food', logs: 'wood', sticks: 'wood', stick: 'wood', rocks: 'stone', rock: 'stone', brick: 'bricks', ore: 'iron', metal: 'iron', part: 'parts', chip: 'chips' });
