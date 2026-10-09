@@ -412,7 +412,7 @@ export class World {
     if (this.builds.filter((b) => b.home && b.status === 'queued').length >= this.limits.maxQueue) return this.refuse(u, now, 'So many new homes at once! Try again in a minute.');
     const item = houseFor(s.era);
     let plot = this.choosePlot(item, { home: true, ownerId: u.id, salt: s.seq + 1 });
-    const spare = plot ? null : this.spareFor(item);
+    const spare = plot ? null : this.spareFor(item, true);
     if (spare) plot = M.tileAt(this.map, spare.q, spare.r);
     if (!plot) return this.refuse(u, now, 'No free land for a home right now. Type !explore to find more!');
     this.touchBuilder(u, now);
@@ -542,11 +542,12 @@ export class World {
     const tooBig = this.tooBigForStorage(it.cost);
     if (tooBig) return this.refuse(u, now, tooBig);
     let plot = this.choosePlot(item, { near: cmd.near, dir: cmd.dir, ownerId: u.id, salt: s.seq + 1 });
-    const spare = plot ? null : this.spareFor(item);
+    const spare = plot ? null : this.spareFor(item, this.needed(item, now));
     if (spare) plot = M.tileAt(this.map, spare.q, spare.r);
     if (!plot) {
       const why = M.siteOf(item).why;
-      return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left. Type !explore to find more, or !upgrade a building to get more out of it!');
+      if (this.explored()) return this.refuse(u, now, 'The town is full! Old buildings only make way for what it needs now (see the plan), or !upgrade a building to get more out of it.');
+      return this.refuse(u, now, why ? withArticle(it.label) + ' needs ' + why + ' and the town has not found one yet. Type !explore to search the fog!' : 'No free land left nearby. Type !explore to find more, or !upgrade a building to get more out of it!');
     }
     this.touchBuilder(u, now);
     if (spare) this.makeWay(spare, item, now);
@@ -1389,7 +1390,22 @@ export class World {
 
   // Is there a known, free spot for this building (or one it can take over)?
   hasSite(item) {
-    return !!this.choosePlot(item, { quick: true }) || !!this.spareFor(item);
+    return !!this.choosePlot(item, { quick: true }) || !!this.spareFor(item, true);
+  }
+
+  // What the town needs now (the plan shows it): only that may take the
+  // place of old buildings when the town is full.
+  needed(item, now = Date.now()) {
+    if (!this.econ) this.economy(now, 0);
+    const e = this.econ;
+    const it = ITEMS[item];
+    if (e.needs.some((n) => (n.res === 'power' ? it.power > 0 : !!it.recipe?.out?.[n.res]))) return true;
+    return it.kind === 'house' && e.population >= e.popCap - 1 && e.popCap < ERAS[this.state.era].popGoal * 1.5;
+  }
+
+  // Has every reachable bit of fog been explored?
+  explored() {
+    return !M.frontier(this.map, this.bits).some((t) => M.walkable(t) || M.neighborsOf(this.map, t).some((n) => this.known(n) && M.walkable(n)));
   }
 
   // What the town is short of right now, with the building that helps
@@ -1400,7 +1416,7 @@ export class World {
     const add = (r, why) => {
       if (out.some((n) => n.res === r)) return;
       // The best maker that has a known spot, else the best one (and a hint to explore).
-      const makers = E.makersOf(r, s.era);
+      const makers = r === 'power' ? E.powerMakers(this.builds, s.era) : E.makersOf(r, s.era);
       if (!makers.length) return;
       const item = makers.find((k) => this.hasSite(k)) || makers[0];
       out.push({ res: r, why, item, site: this.hasSite(item), where: M.siteOf(item).why || null });
@@ -1626,16 +1642,16 @@ export class World {
     return best;
   }
 
-  // The town is full: a building it can spare makes way for a new one. Decor
-  // from an older era goes first (a campfire in the Electric City), then the
-  // commonest decor, then a spare producer of goods the stores are full of.
-  // Homes, stores, power, knowledge and wonders always stay.
-  spareFor(item) {
+  // The town is full: a building it can spare makes way for a new one (see
+  // E.spareScorer). Decor gives way to newer decor; for what the town needs
+  // (need) old decor goes first, then a spare producer of goods the stores
+  // are full of. Homes, stores, power, knowledge, food and wonders stay.
+  spareFor(item, need = false) {
     const it = ITEMS[item];
     if (it.zone === 'far') return null;
     const theirs = this.rivalLand();
     const mine = theirs.size ? (n) => this.known(n) && !theirs.has(n.i) : this.known;
-    const spare = E.spareScorer(this.builds, this.state.stock, E.capacity(this.builds), it);
+    const spare = E.spareScorer(this.builds, this.state.stock, E.capacity(this.builds), it, need);
     let best = null;
     let bestScore = Infinity;
     for (const b of this.builds) {

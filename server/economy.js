@@ -207,6 +207,13 @@ export function makersOf(res, era) {
   }
   return out.sort((a, b) => b.era - a.era || b.amount - a.amount).map((m) => m.key);
 }
+// Power plants to build, the best first. Solar farms make nothing at night,
+// so they stop being an option once they are half of the plants.
+export function powerMakers(builds, era) {
+  const plants = builds.filter((b) => ITEMS[b.item]?.power > 0);
+  const solar = plants.filter((b) => ITEMS[b.item].solar).length;
+  return makersOf('power', era).filter((k) => !ITEMS[k].solar || solar * 2 < plants.length);
+}
 // The best building of this era (or earlier) that makes a resource, or
 // electricity when res is 'power'.
 export function bestMaker(res, era) {
@@ -222,10 +229,12 @@ export function bestMaker(res, era) {
 }
 
 // When a town is full, which of its buildings may make way for a new one of
-// kind `it`: lower scores go first, null never. Decor from an older era goes
-// first, then the commonest decor (decor only gives way to newer decor), then
-// a spare producer (one of three or more) of goods the stores are full of.
-export function spareScorer(builds, stock, cap, it) {
+// kind `it`: lower scores go first, null never. Decor gives way to newer
+// decor at any time. For what the town needs (`need`) older decor goes
+// first, then the commonest, then a spare producer (one of three or more)
+// of goods the stores are full of. Food makers always stay: people eat
+// every minute.
+export function spareScorer(builds, stock, cap, it, need = true) {
   const count = {};
   for (const b of builds) count[b.item] = (count[b.item] || 0) + 1;
   const makes = Object.keys(it.recipe?.out || {});
@@ -234,12 +243,12 @@ export function spareScorer(builds, stock, cap, it) {
     const bt = ITEMS[b.item];
     const level = 3 * (b.level || 1);
     if (bt.kind === 'decor') {
-      if (it.kind === 'decor' && bt.era >= it.era) return null;
+      if (it.kind === 'decor' ? bt.era >= it.era : !need) return null;
       return bt.era * 10 + (bt.comfort || 0) / 10 + level - count[b.item] / 4;
     }
-    if (bt.kind !== 'producer' || it.kind === 'decor' || count[b.item] < 3) return null;
+    if (bt.kind !== 'producer' || !need || it.kind === 'decor' || count[b.item] < 3) return null;
     const outs = Object.keys(bt.recipe?.out || {});
-    if (!outs.length || outs.some((r) => makes.includes(r) || (stock[r] || 0) < cap * 0.9)) return null;
+    if (!outs.length || outs.includes('food') || outs.some((r) => makes.includes(r) || (stock[r] || 0) < cap * 0.9)) return null;
     return 100 + bt.era * 10 + level + 5 * (b.rich || 1) - count[b.item] / 4;
   };
 }

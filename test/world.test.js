@@ -729,11 +729,33 @@ test('a full town makes room: old decor gives way, stores and homes stay', () =>
   assert.equal(w.builds.some((b) => b.id === fire.id), false, 'the campfire made way');
   assert.deepEqual([res.build.q, res.build.r], [fire.q, fire.r]);
   assert.ok(events.some((e) => e.type === 'notice' && /old campfire .* makes way for a hut/.test(e.text)));
-  // Decor only gives way to newer decor, and stores never do.
+  // Decor only gives way to newer decor, stores never do, and only what the
+  // town needs may take the place of decor.
   const again = say(w, { id: 'e', name: 'erin' }, '!build campfire', now);
   assert.equal(again.ok, false);
   assert.match(again.message, /No free land left/);
+  assert.equal(w.needed('stockpile'), false);
+  assert.equal(say(w, { id: 'f', name: 'finn' }, '!build stockpile', now).ok, false);
   assert.ok(w.builds.some((b) => b.item === 'totem') && w.builds.some((b) => b.item === 'stockpile'));
+});
+
+test('what may make way: old decor first, spare producers of full goods, never food, stores or homes', () => {
+  const b = (id, item, extra = {}) => ({ id, item, built: true, status: 'done', level: 1, ...extra });
+  const builds = [b(1, 'campfire'), b(2, 'statue'), b(3, 'farm'), b(4, 'farm'), b(5, 'farm'), b(6, 'quarry'), b(7, 'quarry'), b(8, 'quarry'), b(9, 'kiln'), b(10, 'stockpile'), b(11, 'hut', { home: true })];
+  const stock = { food: 1000, stone: 1000, bricks: 1000, wood: 10 };
+  const need = E.spareScorer(builds, stock, 1000, ITEMS.steelmill, true);
+  const score = Object.fromEntries(builds.map((x) => [x.id, need(x)]));
+  assert.ok(score[1] < score[2], 'a campfire goes before a statue');
+  assert.ok(score[2] < score[6], 'decor goes before producers');
+  assert.equal(score[3], null, 'food makers stay');
+  assert.equal(score[9], null, 'the only kiln stays');
+  assert.equal(score[10], null, 'stores stay');
+  assert.equal(score[11], null, 'homes stay');
+  // Without a need, nothing gives way; newer decor may replace older decor.
+  const free = E.spareScorer(builds, stock, 1000, ITEMS.steelmill, false);
+  assert.ok(builds.every((x) => free(x) == null));
+  const fountain = E.spareScorer(builds, stock, 1000, ITEMS.fountain, false);
+  assert.ok(fountain(builds[0]) != null && fountain(builds[1]) == null);
 });
 
 test('a restart catches up on homes, and projects carry on', () => {
