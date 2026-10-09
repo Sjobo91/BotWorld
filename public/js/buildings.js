@@ -2,9 +2,12 @@
 // shapes, stands on y = 0, faces +z (towards the middle of the island) and
 // fits inside one plot. buildingMesh returns { g, h, anim }: h is about how
 // tall it is (for scaffolding and labels), anim lists the parts that move.
+// Buildings that last through many eras change their look as their town
+// moves on (eralooks.js): pass the era the town has reached.
 import { ITEMS, hashStr } from '../shared/catalog.js';
 import { three, mats, geo, mesh, rng, trimMat, colorOf, stripeMat, oct, addWindows, treeMesh, benchMesh, flowerBed, crenellations, mergeGeos, beamGeo, palmMesh } from './meshes.js';
 import { wonderModel, isWonderModel } from './wonders.js';
+import { lookEra, lookModel } from './eralooks.js';
 
 let T = null;
 const box = (w, h, d) => new T.BoxGeometry(w, h, d);
@@ -290,14 +293,22 @@ const BUILDERS = {
     smokeAt(k.anim, 0.08, 0.4, -0.06, 2.4);
     return 0.4;
   },
+  // A well of mud brick with a wooden frame and a pulley; water jars wait
+  // beside it under a palm.
   well(k) {
-    k.part('wellRing', () => cyl(0.14, 0.15, 0.12, 12), mats.stone, 0, 0.06, 0);
-    k.part('wellWater', () => cyl(0.11, 0.11, 0.01, 12), mats.waterLight, 0, 0.1, 0);
-    for (const s of [-1, 1]) k.part('wellPost', () => box(0.025, 0.28, 0.025), mats.woodDark, s * 0.13, 0.2, 0);
-    k.part('wellRoof', () => gable(0.36, 0.1, 0.24), k.b.color ? k.trim : mats.roof, 0, 0.36, 0);
-    k.part('wellBar', () => cyl(0.008, 0.008, 0.26, 5), mats.wood, 0, 0.28, 0).rotation.z = Math.PI / 2;
-    k.part('bucket', () => cyl(0.03, 0.025, 0.04, 8), mats.wood, 0, 0.2, 0);
-    return 0.42;
+    k.part('ewRing', () => cyl(0.13, 0.15, 0.11, 12), mats.mudLight, 0, 0.055, 0);
+    k.part('ewRim', () => new T.TorusGeometry(0.135, 0.018, 6, 16).rotateX(Math.PI / 2), mats.mud, 0, 0.11, 0);
+    k.part('ewWater', () => cyl(0.11, 0.11, 0.01, 12), mats.waterLight, 0, 0.095, 0);
+    k.part('ewFrame', () => mergeGeos([boxAt(0.022, 0.3, 0.022, -0.13, 0.15, 0), boxAt(0.022, 0.3, 0.022, 0.13, 0.15, 0), boxAt(0.3, 0.022, 0.022, 0, 0.3, 0)]), mats.woodDark, 0, 0, 0);
+    k.part('ewPulley', () => new T.TorusGeometry(0.025, 0.007, 5, 10), mats.wood, 0, 0.27, 0);
+    k.part('ewRope', () => cyl(0.003, 0.003, 0.1, 4), mats.black, 0.025, 0.22, 0);
+    k.part('ewJug', () => sph(0.025, 8, 6), mats.terracotta, 0.025, 0.16, 0).scale.set(1, 1.3, 1);
+    for (const [x, z, s] of [[0.2, 0.12, 1], [0.25, 0.04, 0.8], [-0.2, 0.14, 0.9]]) k.part('ewJar', () => sph(0.035, 8, 6), mats.terracotta, x, 0.04 * s, z).scale.set(s, s * 1.3, s);
+    const p = palmMesh();
+    p.position.set(-0.22, 0, -0.2);
+    p.scale.setScalar(0.6);
+    k.g.add(p);
+    return 0.36;
   },
   market(k) {
     const stalls = [[-0.16, -0.06, 0.25], [0.16, -0.06, -0.25], [0, 0.16, 0]];
@@ -483,15 +494,24 @@ const BUILDERS = {
     k.anim.push({ kind: 'flag', o: k.part('flag', () => box(0.12, 0.07, 0.005), k.trim, 0.06, top + 0.18, 0) });
     return top + 0.22;
   },
+  // A Roman school: a hall with a porch of columns under red tiles, a
+  // sundial and a basket of scrolls in the yard.
   school(k) {
-    k.part('schoolBody', () => box(0.46, 0.22, 0.3), mats.brick, 0, 0.11, 0);
-    k.part('schoolRoof', () => gable(0.5, 0.16, 0.34), mats.slate, 0, 0.29, 0);
-    k.part('belfry', () => box(0.1, 0.16, 0.1), mats.plaster, 0, 0.42, 0.04);
-    k.part('belfryRoof', () => cone(0.09, 0.12, 4), k.trim, 0, 0.56, 0.04).rotation.y = Math.PI / 4;
-    k.part('bell', () => cone(0.025, 0.04, 8), mats.yellow, 0, 0.42, 0.095);
-    k.part('schoolDoor', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.152);
-    for (const x of [-0.15, 0.15]) k.part('schoolWin', () => box(0.08, 0.08, 0.012), mats.window, x, 0.12, 0.152);
-    return 0.6;
+    const tiles = k.b.color ? k.trim : mats.terracotta;
+    k.part('scPodium', () => box(0.52, 0.04, 0.42), mats.travertine, 0, 0.02, -0.02);
+    k.part('scHall', () => box(0.44, 0.2, 0.22), mats.plaster, 0, 0.14, -0.1);
+    k.part('scRoof', () => gable(0.48, 0.12, 0.26), tiles, 0, 0.28, -0.1);
+    k.part('scCols', () => mergeGeos([-0.18, -0.06, 0.06, 0.18].map((x) => cyl(0.014, 0.017, 0.16, 8).translate(x, 0.12, 0.12))), mats.marble, 0, 0, 0);
+    k.part('scBeam', () => box(0.44, 0.022, 0.022), mats.marble, 0, 0.2, 0.12);
+    k.part('scPorch', () => box(0.48, 0.018, 0.16).rotateX(0.18), tiles, 0, 0.222, 0.075);
+    k.part('scDoor', () => box(0.07, 0.12, 0.012), mats.door, 0, 0.1, 0.012);
+    k.part('scWins', () => mergeGeos([-0.14, 0.14].map((x) => boxAt(0.05, 0.05, 0.012, x, 0.16, 0.012))), mats.window, 0, 0, 0);
+    k.part('scDialPost', () => cyl(0.022, 0.028, 0.08, 8), mats.marble, 0.2, 0.04, 0.28);
+    k.part('scDial', () => cyl(0.045, 0.045, 0.01, 14), mats.travertine, 0.2, 0.085, 0.28);
+    k.part('scGnomon', () => box(0.006, 0.035, 0.04).translate(0, 0.017, 0), mats.gold, 0.2, 0.09, 0.28);
+    k.part('scCapsa', () => cyl(0.03, 0.03, 0.06, 10), mats.wood, -0.2, 0.03, 0.27);
+    k.part('scScrolls', () => mergeGeos([[-0.01, -0.008], [0.012, 0.006], [-0.004, 0.014]].map(([x, z]) => cyl(0.008, 0.008, 0.06, 6).translate(x, 0, z))), mats.plaster, -0.2, 0.07, 0.27);
+    return 0.42;
   },
   harbor(k) {
     k.part('quay', () => box(0.5, 0.05, 0.22), mats.stone, 0, 0.025, -0.12);
@@ -509,24 +529,30 @@ const BUILDERS = {
     for (let i = 0; i < 3; i++) k.part('barrel', () => cyl(0.03, 0.03, 0.06, 8), mats.wood, 0.12 + i * 0.065, 0.08, -0.14);
     return 0.42;
   },
+  // The Pharos of Alexandria in small: a square tower, an octagon and a
+  // round lantern, Tritons on the corners and a fire burning on top.
+  // Later eras build it anew (see eralooks.js).
   lighthouse(k) {
-    const bands = [[0.17, 0.2, 0.2], [0.145, 0.17, 0.2], [0.125, 0.145, 0.2]];
-    bands.forEach(([rt, rb, hh], i) => k.part('lhBand' + i, () => cyl(rt, rb, hh, 12), i % 2 ? mats.white : k.trim, 0, hh / 2 + i * hh, 0));
-    k.part('lhGallery', () => cyl(0.17, 0.17, 0.025, 12), mats.black, 0, 0.61, 0);
-    k.part('lhGlass', () => cyl(0.09, 0.09, 0.1, 10), mats.glass, 0, 0.67, 0);
-    k.part('lhLamp', () => sph(0.05, 10, 8), mats.lamp, 0, 0.67, 0);
-    k.part('lhRoof', () => cone(0.12, 0.1, 10), k.trim, 0, 0.77, 0);
-    k.part('door', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.2);
-    const glow = new T.Sprite(mats.glow);
-    glow.position.set(0, 0.67, 0);
-    glow.scale.set(1.1, 1.1, 1);
-    k.g.add(glow);
-    const beam = new T.Group();
-    beam.position.y = 0.67;
-    mesh(geo('beam', () => new T.ConeGeometry(0.22, 2.4, 12, 1, true)), mats.beam, 0, 0, 1.2, beam).rotation.x = -Math.PI / 2;
-    k.g.add(beam);
-    k.anim.push({ kind: 'beam', o: beam });
-    return 0.85;
+    k.part('phBase', () => box(0.46, 0.05, 0.46), mats.travertineDark, 0, 0.025, 0);
+    k.part('phTier1', () => new T.CylinderGeometry(0.15, 0.2, 0.36, 4).rotateY(Math.PI / 4), mats.limestone, 0, 0.23, 0);
+    k.part('phSlits', () => mergeGeos([[0.17, 0.13], [0.3, 0.118]].map(([y, z]) => boxAt(0.03, 0.05, 0.01, 0, y, z))), mats.black, 0, 0, 0);
+    k.part('phDoor', () => box(0.06, 0.1, 0.012), mats.door, 0, 0.1, 0.137);
+    k.part('phCornice1', () => box(0.25, 0.025, 0.25), mats.travertine, 0, 0.42, 0);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) k.part('phTriton', () => new T.CapsuleGeometry(0.012, 0.03, 3, 6), mats.gold, x * 0.105, 0.465, z * 0.105);
+    k.part('phTier2', () => oct(0.095, 0.11, 0.2), mats.limestone, 0, 0.5325, 0);
+    k.part('phCornice2', () => oct(0.12, 0.12, 0.02), mats.travertine, 0, 0.6425, 0);
+    k.part('phTier3', () => cyl(0.065, 0.075, 0.1, 12), mats.limestone, 0, 0.7025, 0);
+    k.part('phBowl', () => cyl(0.07, 0.05, 0.03, 12), mats.gold, 0, 0.7675, 0);
+    const f1 = k.part('lkFlame1', () => blob(0.05).scale(1, 1.9, 1).translate(0, 0.015, 0), mats.flame, 0, 0.8, 0);
+    const f2 = k.part('lkFlame2', () => blob(0.03).scale(1, 1.9, 1), mats.flame2, 0, 0.8, 0);
+    k.anim.push({ kind: 'fire', f1, f2 });
+    for (const [m, sz] of [[mats.fireGlow, 0.8], [mats.glow, 1.3]]) {
+      const glow = new T.Sprite(m);
+      glow.position.set(0, 0.84, 0);
+      glow.scale.set(sz, sz, 1);
+      k.g.add(glow);
+    }
+    return 0.9;
   },
   fountain(k) {
     k.part('basin', () => cyl(0.3, 0.32, 0.09, 16), mats.statue, 0, 0.045, 0);
@@ -859,7 +885,7 @@ const BUILDERS = {
 // Buildings fill most of their plot (wonders are sized for their ring), and
 // grow a little with every level.
 const KIND_SCALE = { wonder: 1, house: 1.25, decor: 1.2 };
-export function buildingMesh(b, level) {
+export function buildingMesh(b, level, era) {
   T = three();
   const g = new T.Group();
   const body = new T.Group();
@@ -880,7 +906,9 @@ export function buildingMesh(b, level) {
     lv,
     part: (name, make, m, x, y, z) => mesh(geo(name, make), m, x, y, z, body),
   };
-  const make = BUILDERS[b.item] || ((kk) => wonderModel(b.item, kk) ?? (kk.part('crate', () => box(1, 1, 1), mats.wood, 0, 0.1, 0).scale.setScalar(0.2), 0.25));
+  const own = BUILDERS[b.item] || ((kk) => wonderModel(b.item, kk) ?? (kk.part('crate', () => box(1, 1, 1), mats.wood, 0, 0.1, 0).scale.setScalar(0.2), 0.25));
+  const look = lookEra(b.item, era);
+  const make = (kk) => lookModel(b.item, look, kk) ?? own(kk);
   const h = make(k) * scale;
   // Upgraded town buildings fly pennants: silver at level 2, gold at level 3.
   if (lv > 1 && !b.home && kind !== 'wonder') levelPennants(k, lv);

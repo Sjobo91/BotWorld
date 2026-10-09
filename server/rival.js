@@ -5,9 +5,10 @@
 //
 // It plays like a small, steady chat of a few regulars: a crew of AI bots
 // gathers and builds, and about once an hour it starts something new (some
-// 20 buildings a day). Its speed leans a little towards keeping the race
-// close, so a busy chat can pull ahead and a sleeping chat is not left
-// hopelessly behind.
+// 20 buildings a day). It is a little slower than a small, active chat and
+// leans towards keeping the race close: it usually reaches a new era first,
+// an active chat wins the last sprint to the Future by about a day, and a
+// sleeping chat is not left hopelessly behind.
 import { ITEMS, ERAS, RESOURCES, BUILD_LEVELS, hashStr, houseFor, evolvedItem, itemsOfEra, otherWonder, wondersOf } from '../public/shared/catalog.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
 import * as M from '../public/shared/terrain.js';
@@ -18,6 +19,10 @@ const ID0 = 1_000_000;
 const STEP_SEC = 5;
 const LABOR = 6;
 const RAW = ['wood', 'stone', 'food', 'marble', 'coal', 'iron'];
+// Its pace at difficulty 1, before leaning. At full pace it beat two and
+// five regulars to the Future in the balance races; at 0.85 they win by
+// about a day.
+const BASE_SPEED = 0.85;
 
 // A home on the far side: land away from the sea, about 27 tiles out, with
 // forest, hills and berries around it.
@@ -120,12 +125,13 @@ export class Rival {
     this.landCache = null;
   }
 
-  // How hard the rival plays: leaning towards a close race. Half an era
-  // behind chat it plays 40% faster, half an era ahead 35% slower.
+  // How hard the rival plays: its base pace times the difficulty, leaning
+  // towards a close race. Half an era behind chat it plays 40% faster, half
+  // an era ahead 35% slower.
   speed() {
     const gap = this.w.raceProgress().total - this.raceProgress().total;
     const lean = Math.max(-0.35, Math.min(0.45, 0.8 * gap));
-    return Math.max(0.4, (this.w.rivalDifficulty || 1) * (1 + lean));
+    return Math.max(0.4, BASE_SPEED * (this.w.rivalDifficulty || 1) * (1 + lean));
   }
   // How far along the road to the Future: the era, plus how far the slowest
   // of knowledge, the wonder and people is towards the next one.

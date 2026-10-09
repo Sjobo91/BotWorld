@@ -5,6 +5,7 @@
 //   npm run balance                       5 regular viewers
 //   npm run balance -- --viewers=30       a busy channel
 //   npm run balance -- --viewers=2 --days=120 --eraDays=9
+//   npm run balance -- --difficulty=1.2   a harder rival (limits.rivalDifficulty)
 //
 // It can also make a ready-grown island to look at:
 //   npm run balance -- --untilEra=3 --save=data-preview
@@ -28,7 +29,10 @@ Math.random = rnd;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 
 const T0 = Date.UTC(2026, 9, 1, 8);
-const world = new World(freshState(T0, SEED), { pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined });
+const world = new World(freshState(T0, SEED), {
+  pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined,
+  limits: args.difficulty ? { rivalDifficulty: Number(args.difficulty) } : undefined,
+});
 const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
@@ -113,7 +117,7 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
   }
 }
 
-console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
+console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays + ', rival difficulty ' + world.rivalDifficulty);
 console.table(daily);
 for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.pick ? '[vote] ' + l.text : l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, ' + ITEMS[l.item].finale : 'entered ' + ERAS[l.era].the));
 if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));

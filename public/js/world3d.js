@@ -8,6 +8,7 @@ import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GAT
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat, NATURE } from './meshes.js';
 import { buildingMesh } from './buildings.js';
+import { lookEra } from './eralooks.js';
 import { createAudio } from './audio.js';
 
 const R = 0.62;
@@ -987,11 +988,16 @@ export async function createWorld(stage, overlay, opts) {
     for (const id of [...poiUser.keys()]) if (!live.has(id)) poiUser.delete(id);
   }
 
+  // Old buildings take the look of the era their town has reached: the
+  // town's for chat's buildings, the rival's for the rival's.
+  const rivalEra = () => data.econ?.race?.rival?.era ?? era;
+  const eraOf = (b) => (b.rival ? rivalEra() : era);
   function setBody(v, item, level, celebrate) {
-    const key = item + ':' + level;
+    const style = lookEra(item, eraOf(v.b));
+    const key = item + ':' + level + ':' + style;
     if (v.body && v.key === key) return;
     if (v.body) v.root.remove(v.body);
-    const made = buildingMesh({ ...v.b, item, level }, level);
+    const made = buildingMesh({ ...v.b, item, level }, level, style);
     v.body = made.g;
     v.h = made.h;
     v.anim = made.anim;
@@ -1000,6 +1006,15 @@ export async function createWorld(stage, overlay, opts) {
     if (celebrate) v.grow = 0.25;
     if (v.damaged) v.body.rotation.z = 0.07;
     renderer.shadowMap.needsUpdate = true;
+  }
+  // A new era: rebuild what looks different now (a log cabin becomes a
+  // sawmill, a pharos a striped lighthouse).
+  function refreshLooks(rival) {
+    for (const v of builds.values()) {
+      if (!v.body || !!v.b.rival !== rival) continue;
+      setBody(v, v.b.pending ? 'wondersite' : v.b.item, v.b.level || 1, false);
+      if (v.b.built && !v.b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
+    }
   }
   function clearBody(v) {
     if (v.body) v.root.remove(v.body);
@@ -2922,6 +2937,7 @@ export async function createWorld(stage, overlay, opts) {
   // --- Eras -----------------------------------------------------------------------------------
   function applyEra(e) {
     era = Math.max(0, Math.min(ERAS.length - 1, e || 0));
+    refreshLooks(false);
     mats.path.color.set(look().path);
     mats.bot.color.set(look().bot);
     rebuildLamps();
@@ -3082,7 +3098,9 @@ export async function createWorld(stage, overlay, opts) {
       else if (b && b.mode === 'walk' && job) decide(b);
     },
     setEconomy(econ) {
+      const was = rivalEra();
       data.econ = econ;
+      if (rivalEra() !== was) refreshLooks(true);
       syncRivalBots();
     },
     produce(list) {

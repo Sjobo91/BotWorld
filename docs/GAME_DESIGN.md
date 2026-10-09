@@ -46,7 +46,7 @@ Cogsworth is an AI town about 27 tiles out, on the side of the world away from t
 * Its economy, wonders and eras follow the town's rules: production with workers, happiness, power and reach, food for its people, knowledge over `eraDays`, the era's wonder and the people goal.
 * **Land.** Tiles within two steps of a rival building are the rival's, and the town cannot build or gather there; the rival keeps out of the town's land the same way. Each side also keeps a home ground nobody else may build on: 13 tiles round the landing pad, 10 round Cogsworth's square. Both spread out over the map with their outposts and race for the forests, hills and ore deposits in between, and a full rival makes room the way the town does.
 * **How it plays.** Power comes first (buildings without it make nothing), and solar farms are at most half its power plants, since they make nothing at night. It never adds makers of a good while the ones it has stand idle for lack of power or inputs, mines go for the ore it lacks, it builds campfires, schools and labs until knowledge comes as fast as it can, and decor only while its people are not content.
-* **The race.** Both towns race on era progress: the era, plus how far the slowest of knowledge, the wonder and people is towards the next one (the next era needs all three, so a crowd of new homes in the first minutes is no lead). The race panel shows all three for both towns. The rival leans towards a close race: up to 45% faster when chat is ahead, up to 35% slower when chat is behind (times `limits.rivalDifficulty`).
+* **The race.** Both towns race on era progress: the era, plus how far the slowest of knowledge, the wonder and people is towards the next one (the next era needs all three, so a crowd of new homes in the first minutes is no lead). The race panel shows all three for both towns. The rival plays at 85% of a full pace (times `limits.rivalDifficulty`) and leans towards a close race: up to 45% faster when chat is ahead, up to 35% slower when chat is behind. So it usually reaches a new era first, and an active chat wins the last sprint to the Future.
 * **Fog.** The rival is hidden until chat's scouts reach its land; then the camera goes to look, and its buildings show on the map with red edges and red bots at work. Until then the **Race to the Future** panel says which way it lies.
 
 ## Merchant Guild orders
@@ -57,7 +57,7 @@ The economic battle between the two towns happens at the Guild's wagon on the la
 * **Hauling.** `!deliver` sends your bot on a 30 second trip with crates from the pad to the wagon; when it is back, each crate it carried fills a fortieth of the order (2 crates with stone tools, 8 with laser tools, so a trip fills 5% to 20%). `!deliver 3` lines up three trips. The townsfolk haul 1.5% a minute on their own. The goods come out of the town's stock: no bricks, no delivery (the plan box then says how to make some).
 * **The rival** hauls 1.5% a minute plus 2.5% a minute with a full crew (half that with a small one), times its lean towards a close race, out of its own stock. On its own it fills an order in about 20 to 35 minutes, so a chat that ignores the Guild loses, and one or two bots that keep hauling win.
 * **Winning.** The first town to fill the order wins, or, when time runs out, whoever delivered more. The Guild pays one and a half times the goods' worth (a good is worth 1 plus its era: wood 1, bricks 2, marble 3, iron 4, steel 5, chips 6) in the two goods the winner has least of, and its scholars share 30 minutes of knowledge. Every bot that hauled for a winning order gets 8 XP (and 3 per trip). The loser gets its crates back. The score of orders won stays in the race panel, and the Gazette reports the wins.
-* **Balance.** In the balance runs chat wins almost three orders in four with two regular viewers (140 of 193 over the game) and three in four with five (285 of 378). Cogsworth takes the orders chat is not around for.
+* **Balance.** In the balance runs chat wins seven orders in ten with two regular viewers (132 of 187 over the game) and three in four with five (283 of 383). Cogsworth takes the orders chat is not around for.
 
 ## What chat sees
 
@@ -98,18 +98,35 @@ This is what stretches the game to about two months: chat can speed it up, but e
 
 | Era starts | 2 viewers | Cogsworth | 5 viewers | Cogsworth |
 | --- | --- | --- | --- | --- |
-| 🐪 Ancient Egypt | day 8.0 | day 6.8 | day 7.9 | day 6.7 |
-| 🏛️ Roman Empire | day 16.2 | day 14.2 | day 15.9 | day 14.0 |
-| 🏰 Middle Ages | day 24.2 | day 22.0 | day 23.8 | day 21.7 |
-| 🏭 Industrial Revolution | day 32.3 | day 30.0 | day 31.8 | day 29.5 |
-| 🏙️ Modern Age | day 40.3 | day 38.0 | day 39.9 | day 37.5 |
-| ✨ Future | day 49.0 | day 46.1 | day 47.8 | day 45.6 |
-| Finale (the Future's wonder done) | day 54.8 | day 54.0 | day 52.8 | day 52.8 |
-| Guild orders won | 140 of 193 | 53 | 285 of 378 | 93 |
+| 🐪 Ancient Egypt | day 8.0 | day 7.6 | day 8.0 | day 7.5 |
+| 🏛️ Roman Empire | day 16.2 | day 15.3 | day 15.8 | day 15.2 |
+| 🏰 Middle Ages | day 24.2 | day 23.3 | day 23.8 | day 22.9 |
+| 🏭 Industrial Revolution | day 32.3 | day 31.4 | day 31.8 | day 30.8 |
+| 🏙️ Modern Age | day 40.4 | day 39.4 | day 39.7 | day 38.8 |
+| ✨ Future | day 49.0 | day 47.5 | day 47.8 | day 46.8 |
+| Finale (the Future's wonder done) | day 54.2 | about day 55 | day 53.0 | about day 54 |
+| Guild orders won | 132 of 187 | 55 | 283 of 383 | 100 |
 
-Each pretend viewer is online an hour and a half a day and types a command about every minute, and votes in every wonder vote. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 720 buildings with two viewers and 1,300 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era about two days before chat (so chat usually votes on a wonder the moment Cogsworth gets there), and chat catches up at the very end. With two viewers Cogsworth finished its Space Elevator about 20 hours before chat lit the Fusion Spire; with five the two finished within a few hours of each other, Cogsworth just first.
+Each pretend viewer is online an hour and a half a day and types a command about every minute, and votes in every wonder vote. Because eras wait on knowledge, the finale lands in the eighth week whether two or five regulars play; a busy chat builds a much bigger town on the way (about 730 buildings with two viewers and 1,330 with five; a busy town fills every spot, and then old decor makes way). Cogsworth plays in the same runs: it enters every era half a day to a day and a half before chat (so chat usually votes on a wonder the moment Cogsworth gets there), and chat catches up in the Future. In both runs Cogsworth had its wonder and its people when chat's finale came, but still a tenth of its knowledge to go: about a day behind. At full pace (`limits.rivalDifficulty` 1.18) Cogsworth won both races by a nose.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, a totem an obelisk and later a statue, an irrigation canal a windmill, huts become mud brick houses, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
+
+Buildings that stay useful through many eras keep up with the times, the same building in a new look (`/gallery.html?looks=1` shows them all):
+
+| Building | Looks, era by era |
+| --- | --- |
+| 🪓 Woodcutter | log cabin; a steam sawmill (Industrial Revolution); a lumber yard with a log loader (Modern Age); a tree farm under a glass dome with a drone (Future) |
+| ⛏️ Quarry, marble quarry | a pit with a wooden hoist or treadwheel crane; an iron derrick and a steam engine; an excavator and a conveyor; a laser gantry with floating blocks |
+| 🧱 Brick kiln | a domed kiln; a Hoffmann kiln with a tall chimney; a brickworks hall; a brick printer |
+| 🏪 Market | stalls under awnings; a half timbered market hall (Middle Ages); a market hall of iron and glass; a supermarket; a glass dome with holo signs |
+| ⚓ Harbor | a wooden quay with a sailing boat; a steamboat and an iron crane; a container port; a hover ship |
+| ⚒️ Mine | a timbered tunnel; a pithead with a winding wheel (Industrial Revolution and Modern Age); a shaft of light under a dome |
+| ⛺ Outpost | a tent camp; a palisade with a lookout (Middle Ages); shipping containers and a radio mast (Modern Age); a dome with a landing pad |
+| 🌾 Farm | a mud and straw barn; a thatched barn with haystacks (Middle Ages); a red barn with a silo (Industrial Revolution) |
+| 🗼 Lighthouse | the Pharos of Rome; a stone tower with a fire basket; a striped lighthouse (Industrial Revolution and Modern Age); a spire of light |
+| ⛲ Fountain | a stone basin; rings of light (Future) |
+
+The school (Roman, with a porch of columns and a sundial) and the well (Egyptian, of mud brick with a pulley) look like their own eras. The town's buildings follow the town's era and Cogsworth's follow Cogsworth's.
 
 ## The economy
 

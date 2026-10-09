@@ -814,6 +814,22 @@ test('the rival can be switched off', () => {
   assert.equal(w.econ.race, null);
 });
 
+test('the rival plays a little slower than a small, active chat and leans towards a close race', () => {
+  const { w } = makeWorld();
+  const r = w.rival;
+  // Level with chat it plays at its base pace: 85% at difficulty 1.
+  assert.ok(Math.abs(r.speed() - 0.85) < 1e-9);
+  // Chat an era ahead: it hurries (45% faster). Chat an era behind: it waits (35% slower).
+  w.state.era = 1;
+  assert.ok(Math.abs(r.speed() - 0.85 * 1.45) < 1e-9);
+  w.state.era = 0;
+  r.s.era = 1;
+  assert.ok(Math.abs(r.speed() - 0.85 * 0.65) < 1e-9);
+  // The difficulty scales it.
+  const easy = new World(freshState(T0, 1), { limits: { rivalDifficulty: 0.5 } });
+  assert.ok(Math.abs(easy.rival.speed() - 0.425) < 1e-9);
+});
+
 test('what the town is stuck on may start even when three projects are going', () => {
   const { w } = makeWorld();
   rich(w);
