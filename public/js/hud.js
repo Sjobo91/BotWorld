@@ -217,7 +217,10 @@ export function createHud(state, now, opts) {
     });
     const a = angleOf(r.origin);
     const way = COMPASS[Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
-    $('raceNote').textContent = r.finished ? r.name + ' finished ' + (r.wonderItem ? theName(r.wonderItem) : 'their last wonder') + ' first. BotWorld can still finish the race!'
+    // Who finished first: the rival only won if BotWorld had not finished yet.
+    const rivalFirst = r.finished && !(state.finished && (state.finishedAt || 0) <= (r.finishedAt || Infinity));
+    $('raceNote').textContent = rivalFirst ? r.name + ' finished ' + (r.wonderItem ? theName(r.wonderItem) : 'their last wonder') + ' first.' + (state.finished ? ' BotWorld made it too!' : ' BotWorld can still finish the race!')
+      : state.finished ? 'BotWorld won the race to the Future!' + (r.finished ? ' ' + r.name + ' finished later.' : '')
       : r.met ? r.name + ' lies to the ' + way + ' with ' + r.builds + ' buildings. Claim the land between: !build outpost ' + way
       : 'An AI town far to the ' + way + ', past the fog, races BotWorld to the Future. !explore ' + way + ' to find it.';
     renderGuild(r.name);

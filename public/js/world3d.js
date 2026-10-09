@@ -276,7 +276,13 @@ export async function createWorld(stage, overlay, opts) {
     layout.allR = Math.min(MAP_RADIUS, Math.max(layout.viewR, (ds.length ? ds[ds.length - 1] : 0) + 1.5));
     layout.knownR = knownFar;
     layout.townR = (Math.max(3, far - 1) * SQ3 + 1) * R;
-    layout.railR = Math.max(3, far - 1.4) * SQ3 * R;
+    // The railway circles just outside most of the town, moved out to the
+    // first ring where it passes no building (the outer tenth reaches past it).
+    const rs = [];
+    for (const v of builds.values()) if (!v.b.rival) { const p = hexToWorld(v.b.q, v.b.r); rs.push(Math.hypot(p.x, p.z)); }
+    let rail = Math.max(3, far - 1.4) * SQ3 * R;
+    while (rs.some((d) => Math.abs(d - rail) < 0.8 * R)) rail += 0.2 * R;
+    layout.railR = rail;
     layout.townTiles = layout.tiles.filter((t) => known[t.i] && walkTile(t) && t.d <= layout.extent);
     updateLimits();
   }
@@ -882,7 +888,9 @@ export async function createWorld(stage, overlay, opts) {
     if (!world) return;
     const built = [...builds.values()].filter((v) => v.b.built && ITEMS[v.b.item]?.train);
     const style = built.some((v) => v.b.item === 'maglev') ? 'maglev' : built.length ? 'steam' : null;
-    if (train && train.style === style) return;
+    // Rebuilt when the style changes or the town grows past the rails.
+    if (train && train.style === style && train.rr === layout.railR) return;
+    const train0 = train;
     if (train) world.remove(train.g);
     train = null;
     if (!style) return;
@@ -910,7 +918,7 @@ export async function createWorld(stage, overlay, opts) {
       cars.push(c);
     }
     world.add(g);
-    train = { g, cars, style, a: rand() * Math.PI * 2, puff: 0 };
+    train = { g, cars, style, rr, a: train0 ? train0.a : rand() * Math.PI * 2, puff: 0 };
   }
   function stepTrain(dt) {
     if (!train) return;
@@ -3270,6 +3278,7 @@ export async function createWorld(stage, overlay, opts) {
         allR: layout.allR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
+        railR: +layout.railR.toFixed(3),
         guild: guild.g ? { x: +guild.g.position.x.toFixed(2), z: +guild.g.position.z.toFixed(2), k: +guild.k.toFixed(2) } : null,
         season,
       };

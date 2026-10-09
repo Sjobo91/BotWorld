@@ -1118,4 +1118,62 @@ test('a save from before the eras of history moves to its new era and wonders', 
   const w = new World(s);
   assert.equal(w.currentWonder().item, 'notredame');
   assert.equal(w.state.era, 3);
+  // The Roman Empire it skipped is behind it: no vote for its wonder.
+  assert.equal(w.wonderPickDue(), null);
+});
+
+test('a wonder finished during its vote goes to the votes already cast', () => {
+  const { w } = makeWorld();
+  w.state.era = 1;
+  w.ensureWonder(T0);
+  w.startWonderVote(1, T0);
+  say(w, alice, '!vote 2', T0 + 1000);
+  say(w, bob, '!vote 2', T0 + 2000);
+  w.autoPick(1, T0 + 3000);
+  assert.equal(w.state.picks[1], 'ziggurat');
+  assert.equal(w.state.vote, null);
+});
+
+test('hungry people stay on the list when power is short, with a maker that needs none', () => {
+  const { w } = makeWorld();
+  w.state.era = 5;
+  w.ensureWonder(T0);
+  revealAll(w);
+  let now = finish(w, alice, 'skyscraper', T0);
+  now = finish(w, bob, 'factory', now);
+  w.state.population = 20;
+  w.state.stock.food = 0;
+  w.economy(now, 0);
+  assert.ok(w.econ.power.demand > w.econ.power.supply, 'power is short');
+  const food = w.econ.needs.find((n) => n.res === 'food');
+  assert.ok(food, JSON.stringify(w.econ.needs));
+  assert.equal(food.why, 'hungry');
+  assert.ok(!(ITEMS[food.item].power < 0), 'a food maker that works without power: ' + food.item);
+  assert.ok(w.econ.plan.some((st) => st.cmd === '!food'), 'and chat can pick some by hand');
+});
+
+test('the rival only wins the race when it finishes before BotWorld', () => {
+  const { w, events } = makeWorld();
+  const rv = w.rival;
+  const s = rv.s;
+  s.era = ERAS.length - 1;
+  rv.ensureWonder(T0);
+  const wonder = rv.currentWonder();
+  wonder.status = 'done';
+  wonder.built = true;
+  s.knowledge = w.knowledgeNeed();
+  s.population = ERAS[s.era].popGoal;
+  w.state.finished = true;
+  w.state.finishedAt = T0;
+  rv.checkEra(T0 + 1000);
+  const note = events.filter((e) => e.type === 'notice' && e.kind === 'rival').pop();
+  assert.ok(s.finished);
+  assert.match(note.text, /too, after BotWorld/);
+  assert.doesNotMatch(note.text, /won the race/);
+});
+
+test('goods of a later era say when they arrive', () => {
+  const { w } = makeWorld();
+  rich(w);
+  assert.equal(say(w, alice, '!work bricks', T0).message, 'Bricks arrives in Ancient Egypt.');
 });

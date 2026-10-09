@@ -20,7 +20,7 @@ export function templateHeadline(facts, econ, era) {
   const lines = [];
   for (const f of facts) {
     if (f.kind === 'era') lines.push(pick(['A new age dawns: welcome to ' + ERAS[f.era].the + '!', ERAS[f.era].name + ' arrives! ' + ERAS[f.era].tagline + ', says the town.', 'History made: the town enters ' + ERAS[f.era].the]));
-    if (f.kind === 'finale') lines.push((ITEMS[f.item]?.finale || 'The last wonder stands!').replace(/!$/, '') + ' From sticks and stones to a city of light');
+    if (f.kind === 'finale') lines.push((ITEMS[f.item]?.finale || 'The last wonder stands!') + ' From sticks and stones to a city of light');
     if (f.kind === 'pick') lines.push(f.how === 'vote' ? pick(['Chat has spoken: the town will build ' + theName(f.item), 'Vote is in! Bots start on ' + theName(f.item) + (f.rival ? ', ' + f.rival + ' takes ' + theName(f.other) : '')]) : 'Work begins on ' + theName(f.item));
     if (f.kind === 'wonder' && ITEMS[f.item]) lines.push(pick([TheName(f.item) + ' is finished, and the whole town came to look', 'Haulers celebrate: ' + theName(f.item) + ' stands tall']));
     if (f.kind === 'event' && EVENTS[f.key]) {

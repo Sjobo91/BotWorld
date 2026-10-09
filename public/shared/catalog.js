@@ -316,13 +316,9 @@ export function resolveItem(word) {
 }
 // "wonder", or a wonder's own name ("pyramid", "eiffel tower"): the whole
 // chat builds those together, so !build wonder means !help wonder.
-const WONDER_WORDS = new Set(['wonder']);
-for (const [k, it] of Object.entries(ITEMS)) {
-  if (it.kind === 'wonder') WONDER_WORDS.add(k).add(it.label.toLowerCase().replace(/\s+/g, ''));
-}
 export function isWonderWord(word) {
   const w = String(word || '').toLowerCase().replace(/\s+/g, '');
-  return WONDER_WORDS.has(w) || (w.endsWith('s') && WONDER_WORDS.has(w.slice(0, -1)));
+  return w === 'wonder' || w === 'wonders' || !!resolveWonder(w);
 }
 // What a building is for, in a few words, worked out from what it does in the
 // game so it is never out of date: on the Buildings page, when a project
@@ -356,6 +352,18 @@ export function resolveWonder(word) {
     if (it.kind !== 'wonder') continue;
     const name = it.label.toLowerCase().replace(/\s+/g, '');
     if (w === k || w === name || w === k + 's' || w === name + 's') return k;
+  }
+  return null;
+}
+// The wonder some chat words name, in one word or several in a row: "the
+// big ben", "sydney opera house", "ziggurat of ur".
+export function wonderIn(words) {
+  const ws = (words || []).map((w) => String(w || '').toLowerCase());
+  for (let i = 0; i < ws.length; i++) {
+    for (let j = i + 1; j <= ws.length; j++) {
+      const k = resolveWonder(ws.slice(i, j).join(''));
+      if (k) return k;
+    }
   }
   return null;
 }

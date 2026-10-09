@@ -155,6 +155,7 @@ export class Rival {
       wonderPending: !!w?.pending,
       progress: this.raceProgress(),
       finished: s.finished,
+      finishedAt: s.finishedAt,
       met: s.met,
       origin: s.origin,
     };
@@ -282,7 +283,9 @@ export class Rival {
     if (s.era >= ERAS.length - 1) {
       s.finished = true;
       s.finishedAt = now;
-      this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' finished their ' + ITEMS[w.item].label + ' and won the race to the Future! The town carries on.' });
+      // The race is won only if BotWorld has not finished yet.
+      const won = !this.w.state.finished;
+      this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' finished their ' + ITEMS[w.item].label + (won ? ' and won the race to the Future! The town carries on.' : ' too, after BotWorld.') });
       return;
     }
     s.era++;

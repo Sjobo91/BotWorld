@@ -307,7 +307,14 @@ export class World {
   relocateWonderRing(now = Date.now()) {
     for (const b of [...this.builds]) {
       if (b.wonder || !isWonderPlot(b.q, b.r, this.state.era)) continue;
-      const plot = this.choosePlot(b.item, { home: b.home, salt: b.id });
+      let plot = this.choosePlot(b.item, { home: b.home, salt: b.id });
+      // A full town: it takes the place of something the town can spare,
+      // as a new building would (a home always may, so nobody loses theirs).
+      const spare = plot ? null : this.spareFor(b.item, !!b.home);
+      if (spare) {
+        plot = M.tileAt(this.map, spare.q, spare.r);
+        this.makeWay(spare, b.item, now);
+      }
       if (plot) {
         b.q = plot.q;
         b.r = plot.r;
@@ -860,7 +867,7 @@ export class World {
     const makers = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[target] && (!b.ores || b.ores.includes(target)));
     if (!makers.length) {
       const who = RESOURCES[target].from;
-      if (RESOURCES[target].era > s.era) return this.refuse(u, now, RESOURCES[target].label + ' arrives in the ' + ERAS[RESOURCES[target].era].name + '.');
+      if (RESOURCES[target].era > s.era) return this.refuse(u, now, RESOURCES[target].label + ' arrives in ' + ERAS[RESOURCES[target].era].the + '.');
       return this.refuse(u, now, 'Nobody makes ' + res(target) + ' yet. Start ' + withArticle(label(who)) + ': !build ' + who);
     }
     const open = makers.filter((b) => this.helpersAt(b.id) < E.MAX_HELPERS);
@@ -880,7 +887,7 @@ export class World {
     if (kind === 'food' && !spots.length) { kind = 'fish'; spots = this.gatherSpots(kind); }
     const g = M.GATHER[kind];
     const r = g.res;
-    if (RESOURCES[r].era > s.era) return this.refuse(u, now, RESOURCES[r].label + ' arrives in the ' + ERAS[RESOURCES[r].era].name + '.');
+    if (RESOURCES[r].era > s.era) return this.refuse(u, now, RESOURCES[r].label + ' arrives in ' + ERAS[RESOURCES[r].era].the + '.');
     if (!spots.length) return this.refuse(u, now, 'Nobody has found ' + g.land + ' yet. Try !explore');
     const t = spots[hashStr(u.id + ':' + Math.floor(now / 1000)) % spots.length];
     if (s.jobs[u.id]) this.endJob(u.id, false, now, false);
@@ -1074,12 +1081,13 @@ export class World {
   }
 
   // --- Which wonder: chat chooses, the rival builds the other ----------------------------
-  // The first era (up to the furthest town) whose wonder chat has not
-  // chosen yet.
+  // The first era, from the town's own up to the furthest town, whose wonder
+  // chat has not chosen yet. Eras behind the town are done (a save from
+  // before the eras of history skipped the Roman Empire: no vote for it).
   wonderPickDue() {
     const s = this.state;
     const top = Math.max(s.era, this.rival ? this.rival.s.era : 0);
-    for (let e = 0; e <= top; e++) if (!s.picks[e]) return e;
+    for (let e = s.era; e <= top; e++) if (!s.picks[e]) return e;
     return null;
   }
 
@@ -1119,9 +1127,12 @@ export class World {
     this.dirty = true;
   }
 
-  // A wonder finished before anybody voted: chance decides.
+  // A wonder finished before chat had chosen: the votes cast so far decide,
+  // or chance when nobody voted.
   autoPick(era, now) {
     if (this.state.picks[era]) return;
+    const v = this.state.vote;
+    if (v?.kind === 'wonder' && v.era === era) return this.resolveWonderVote(this.voteView(), now);
     const options = wondersOf(era);
     this.pickWonder(era, options[Math.floor(Math.random() * options.length)], now, 'auto');
   }
@@ -1674,21 +1685,28 @@ export class World {
   needs(cap, pw) {
     const s = this.state;
     const out = [];
+    const powerShort = pw.demand > pw.supply * 1.02;
+    // A building that uses power makes nothing while power is short.
+    const runs = (k) => !(powerShort && ITEMS[k].power < 0);
     const add = (r, why, depth = 0) => {
       if (out.some((n) => n.res === r)) return;
-      // The best maker that has a known spot, else the best one (and a hint to explore).
+      // The best maker that has a known spot, one that works right now if
+      // there is one; else the best one (and a hint to explore).
       const makers = r === 'power' ? E.powerMakers(this.builds, s.era) : E.makersOf(r, s.era);
       if (!makers.length) return;
-      const item = makers.find((k) => this.hasSite(k, r)) || makers[0];
+      const order = makers.filter(runs).concat(makers.filter((k) => !runs(k)));
+      const found = order.find((k) => this.hasSite(k, r));
+      const item = found || order[0];
       // Another one would stand idle like the ones the town has (coal plants
       // and steel mills without coal, factories without power): what they
-      // wait for is what the town needs.
-      const wait = this.idleFor((b) => b.item === item) || (ITEMS[item].power < 0 && pw.demand > pw.supply * 1.02 ? 'power' : null);
-      if (wait && depth < 3) return add(wait, why, depth + 1);
+      // wait for is what the town needs. Food stays, though: people eat
+      // every minute, and chat can always pick some by hand.
+      const wait = this.idleFor((b) => b.item === item) || (runs(item) ? null : 'power');
+      if (wait && r !== 'food' && depth < 3) return add(wait, why, depth + 1);
       const where = (M.siteOf(item).ore && M.GATHER[r]?.land) || M.siteOf(item).why || null;
-      out.push({ res: r, why, item, site: this.hasSite(item, r), where });
+      out.push({ res: r, why, item, site: !!found, where });
     };
-    if (pw.demand > pw.supply * 1.02) add('power', 'power');
+    if (powerShort) add('power', 'power');
     const food = s.stock.food || 0;
     if (food < cap * 0.15 && (this.rates.food || 0) <= 0.5) add('food', 'hungry');
     for (const r of this.wonderShort || []) add(r, 'wonder');

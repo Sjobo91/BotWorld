@@ -93,6 +93,13 @@ test('other commands', () => {
   assert.deepEqual(parseCommand('!build the colosseum'), { type: 'help', target: 'wonder' });
   assert.deepEqual(parseCommand('!build great pyramid 3'), { type: 'help', target: 'wonder', times: 3 });
   assert.deepEqual(parseCommand('!help the colosseum'), { type: 'help', target: 'wonder' });
+  // Wonder names of more than one word, small words and all.
+  assert.deepEqual(parseCommand('!help great wall'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!help big ben 3'), { type: 'help', target: 'wonder', times: 3 });
+  assert.deepEqual(parseCommand('!help sydney opera house'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!info big ben'), { type: 'info', words: ['bigben'] });
+  assert.deepEqual(parseCommand('!what is the ziggurat of ur'), { type: 'info', words: ['ziggurat'] });
+  assert.deepEqual(parseCommand('!info a kiln'), { type: 'info', words: ['kiln'] });
   assert.equal(parseCommand('!build hut near the wonder').item, 'hut');
   assert.deepEqual(parseCommand('!commands'), { type: 'commands' });
   assert.deepEqual(parseCommand('!home'), { type: 'home' });

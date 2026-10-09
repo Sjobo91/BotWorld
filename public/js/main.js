@@ -289,8 +289,7 @@ function announceJob(userId, job) {
   if (job.kind === 'explore') { hud.toast('job', '🧭', who, ' set off to explore the fog.'); return; }
   if (job.kind === 'deliver') { hud.toast('job', '📜', who, ' is hauling ' + (RESOURCES[job.res] ? RESOURCES[job.res].emoji + ' ' + RESOURCES[job.res].label.toLowerCase() : 'goods') + ' to the Guild wagon.'); return; }
   if (job.kind === 'build') { hud.toast('job', '🔨', who, ' is helping build the ' + label + '.'); return; }
-  if (job.kind === 'wonder') hud.toast('job', '📦', who, ' is hauling goods to the ' + label + '.');
-  else if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
+  if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
   else hud.toast('job', '⚒️', who, ' is helping at the ' + label + (job.res && RESOURCES[job.res] ? ' (' + RESOURCES[job.res].emoji + ')' : '') + '.');
 }
 
