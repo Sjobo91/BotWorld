@@ -367,7 +367,7 @@ export class World {
       case 'work': return this.work(cmd, u, now);
       case 'explore': return this.explore(cmd, u, now);
       case 'repair': return this.repair(u, now);
-      case 'deliver': return this.deliver(u, now);
+      case 'deliver': return cmd.start ? this.startOrder(u, now) : this.deliver(u, now);
       case 'vote': return this.vote(cmd, u, now);
       case 'hat': return this.hat(cmd, u, now);
       case 'dance': return this.dance(u, now);
@@ -645,6 +645,17 @@ export class World {
     if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, 'Your bot is busy right now (#' + (job.buildId || '…') + ').');
     if (job) this.endJob(u.id, false, now, false);
     return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.shiftSec * 1000 }, now, ITEMS[w.item].label);
+  }
+
+  // !deliver start (moderators): the Guild posts its next order right away.
+  startOrder(u, now) {
+    if (!u.mod && !u.broadcaster) return { ok: false, message: '' };
+    if (!this.rival || !this.limits.contracts) return { ok: false, message: 'The Merchant Guild does not trade here.' };
+    const c = this.state.contract;
+    if (c && !c.winner) return { ok: false, message: 'A Guild order is open already.' };
+    this.state.contract = null;
+    this.state.nextContractAt = now;
+    return { ok: true, message: 'The Merchant Guild posts an order in a moment.' };
   }
 
   // !deliver: one trip with crates to the Merchant Guild's wagon.

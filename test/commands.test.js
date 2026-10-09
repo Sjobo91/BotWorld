@@ -110,4 +110,5 @@ test('!deliver hauls for a Merchant Guild order, and can be lined up', () => {
   assert.deepEqual(parseCommand('!deliver 3'), { type: 'deliver', times: 3 });
   assert.equal(parseCommand('!trade').type, 'deliver');
   assert.equal(parseCommand('!haul x2').times, 2);
+  assert.deepEqual(parseCommand('!deliver start'), { type: 'deliver', start: true });
 });

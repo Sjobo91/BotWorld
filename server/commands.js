@@ -123,6 +123,7 @@ export function parseCommand(text) {
     case 'guild':
     case 'order':
     case 'contract':
+      if (args[0] === 'start' || args[0] === 'now') return { type: 'deliver', start: true };
       return withTimes({ type: 'deliver' }, args);
     case 'vote':
     case 'v': {

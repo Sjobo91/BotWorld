@@ -79,7 +79,7 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!dance` | Your bot throws a little party |
 | `!commands` | Shows the commands on screen |
 
-Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
+Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now), `!deliver start` (a Merchant Guild order now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
 
 Every job is short (about half a minute), so chat can keep typing and see what it did: the goods pop up over the bot when it comes back, and so does every bit of XP. Typed while the bot is busy, jobs wait in line (the number shows next to its name).
 

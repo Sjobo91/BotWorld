@@ -678,6 +678,13 @@ test('the Guild needs chat around, goods to deliver and the rival', () => {
   assert.ok(c);
   w.state.stock[c.res] = 0;
   assert.match(say(w, bob, '!deliver', now).message, /no .* to deliver\. Make some first/);
+  // Moderators can call the next order right away.
+  assert.equal(say(w, alice, '!deliver start', now).ok, false);
+  w.state.contract.winner = 'none';
+  w.state.contract.endedAt = now;
+  assert.equal(say(w, mod, '!deliver start', now).ok, true);
+  now = run(w, now, 10e3);
+  assert.ok(w.state.contract && !w.state.contract.winner && w.state.contract.id === c.id + 1);
   // Without the rival there is no Guild.
   const solo = makeWorld({ limits: { rival: false } }).w;
   say(solo, alice, '!me', T0);
