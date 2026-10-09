@@ -785,6 +785,18 @@ export class World {
     return best;
   }
 
+  // How much of each producer's goods reach town, worked out again only
+  // when the stores (or the buildings) change.
+  reachMap() {
+    const stores = this.stores();
+    const key = stores.map((b) => b.id || 0).join(',') + '|' + this.builds.length;
+    if (this.reachCache?.key === key) return this.reachCache.map;
+    const map = new Map();
+    for (const b of this.builds) if (ITEMS[b.item].recipe) map.set(b.id, reachOf(b, stores));
+    this.reachCache = { key, map };
+    return map;
+  }
+
   // The landing pad and every working store (outposts too).
   stores() {
     return [{ q: 0, r: 0 }].concat(this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].kind === 'storage'));
@@ -1296,7 +1308,7 @@ export class World {
       powerRatio: pw.ratio,
       helpers: (id) => helpers.get(id) || 0,
       boosts: ev?.boost || {},
-      reach: reachFn(this.stores()),
+      reach: ((m) => (b) => m.get(b.id) ?? 1)(this.reachMap()),
       progress: this.progress,
       fuel: this.fuel,
       cap,
@@ -1429,8 +1441,8 @@ export class World {
       if (up) add({ kind: 'upgrade', item: up.item, res: n.res, text: 'Upgrade the ' + label(up.item) + ' for more ' + what, cmd: '!upgrade ' + up.item });
     }
     if (room) {
-      const stores = this.stores();
-      const far = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe && reachOf(b, stores) < 0.75);
+      const reach = this.reachMap();
+      const far = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe && (reach.get(b.id) ?? 1) < 0.75);
       if (far.length) add({ kind: 'build', item: 'outpost', text: far.length + (far.length === 1 ? ' producer is' : ' producers are') + ' far from a store: build an outpost', cmd: '!build outpost' });
     }
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
@@ -1652,7 +1664,6 @@ export function reachOf(t, stores) {
   const d = storeDist(t, stores);
   return d <= REACH ? 1 : Math.max(0.4, 1 - 0.1 * (d - REACH));
 }
-const reachFn = (stores) => (b) => reachOf(b, stores);
 
 function compass(a) {
   const names = ['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast'];
