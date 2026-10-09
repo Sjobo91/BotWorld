@@ -8,7 +8,7 @@
 // 20 buildings a day). Its speed leans a little towards keeping the race
 // close, so a busy chat can pull ahead and a sleeping chat is not left
 // hopelessly behind.
-import { ITEMS, ERAS, RESOURCES, BUILD_LEVELS, hashStr, houseFor, evolvedItem, itemsOfEra } from '../public/shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, BUILD_LEVELS, hashStr, houseFor, evolvedItem, itemsOfEra, otherWonder, wondersOf } from '../public/shared/catalog.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
 import * as M from '../public/shared/terrain.js';
 import * as E from './economy.js';
@@ -17,7 +17,7 @@ export const RIVAL_NAME = 'Cogsworth';
 const ID0 = 1_000_000;
 const STEP_SEC = 5;
 const LABOR = 6;
-const RAW = ['wood', 'stone', 'food', 'coal', 'iron'];
+const RAW = ['wood', 'stone', 'food', 'marble', 'coal', 'iron'];
 
 // A home on the far side: land away from the sea, about 27 tiles out, with
 // forest, hills and berries around it.
@@ -127,8 +127,8 @@ export class Rival {
     const lean = Math.max(-0.35, Math.min(0.45, 0.8 * gap));
     return Math.max(0.4, (this.w.rivalDifficulty || 1) * (1 + lean));
   }
-  // How far along the road to the Future: the era, plus a third each for
-  // knowledge, the wonder and people towards the next one.
+  // How far along the road to the Future: the era, plus how far the slowest
+  // of knowledge, the wonder and people is towards the next one.
   raceProgress() {
     const s = this.s;
     return raceProgress(s.era, s.finished, s.knowledge / this.w.knowledgeNeed(), this.currentWonder(), s.population);
@@ -144,6 +144,8 @@ export class Rival {
       outposts: this.builds.filter((b) => b.item === 'outpost' && b.built).length,
       knowledge: Math.round((100 * s.knowledge) / this.w.knowledgeNeed()),
       wonder: w ? Math.round(E.wonderProgress(w) * 100) : 100,
+      wonderItem: w ? w.item : null,
+      wonderPending: !!w?.pending,
       progress: this.raceProgress(),
       finished: s.finished,
       met: s.met,
@@ -152,9 +154,11 @@ export class Rival {
   }
 
   currentWonder() {
-    const key = ERAS[this.s.era].wonder;
-    return this.builds.find((b) => b.wonder && b.item === key) || null;
+    const era = this.s.era;
+    return this.builds.find((b) => b.wonder && ITEMS[b.item].era === era) || null;
   }
+  // It builds the wonder chat did not choose; until chat has voted, just a
+  // wonder (both need the same goods).
   ensureWonder(now) {
     if (this.currentWonder()) return;
     const old = this.builds.find((b) => b.wonder);
@@ -163,9 +167,18 @@ export class Rival {
       this.builds.splice(this.builds.indexOf(old), 1);
       this.w.emit({ type: 'remove', id: old.id });
     }
-    const w = { id: ++this.s.seq, item: ERAS[this.s.era].wonder, wonder: true, rival: true, color: null, level: 1, q: this.s.origin.q, r: this.s.origin.r, status: 'building', startedAt: now, walkSec: 0, buildSec: 0, delivered: {}, built: false, cost: {} };
+    const pick = this.w.state.picks?.[this.s.era];
+    const w = { id: ++this.s.seq, item: pick ? otherWonder(pick) : wondersOf(this.s.era)[1], wonder: true, rival: true, color: null, level: 1, q: this.s.origin.q, r: this.s.origin.r, status: 'building', startedAt: now, walkSec: 0, buildSec: 0, delivered: {}, built: false, cost: {} };
+    if (!pick) w.pending = true;
     this.builds.push(w);
     this.invalidate();
+    this.changed(w);
+  }
+  pickWonder(era, key) {
+    const w = this.builds.find((b) => b.wonder && ITEMS[b.item].era === era);
+    if (!w) return;
+    w.item = key;
+    delete w.pending;
     this.changed(w);
   }
   changed(b) {
@@ -221,7 +234,7 @@ export class Rival {
     const raw = RAW.filter((r) => RESOURCES[r].era <= s.era && (r !== 'coal' && r !== 'iron' ? true : this.knowsOre(r)));
     if (raw.length) {
       const r = raw.reduce((a, b) => ((s.stock[b] || 0) < (s.stock[a] || 0) ? b : a));
-      const load = 2 + Math.min(5, s.era);
+      const load = 2 + (5 * Math.min(s.era, ERAS.length - 1)) / (ERAS.length - 1);
       s.stock[r] = Math.min(cap, (s.stock[r] || 0) + ((s.crew * 0.5 * load) / 40) * dt * sp);
     }
     const eat = (s.population * E.foodPerPop(s.era) * dt) / 60;
@@ -237,6 +250,8 @@ export class Rival {
       const fraction = ((1 + 0.6 * Math.min(4, s.crew / 3)) * dt * sp) / 60 / (this.w.pace.eraDays * 1440 * 0.85);
       E.deliverToWonder(w, s.stock, { fraction, cap });
       if (E.wonderProgress(w) >= 0.9999) {
+        // Nobody voted all this time: chance decides for both towns.
+        if (w.pending) this.w.autoPick(s.era, now);
         w.status = 'done';
         w.built = true;
         w.doneAt = now;
@@ -260,7 +275,7 @@ export class Rival {
     if (s.era >= ERAS.length - 1) {
       s.finished = true;
       s.finishedAt = now;
-      this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' lit their Fusion Spire! The race is over, but the town carries on.' });
+      this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' finished their ' + ITEMS[w.item].label + ' and won the race to the Future! The town carries on.' });
       return;
     }
     s.era++;
@@ -276,7 +291,7 @@ export class Rival {
       if (to !== b.item) { b.item = to; this.changed(b); }
     }
     this.ensureWonder(now);
-    this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' entered the ' + ERAS[s.era].name + (first ? ' first! Chat, catch up!' : '.') });
+    this.w.emit({ type: 'notice', kind: 'rival', text: s.name + ' entered ' + ERAS[s.era].the + (first ? ' first! Chat, catch up!' : '.') });
     this.w.emit({ type: 'rival', rival: this.summary() });
   }
 
@@ -511,10 +526,19 @@ export class Rival {
   }
 }
 
+// How far a town is towards its next era. The next era only starts when
+// people, the wonder and knowledge are all there, so the slowest of the
+// three counts (a crowd of new homes in the first minutes is no lead).
 export function raceProgress(era, finished, knowledge, wonder, population) {
-  if (finished) return { era, frac: 1, total: era + 1 };
-  const frac = (Math.min(1, knowledge) + (wonder ? (wonder.status === 'done' ? 1 : E.wonderProgress(wonder)) : 0) + Math.min(1, population / ERAS[era].popGoal)) / 3;
-  return { era, frac: Math.round(frac * 1000) / 1000, total: Math.round((era + frac) * 1000) / 1000 };
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  if (finished) return { era, frac: 1, total: era + 1, parts: { people: 1, wonder: 1, knowledge: 1 } };
+  const parts = {
+    people: r3(Math.min(1, population / ERAS[era].popGoal)),
+    wonder: r3(wonder ? (wonder.status === 'done' ? 1 : E.wonderProgress(wonder)) : 0),
+    knowledge: r3(Math.min(1, knowledge)),
+  };
+  const frac = Math.min(parts.people, parts.wonder, parts.knowledge);
+  return { era, frac, total: r3(era + frac), parts };
 }
 
 function reachOf(t, stores) {

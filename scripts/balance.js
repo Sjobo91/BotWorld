@@ -32,7 +32,8 @@ const world = new World(freshState(T0, SEED), { pace: args.eraDays ? { eraDays: 
 const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
-  if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale' });
+  if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale', item: e.item });
+  if (e.type === 'notice' && e.kind === 'wonderpick') log.push({ day: (now - T0) / 864e5, text: e.text, pick: true });
   if (e.type === 'notice' && e.kind === 'rival') log.push({ day: (now - T0) / 864e5, text: e.text });
 });
 
@@ -49,7 +50,7 @@ function choose(v) {
   const s = world.state;
   const say = (text) => world.handleChat({ id: v.id, name: v.name }, text, now);
   if (!world.homeOf(v.id)) return say('!home');
-  if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * 3)));
+  if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * s.vote.options.length)));
   if (world.builds.some((b) => b.damaged && !b.repairBy) && rnd() < 0.5) return say('!repair');
   const job = s.jobs[v.id];
   // Busy bots: chat sometimes lines up more, often just watches.
@@ -114,11 +115,11 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
 
 console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
 console.table(daily);
-for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.pick ? '[vote] ' + l.text : l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, ' + ITEMS[l.item].finale : 'entered ' + ERAS[l.era].the));
 if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));
 const guild = world.state.contracts;
 if (guild && guild.n) console.log('Guild orders: ' + guild.n + ' posted, BotWorld won ' + guild.town + ', ' + (world.rival ? world.rival.s.name : 'the rival') + ' won ' + guild.rival);
-if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
+if (!world.state.finished) console.log('after ' + DAYS + ' days: still in ' + ERAS[world.state.era].the);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;
 console.log('built:', JSON.stringify(byItem));

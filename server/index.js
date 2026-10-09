@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { Store } from './store.js';
 import { World } from './world.js';
+import { ERAS } from '../public/shared/catalog.js';
 import { TwitchChat } from './twitch.js';
 import { startSimulator } from './simulator.js';
 import { Gazette } from './gazette.js';
@@ -151,7 +152,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 const listenArgs = cfg.host ? [cfg.port, cfg.host] : [cfg.port];
 server.listen(...listenArgs, () => {
   console.log('BotWorld is running: http://localhost:' + cfg.port + '  (stream view: http://localhost:' + cfg.port + '/?stream=1)');
-  console.log('World: ' + world.builds.length + ' builds, ' + Object.keys(world.state.builders).length + ' builders, era ' + (world.era + 1) + ' of 6 (' + cfg.pace.eraDays + ' days per era). Saved in ' + store.file);
+  console.log('World: ' + world.builds.length + ' builds, ' + Object.keys(world.state.builders).length + ' builders, era ' + (world.era + 1) + ' of ' + ERAS.length + ' (' + cfg.pace.eraDays + ' days per era). Saved in ' + store.file);
   if (cfg.channel) {
     twitch = new TwitchChat(cfg.channel, onChat);
     twitch.start();

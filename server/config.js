@@ -10,8 +10,8 @@ const DEFAULTS = {
   simulate: false,
   dataDir: 'data',
   limits: {},
-  // eraDays: days one era takes at base speed (6 eras, about 2 months in all).
-  pace: { eraDays: 11 },
+  // eraDays: days one era takes at base speed (7 eras, about 2 months in all).
+  pace: { eraDays: 9.5 },
   // Where the island is, for sunrise, sunset and solar panels.
   geo: { lat: 52.2, lon: 5.1 },
   // A newspaper headline every everyMin minutes. ai: 'auto' lets Claude write

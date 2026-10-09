@@ -59,6 +59,27 @@ export const NATURE = {
   boulder: () => rockAt(0.09, 0, 0.04, 0, 1, 0.7, 1),
   reed: () => new T.CylinderGeometry(0.006, 0.009, 0.18, 4).translate(0, 0.09, 0),
 };
+// A square beam from a to b (THREE.Vector3s), ready to merge.
+export function beamGeo(a, b, w, d = w) {
+  const dir = new T.Vector3().subVectors(b, a);
+  const g = new T.BoxGeometry(w, dir.length(), d);
+  g.applyQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0, 1, 0), dir.clone().normalize()));
+  const mid = a.clone().add(b).multiplyScalar(0.5);
+  return g.translate(mid.x, mid.y, mid.z);
+}
+// A date palm for the warm eras: a slim trunk and a crown of drooping fronds.
+export function palmMesh() {
+  const g = new T.Group();
+  for (let i = 0; i < 4; i++) mesh(geo('palmSeg', () => new T.CylinderGeometry(0.012, 0.016, 0.1, 6)), mats.palmTrunk, i * 0.008, 0.05 + i * 0.095, 0, g);
+  const crown = new T.Group();
+  crown.position.set(0.03, 0.4, 0);
+  for (let i = 0; i < 7; i++) {
+    const f = mesh(geo('palmFrond', () => new T.BoxGeometry(0.17, 0.006, 0.04).translate(0.085, 0, 0)), mats.palm, 0, 0, 0, crown);
+    f.rotation.set(0, (i / 7) * Math.PI * 2, -0.5);
+  }
+  g.add(crown);
+  return g;
+}
 export function mesh(g, m, x, y, z, parent) {
   const o = new T.Mesh(g, m);
   o.position.set(x, y, z);
@@ -174,6 +195,27 @@ function setupMaterials() {
     redLight: new T.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff2020, emissiveIntensity: 1.5 }),
     clockFace: std(0xfaf6ea),
     rail: std(0x6b5a4a),
+    // The eras of history: sun-dried mud, limestone, marble, gold and iron.
+    mudLight: std(0xd8b98a),
+    limestone: std(0xe4d5ac),
+    sandstone: std(0xb9a27e),
+    granite: std(0xc0907a),
+    marble: std(0xf2efe9, { roughness: 0.45 }),
+    marbleShade: std(0xd8d2c7, { roughness: 0.55 }),
+    terracotta: std(0xc4673f),
+    gold: std(0xe6b83c, { roughness: 0.35, metalness: 0.55 }),
+    tuff: std(0x7b7063),
+    pukao: std(0xa4513a),
+    sarsen: std(0xa3a399),
+    travertine: std(0xd9caa6),
+    travertineDark: std(0xb9a985),
+    ironwork: std(0x75573f, { roughness: 0.6, metalness: 0.3 }),
+    gothic: std(0xdcd2bb),
+    westminster: std(0xd6c08c),
+    palm: std(0x4f9a4a),
+    palmTrunk: std(0x9b7a52),
+    reedRoof: std(0xc9b47a),
+    sparkle: new T.MeshBasicMaterial({ color: 0xfff4c9 }),
   });
   mats.towerGlass = towerGlassMat();
 }

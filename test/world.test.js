@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, freshState, migrate, reachOf, LABOR, TOWN_CREW } from '../server/world.js';
+import { freshRival } from '../server/rival.js';
 import { hexDist, hexKey } from '../public/shared/hex.js';
-import { ITEMS, ERAS } from '../public/shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES } from '../public/shared/catalog.js';
 import * as M from '../public/shared/terrain.js';
 import * as E from '../server/economy.js';
 
@@ -31,6 +32,13 @@ function run(w, from, ms, step = 5000) {
   return now;
 }
 const say = (w, user, text, now) => w.handleChat(user, text, now);
+// An old (version 3) rival in the medieval era, with its own cathedral.
+function freshRivalFor(v3) {
+  const rv = freshRival(M.makeMap(v3.mapSeed), T0, 2);
+  rv.builds.push({ id: 1_000_001, item: 'cathedral', wonder: true, rival: true, q: rv.origin.q, r: rv.origin.r, status: 'building', built: false, delivered: {} });
+  rv.eraFirst = { 2: 'rival' };
+  return rv;
+}
 // Gives the town whatever it needs, for tests about other things.
 const rich = (w) => { for (const r of ['wood', 'stone', 'food', 'bricks', 'coal', 'iron', 'steel', 'parts', 'chips']) w.state.stock[r] = 100; };
 const revealAll = (w) => { for (const t of w.map.tiles) M.setExplored(w.bits, t.i); w.saveBits(); };
@@ -47,7 +55,9 @@ test('a fresh world starts in the Stone Age, with goods, a wonder site and land 
   assert.equal(w.state.era, 0);
   assert.ok(w.state.stock.wood > 0 && w.state.stock.stone > 0);
   const wonder = w.builds.find((b) => b.wonder);
-  assert.equal(wonder.item, 'stonecircle');
+  // Chat has not chosen between Stonehenge and the Moai yet.
+  assert.equal(wonder.item, 'stonehenge');
+  assert.equal(wonder.pending, true);
   assert.equal(hexDist(wonder.q, wonder.r), 1);
   assert.equal(w.map.total, 4921);
   const known = M.exploredCount(w.map, w.bits);
@@ -110,7 +120,7 @@ test('buildings from later eras are explained, not built', () => {
   const { w } = makeWorld();
   const res = say(w, alice, '!build factory', T0);
   assert.equal(res.ok, false);
-  assert.match(res.message, /Industrial Age/);
+  assert.match(res.message, /Industrial Revolution/);
 });
 
 test('a town project is built by helpers: the more bots, the faster', () => {
@@ -200,7 +210,7 @@ test('producers need the right land, and richer land works faster', () => {
 
 test('a mine needs a known ore deposit: explore first', () => {
   const { w } = makeWorld();
-  w.state.era = 2;
+  w.state.era = 3;
   w.ensureWonder(T0);
   rich(w);
   const ore = w.map.tiles.find((t) => (t.f === 'coal' || t.f === 'iron') && !w.known(t));
@@ -291,7 +301,7 @@ test('a kiln turns stone and wood into bricks, and stalls without them', () => {
   const { w } = makeWorld();
   w.state.era = 1;
   w.ensureWonder(T0);
-  let now = finish(w, bob, 'cottage', T0);
+  let now = finish(w, bob, 'mudhouse', T0);
   now = finish(w, alice, 'kiln', now);
   w.state.population = 10;
   w.state.stock.bricks = 0;
@@ -307,7 +317,7 @@ test('a kiln turns stone and wood into bricks, and stalls without them', () => {
 
 test('factories need power: nothing without a power plant, parts with one', () => {
   const { w } = makeWorld();
-  w.state.era = 3;
+  w.state.era = 4;
   w.ensureWonder(T0);
   let now = finish(w, alice, 'factory', T0);
   now = finish(w, bob, 'apartments', now);
@@ -425,7 +435,7 @@ test('help comes in short shifts, so chat keeps typing !help', () => {
 
 test('!upgrade tools needs a level, the era and some goods, and then carries more', () => {
   const { w, events } = makeWorld();
-  assert.match(say(w, alice, '!upgrade tools', T0).message, /come with the Village/);
+  assert.match(say(w, alice, '!upgrade tools', T0).message, /come with Ancient Egypt/);
   w.state.era = 1;
   w.ensureWonder(T0);
   assert.match(say(w, alice, '!upgrade tools', T0).message, /need level 3, you are level 1/);
@@ -479,7 +489,8 @@ test('!upgrade woodcutter takes a town building to the next level, and it makes 
 
 test('gathering by hand needs known land, the right era and room in storage', () => {
   const { w } = makeWorld();
-  assert.match(say(w, alice, '!coal', T0).message, /Medieval Town/);
+  assert.match(say(w, alice, '!coal', T0).message, /Middle Ages/);
+  assert.match(say(w, alice, '!marble', T0).message, /Roman Empire/);
   assert.equal(say(w, alice, '!mine', T0).ok, true);
   assert.equal(w.state.jobs.a.res, 'stone');
   assert.ok(['hills', 'mountain'].includes(M.tileAt(w.map, w.state.jobs.a.q, w.state.jobs.a.r).t));
@@ -505,14 +516,17 @@ test('the wonder fills up, the era changes, and homes and huts grow into the new
     for (const r of ['wood', 'stone', 'food']) w.state.stock[r] = 100;
     now = run(w, now, 60e3);
   }
-  const wonder = w.builds.find((b) => b.item === 'stonecircle');
+  // Nobody voted for the Stone Age's wonder, so chance chose one.
+  const wonder = w.builds.find((b) => b.wonder && ITEMS[b.item].era === 0);
   assert.equal(wonder.status, 'done');
+  assert.ok(!wonder.pending && ['stonehenge', 'moai'].includes(wonder.item));
+  assert.equal(w.state.picks[0], wonder.item);
   assert.equal(w.state.era, 1);
   assert.ok(events.some((e) => e.type === 'era' && e.era === 1));
-  assert.ok(w.builds.some((b) => b.item === 'greathall' && b.wonder));
+  assert.ok(w.builds.some((b) => b.wonder && ITEMS[b.item].era === 1));
   now = run(w, now, 120e3);
-  assert.equal(home.item, 'cottage');
-  assert.ok(w.builds.filter((b) => b.project && ITEMS[b.item].kind === 'house').every((b) => b.item === 'cottage'));
+  assert.equal(home.item, 'mudhouse');
+  assert.ok(w.builds.filter((b) => b.project && ITEMS[b.item].kind === 'house').every((b) => b.item === 'mudhouse'));
 });
 
 test('!upgrade makes your home bigger, up to three levels', () => {
@@ -549,6 +563,7 @@ test('votes start when chat is around, and the winner happens', () => {
 
 test('moderators can start a vote right away with !vote start', () => {
   const { w } = makeWorld();
+  w.pickWonder(0, 'stonehenge', T0);
   assert.equal(say(w, alice, '!vote start', T0).ok, false);
   assert.equal(w.state.vote, null);
   assert.equal(say(w, mod, '!vote start', T0).ok, true);
@@ -890,7 +905,7 @@ test('a save from before eras is migrated', () => {
     { id: 2, item: 'shop', level: 1, q: 2, r: -1, ownerId: 'a', status: 'building' },
   ] };
   const s = migrate(old, T0);
-  assert.equal(s.version, 3);
+  assert.equal(s.version, 4);
   assert.deepEqual(s.builds.map((b) => b.item), ['hut', 'market']);
   assert.ok(s.builds.every((b) => b.built));
   const w = new World(s);
@@ -906,7 +921,7 @@ test('a save from before the big world keeps its buildings on cleared land', () 
     { id: 3, item: 'woodcutter', level: 1, q: 9, r: -4, ownerId: 'a', status: 'done', built: true },
   ] };
   const w = new World(migrate(v2, T0));
-  assert.equal(w.state.version, 3);
+  assert.equal(w.state.version, 4);
   assert.equal(w.homeOf('a').id, 1);
   assert.equal(w.builds.find((b) => b.id === 2).project, true);
   for (const b of w.builds.filter((x) => !x.wonder)) {
@@ -935,8 +950,120 @@ test('the snapshot carries the map, the explored land and the era history', () =
 });
 
 test('ERAS still line up with houses and wonders', () => {
-  for (const e of ERAS) {
+  ERAS.forEach((e, i) => {
     assert.equal(ITEMS[e.house].kind, 'house');
-    assert.equal(ITEMS[e.wonder].kind, 'wonder');
+    assert.equal(ITEMS[e.house].era, i);
+    // Two wonders from different places that need the very same goods.
+    const [a, b] = e.wonders;
+    assert.ok(ITEMS[a].kind === 'wonder' && ITEMS[b].kind === 'wonder' && ITEMS[a].era === i && ITEMS[b].era === i);
+    assert.notEqual(ITEMS[a].place + ITEMS[a].label, ITEMS[b].place + ITEMS[b].label);
+    assert.deepEqual(ITEMS[a].needs, ITEMS[b].needs);
+  });
+  // Nothing needs a good from a later era, and buildings only grow into later ones.
+  for (const [k, it] of Object.entries(ITEMS)) {
+    const goods = [it.cost, it.needs, it.recipe?.in, it.recipe?.out].flatMap((o) => Object.keys(o || {}));
+    for (const r of goods) assert.ok(RESOURCES[r].era <= it.era, k + ' uses ' + r);
+    if (it.evolve) assert.ok(ITEMS[it.evolve].era > it.era, k + ' evolves back');
   }
+  for (const [r, info] of Object.entries(RESOURCES)) assert.equal(ITEMS[info.from].era, info.era, r);
+});
+
+test('chat votes for the wonder, and the rival builds the other one', () => {
+  const { w, events } = makeWorld();
+  assert.equal(w.state.vote, null, 'nobody around, no vote');
+  say(w, alice, '!wood', T0);
+  w.tick(T0 + 1000);
+  const v = w.state.vote;
+  assert.equal(v.kind, 'wonder');
+  assert.deepEqual(v.options, ['stonehenge', 'moai']);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'wondervote' && /!vote 1 Stonehenge/.test(e.text)));
+  assert.equal(say(w, alice, '!vote 3', T0 + 2000).ok, false);
+  assert.equal(say(w, alice, '!vote 2', T0 + 2000).ok, true);
+  assert.equal(say(w, bob, '!2', T0 + 3000).ok, true);
+  assert.equal(say(w, carol, '!1', T0 + 4000).ok, true);
+  assert.deepEqual(w.voteView().counts, [1, 2]);
+  w.tick(T0 + 301e3);
+  assert.equal(w.state.vote, null);
+  assert.equal(w.state.picks[0], 'moai');
+  const mine = w.currentWonder();
+  assert.equal(mine.item, 'moai');
+  assert.ok(!mine.pending);
+  const theirs = w.rival.currentWonder();
+  assert.equal(theirs.item, 'stonehenge');
+  assert.ok(!theirs.pending);
+  assert.ok(events.some((e) => e.type === 'notice' && e.kind === 'wonderpick' && e.item === 'moai' && /Chat chose the Moai for the Stone Age! Cogsworth builds Stonehenge\./.test(e.text)));
+  // Event votes come back later, with three choices.
+  assert.equal(say(w, mod, '!vote start', T0 + 302e3).ok, true);
+  assert.equal(w.state.vote.kind, 'event');
+  assert.equal(w.state.vote.options.length, 3);
+});
+
+test('when the rival reaches an era first, chat chooses for both before getting there', () => {
+  const { w } = makeWorld();
+  w.pickWonder(0, 'stonehenge', T0);
+  const rv = w.rival;
+  rv.ensureWonder(T0);
+  // The rival finishes its Stone Age.
+  rv.s.knowledge = w.knowledgeNeed();
+  rv.s.population = 500;
+  rv.currentWonder().delivered = { ...ITEMS.moai.needs };
+  rv.currentWonder().status = 'done';
+  rv.checkEra(T0);
+  assert.equal(rv.s.era, 1);
+  assert.equal(rv.currentWonder().pending, true);
+  say(w, alice, '!wood', T0);
+  w.tick(T0 + 1000);
+  assert.equal(w.state.vote.kind, 'wonder');
+  assert.equal(w.state.vote.era, 1);
+  say(w, alice, '!vote 2', T0 + 2000);
+  w.tick(T0 + 302e3);
+  assert.equal(w.state.picks[1], 'ziggurat');
+  assert.equal(rv.currentWonder().item, 'pyramid');
+  // The town gets there later and starts its wonder right away.
+  w.state.era = 1;
+  const mine = w.ensureWonder(T0 + 400e3);
+  assert.equal(mine.item, 'ziggurat');
+  assert.ok(!mine.pending);
+});
+
+test('the Future\'s wonder rises behind the pad, and what stood there moves', () => {
+  const { w } = makeWorld();
+  rich(w);
+  const hut = say(w, alice, '!home', T0).build;
+  hut.q = -1;
+  hut.r = -1;
+  w.state.era = 6;
+  const wonder = w.ensureWonder(T0);
+  assert.deepEqual([wonder.q, wonder.r], [-1, -1]);
+  assert.ok(hut.q !== -1 || hut.r !== -1, 'the home moved away');
+  assert.ok(w.builds.includes(hut));
+});
+
+test('a save from before the eras of history moves to its new era and wonders', () => {
+  const v3 = freshState(T0, 1);
+  v3.version = 3;
+  delete v3.picks;
+  Object.assign(v3, { era: 2, eraHistory: [{ era: 0, at: T0 }, { era: 1, at: T0 + 1 }, { era: 2, at: T0 + 2 }] });
+  v3.builds = [
+    { id: 1, item: 'stonecircle', wonder: true, q: -1, r: 1, status: 'done', built: true, delivered: {} },
+    { id: 2, item: 'greathall', wonder: true, q: 0, r: 1, status: 'done', built: true, delivered: {} },
+    { id: 3, item: 'cathedral', wonder: true, q: 1, r: 0, status: 'building', built: false, delivered: { stone: 10 } },
+    { id: 4, item: 'cottage', home: true, ownerId: 'a', q: 3, r: 0, status: 'done', built: true, level: 1 },
+    { id: 5, item: 'barn', project: true, q: 4, r: 0, status: 'done', built: true, level: 1 },
+  ];
+  v3.builders = { a: { id: 'a', name: 'alice' } };
+  v3.rival = freshRivalFor(v3);
+  const s = migrate(v3, T0);
+  assert.equal(s.version, 4);
+  assert.equal(s.era, 3);
+  assert.deepEqual(s.eraHistory.map((h) => h.era), [0, 1, 3]);
+  assert.deepEqual(s.builds.map((b) => b.item), ['stonehenge', 'pyramid', 'notredame', 'mudhouse', 'granary']);
+  assert.deepEqual(s.picks, { 0: 'stonehenge', 1: 'pyramid', 3: 'notredame' });
+  const nd = s.builds.find((b) => b.item === 'notredame');
+  assert.deepEqual([nd.q, nd.r], [1, -1]);
+  assert.equal(s.rival.era, 3);
+  assert.equal(s.rival.builds.find((b) => b.wonder).item, 'angkorwat');
+  const w = new World(s);
+  assert.equal(w.currentWonder().item, 'notredame');
+  assert.equal(w.state.era, 3);
 });

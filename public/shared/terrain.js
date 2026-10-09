@@ -42,6 +42,7 @@ const WATER = ['deep', 'water', 'river'];
 export const SITES = {
   woodcutter: { near: ['forest'], rich: ['forest'], why: 'a forest' },
   quarry: { on: [...BUILD_ON, 'hills'], near: ['hills', 'mountain'], rich: ['hills', 'mountain'], why: 'rocky hills' },
+  marblequarry: { on: [...BUILD_ON, 'hills'], near: ['hills', 'mountain'], rich: ['mountain'], why: 'rocky hills' },
   gatherer: { near: ['meadow'], rich: ['meadow'], why: 'a berry meadow' },
   fisher: { near: WATER, rich: WATER, why: 'water' },
   harbor: { near: ['deep', 'water'], rich: ['deep', 'water'], why: 'the sea or a lake' },
@@ -319,7 +320,7 @@ export function oresNear(map, t) {
 }
 
 // --- Gathering by hand -----------------------------------------------------------------------
-// !wood, !stone, !food, !fish, !coal, !iron send a bot on one trip: walk out
+// !wood, !stone, !food, !fish, !marble, !coal, !iron send a bot on one trip: walk out
 // to the right land, work there HAND_WORK_SEC seconds, carry the load back to
 // the nearest store. How much it carries depends on its tools. Buildings make
 // more, and keep going while chat sleeps.
@@ -338,6 +339,7 @@ export const GATHER = {
   stone: { res: 'stone', pose: 'mine', verb: 'break stone', land: 'rocky hills', on: (map, t) => t.t === 'hills' || t.t === 'mountain' },
   food: { res: 'food', pose: 'pick', verb: 'pick berries', land: 'a berry meadow', on: (map, t) => t.t === 'meadow' },
   fish: { res: 'food', pose: 'fish', verb: 'catch fish', land: 'water', on: nearWater },
+  marble: { res: 'marble', pose: 'mine', verb: 'cut marble', land: 'rocky hills', on: (map, t) => t.t === 'hills' || t.t === 'mountain' },
   coal: { res: 'coal', pose: 'mine', verb: 'dig coal', land: 'a coal deposit', on: (map, t) => t.f === 'coal' },
   iron: { res: 'iron', pose: 'mine', verb: 'dig iron', land: 'an iron deposit', on: (map, t) => t.f === 'iron' },
 };

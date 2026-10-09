@@ -2,9 +2,9 @@
 
 A 24/7 Twitch stream where chat builds a world together. Type `!home` in chat and your own little bot lands, gets its own home in your colour, and then helps the whole chat build a town: someone starts a project (`!build woodcutter`), everyone helps (`!help`), and the more bots help, the faster it rises. Built in the style of Botdorp, in English.
 
-The town sits in the middle of a big world (about ten times the old island), with forests, berry meadows, rocky hills, mountains with coal and iron, lakes, rivers and a sea coast. Everything beyond the first few fields is fog until a bot explores it with `!explore`, like in Age of Empires. It starts with sticks and stones and, over about two months, works its way through six eras up to a glowing future city with fusion reactors. Every era has a wonder that the whole chat builds together.
+The town sits in the middle of a big world (about ten times the old island), with forests, berry meadows, rocky hills, mountains with coal and iron, lakes, rivers and a sea coast. Everything beyond the first few fields is fog until a bot explores it with `!explore`, like in Age of Empires. It starts with sticks and stones and, over about two months, works its way through the history of the world: the Stone Age, Ancient Egypt, the Roman Empire, the Middle Ages, the Industrial Revolution and the Modern Age, up to a glowing future city with fusion reactors. Every era has two famous wonders (Stonehenge or the Moai, the Great Pyramid or the Ziggurat of Ur, the Colosseum or the Great Wall, ...): chat votes for the one the whole chat builds, and the rival AI town builds the other.
 
-![The world on day 1, in the Medieval Town and in the Electric City](docs/world.jpg)
+![The world on day 1, in the Middle Ages and in the Future](docs/world.jpg)
 
 ## Try it in two minutes
 
@@ -24,7 +24,7 @@ npm run balance -- --untilEra=3 --save=data-preview
 npm start -- --data=data-preview
 ```
 
-`/gallery.html` shows every building of every era side by side.
+`/gallery.html` shows every building of every era side by side, and `/gallery.html?wonders=1` all fourteen wonders.
 
 ## Read your real Twitch chat
 
@@ -34,7 +34,7 @@ npm start -- --channel=your_channel_name
 
 Or copy `botworld.config.example.json` to `botworld.config.json`, fill in your channel and run `npm start`. Reading chat needs no password, token or Twitch app: BotWorld joins chat anonymously and read only.
 
-The world is saved in `data/world.json` (with a dated copy in `data/backups/` every day), so you can stop and start BotWorld any time. Builds that finished while it was off are caught up on the next start. A world saved by the first version of BotWorld (before eras) is upgraded automatically.
+The world is saved in `data/world.json` (with a dated copy in `data/backups/` every day), so you can stop and start BotWorld any time. Builds that finished while it was off are caught up on the next start. A world saved by an older version of BotWorld (before eras, or before the eras of history) is upgraded automatically.
 
 ## Go live with OBS
 
@@ -45,7 +45,7 @@ The world is saved in `data/world.json` (with a dated copy in `data/backups/` ev
    * Tick **Control audio via OBS**
 3. Stream to Twitch as usual (Settings > Stream). Use a keyframe interval of 2 seconds.
 
-The `?stream=1` view hides the test bar and lets the camera direct itself: it flies to every new build, follows bots to work, watches storms and finished wonders, and tours the town when chat is quiet. The sky follows the real clock and the seasons (snow in winter), so nights are dark with lit windows and street lights. Every time a new era starts there is a big banner and a timelapse of how the town grew.
+The `?stream=1` view hides the test bar and lets the camera direct itself: it flies to every new build, follows bots to work, watches storms and finished wonders, and tours the town when chat is quiet. Its overview grows with the town (up to 16 rings round the pad, where buildings can still be told apart); a bigger city is toured district by district, outposts and the rival town included. The sky follows the real clock and the seasons (snow in winter), so nights are dark with lit windows and street lights. Every time a new era starts there is a big banner and a timelapse of how the town grew.
 
 ![The stream view](docs/stream.jpg)
 
@@ -58,12 +58,13 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!home` | Your bot lands and builds your own home, with a flag and a rim in your colour |
 | `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
 | `!help` | Your bot helps build the project that needs it most for 40 seconds. `!help #12` for a certain one |
-| `!help wonder` | Haul goods to the era's wonder (`!build wonder` does the same: the whole chat builds it together) |
+| `!help wonder` | Haul goods to the era's wonder (`!build wonder` or `!build pyramid` does the same: the whole chat builds it together) |
 | `!deliver` | One trip with crates to the Merchant Guild's wagon while a Guild order is open (also `!trade`, `!deliver 3`) |
 | `!wood` | One trip: your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
 | `!stone` | One trip to break stone in the rocky hills (also `!mine`) |
 | `!food` | One trip to pick berries in a meadow, or `!fish` by the water |
-| `!coal`, `!iron` | From the Medieval Town: dig ore at a deposit the scouts found |
+| `!marble` | From the Roman Empire: one trip to cut marble in the rocky hills |
+| `!coal`, `!iron` | From the Middle Ages: dig ore at a deposit the scouts found |
 | `!wood 3` | Do it three times in a row (works for every job, up to 5) |
 | `!work bricks` | Help at a building that makes a good from other goods: `bricks`, `steel`, `parts`, `chips` |
 | `!explore` | Your bot scouts the fog and reveals new land. `!explore north` (or east, south, west, ne, ...) |
@@ -73,33 +74,35 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!upgrade` | Make your home bigger (three levels per era) |
 | `!stop` | Your bot stops and forgets the jobs lined up |
 | `!repair` | Fix a building broken by a storm or blackout |
-| `!vote 1` or `!1` | Vote in a chat vote |
+| `!vote 1` or `!1` | Vote in a chat vote: which wonder BotWorld builds, or the next event |
+| `!info totem` | What a building, wonder or good is for, on screen for everyone (also `!what is a kiln`) |
 | `!me` | Show your card, put a beacon in your colour over your bot and fly the camera to it |
 | `!hat tophat` | Dress your bot (more hats unlock as you level up) |
 | `!dance` | Your bot throws a little party |
 | `!commands` | Shows the commands on screen |
 
-Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now), `!deliver start` (a Merchant Guild order now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
+Moderators and the broadcaster also have `!remove #12` (any build), `!vote start` (start a vote now, the wonder vote first when one is due), `!deliver start` (a Merchant Guild order now) and `!event storm` (start an event: festival, harvest, tallTrees, richVeins, merchant, meteor, builderRush, storm, blackout).
 
 Every job is short (about half a minute), so chat can keep typing and see what it did: the goods pop up over the bot when it comes back, and so does every bit of XP. Typed while the bot is busy, jobs wait in line (the number shows next to its name).
 
-On screen, the **What to do now** box always says the next step for chat, with the command to type, and the how-to card takes turns showing the commands, where every good comes from and this era's buildings.
+On screen, the **What to do now** box always says the next step for chat, with the command to type, and the how-to card takes turns showing the commands, where every good comes from and this era's buildings, one at a time with what each is for. When a project starts, the toast says what it is for too ("started a totem: makes the homes around it happier").
 
 ## The game
 
 In short (all the details and numbers are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)):
 
+* **Eras of history.** Stone Age, Ancient Egypt, the Roman Empire, the Middle Ages, the Industrial Revolution, the Modern Age and the Future, each with its own homes, buildings and goods (bricks in Egypt, marble in Rome, coal and iron in the Middle Ages, steel, parts and chips after). Every era has two wonders from different parts of the world with the very same costs. When an era comes into sight chat votes which one BotWorld builds (`!vote 1` or `!vote 2`); Cogsworth, the rival, builds the other. Until chat has chosen, the wonder is a building site with a sign.
 * **Town projects.** Every building except your home is built by the whole town. Bots who `!help` add their work; the townsfolk always help a little, so projects finish even when chat sleeps.
-* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!coal` and `!iron` send your bot on a trip to chop, mine or pick on the right land, and it carries the load back to the nearest store: 2 goods with stone tools, up to 8 with laser tools. There is always something useful to do, even before the first woodcutter stands.
-* **The whole world.** Outposts take the town out over the map. Producers more than 4 tiles from a store (the pad, a stockpile, barn, warehouse or outpost) make a tenth less per extra tile, so chat builds outposts near the forests, hills and ore far away. Roads with little mule carts run from every outpost back to town.
-* **The rival.** Cogsworth, an AI town on the far side of the world, plays by the same rules: it gathers, builds, upgrades, sends out outposts and climbs the eras. Land near its buildings is its own, so both towns race for the forests and ore deposits in between. The **Race to the Future** panel shows how far each town is towards the next era (knowledge, wonder and people); chat finds Cogsworth by exploring (it is shown on the map once found). The rival leans towards a close race: it speeds up a little when chat is far ahead and slows down when chat is behind.
+* **Gathering by hand.** `!wood`, `!stone`, `!food`, `!marble`, `!coal` and `!iron` send your bot on a trip to chop, mine or pick on the right land, and it carries the load back to the nearest store: 2 goods with stone tools, up to 8 with laser tools. There is always something useful to do, even before the first woodcutter stands.
+* **The whole world.** Outposts take the town out over the map. Producers more than 4 tiles from a store (the pad, a stockpile, granary, warehouse or outpost) make a tenth less per extra tile, so chat builds outposts near the forests, hills and ore far away. Roads with little mule carts run from every outpost back to town.
+* **The rival.** Cogsworth, an AI town on the far side of the world, plays by the same rules: it gathers, builds, upgrades, sends out outposts and climbs the eras. Land near its buildings is its own, so both towns race for the forests and ore deposits in between. The **Race to the Future** panel shows how far each town is towards the next era: the slowest of people, the wonder and knowledge, since the next era needs all three, with all three shown; chat finds Cogsworth by exploring (it is shown on the map once found). The rival leans towards a close race: it speeds up a little when chat is far ahead and slows down when chat is behind.
 * **Merchant Guild orders.** About once an hour, while chat is around, the Guild wants a load of one good (say 240 bricks) within 30 minutes, and both towns race to fill it. Every `!deliver` is a bot's trip to the Guild's wagon on the landing pad, worth a twentieth of the order per crate it carries; the townsfolk haul a little on their own, and so do Cogsworth's porters. The first town to fill it (or whoever is further along when time runs out) gets paid one and a half times the goods' worth in what it has least of, plus 30 minutes of knowledge; the loser gets its crates back.
 * **Upgrades.** Every town building can go up to level 3 (`!upgrade woodcutter`), which makes 50% more per level and shows as pennants on the building. Bots get better tools with `!upgrade tools` as their viewer levels up.
-* **The land matters.** A woodcutter needs a forest next to it, a quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge. When every spot is taken, old decor makes way for new buildings while people are content (a campfire goes before a statue), and what the town needs may also replace a spare producer of goods the stores are full of; homes, stores and food makers always stay, and `!upgrade` grows the rest.
-* **Goods.** Woodcutters, quarries, farms, kilns, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
-* **People** move into homes when there is food and the town is not miserable. Parks, fountains, statues and stadiums make them happier, and happy towns work faster.
-* **Power** from the Industrial Age: coal plants, wind turbines, solar farms (only by day) and fusion. Factories and skyscrapers stop without it.
-* **Eras.** To move on, a town needs enough people, the era's wonder finished and a full knowledge bar, which takes about 11 days (campfires, schools and labs speed it up). Old buildings, homes too, then rebuild themselves in the new style.
+* **The land matters.** A woodcutter needs a forest next to it, a quarry or marble quarry rocky hills, a gatherer a berry meadow, a fisher water, a mine a coal or iron deposit. The richer the spot, the more it makes. Scouts (`!explore`) find new land, ore, ruins with goods and old tablets with knowledge. When every spot is taken, old decor makes way for new buildings while people are content (a campfire goes before a statue), and what the town needs may also replace a spare producer of goods the stores are full of; homes, stores and food makers always stay, and `!upgrade` grows the rest.
+* **Goods.** Woodcutters, quarries, farms, kilns, marble quarries, mines, steel mills, factories and chip fabs make the goods that buildings cost. Some need other goods (a kiln turns stone and wood into bricks), workers (people from the homes) and later electricity. Storage limits how much the town can keep.
+* **People** move into homes when there is food and the town is not miserable. Totems, obelisks, temples, fountains, statues, parks and stadiums make the homes around them happier, and happy towns work faster.
+* **Power** from the Industrial Revolution: coal plants, wind turbines, solar farms (only by day) and fusion. Factories and skyscrapers stop without it.
+* **Eras.** To move on, a town needs enough people, the era's wonder finished and a full knowledge bar, which takes about 9.5 days (campfires, schools, universities and labs speed it up). Old buildings, homes too, then rebuild themselves in the new style.
 * **Viewers** earn XP and levels for everything they do (helping, exploring, hauling), which unlock hats. A weekly leaderboard keeps it fresh.
 * **Votes and events** every hour or so: festivals, harvests, a merchant ship, meteor showers, storms that break buildings until chat repairs them.
 
@@ -152,7 +155,7 @@ To survive reboots, run both with a service manager (systemd on Linux, or Task S
 | Port | `--port=3000`, `PORT` | 3000 |
 | Data folder | `--data=folder`, `BOTWORLD_DATA` | `data` |
 | Pretend viewers | `--simulate`, `BOTWORLD_SIMULATE=1` | off |
-| Days per era | `--era-days=11`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 11 (about 2 months in all) |
+| Days per era | `--era-days=9.5`, `BOTWORLD_ERA_DAYS`, or `pace.eraDays` | 9.5 (7 eras, about 2 months in all) |
 | Where the world is (sun, solar power) | `geo.lat`, `geo.lon` | 52.2, 5.1 (the Netherlands) |
 | Gazette | `gazette.everyMin`, `gazette.ai`, `gazette.model`, `ANTHROPIC_API_KEY` | every 30 min, Claude when a key is set |
 | Limits | `limits` in the config file: `maxProjects`, `maxHelpers`, `voteEveryMin`, `queueMax`, `shiftSec` and more | see `server/world.js` |
@@ -169,7 +172,7 @@ Twitch chat ──> server/twitch.js ──> server/commands.js ──> server/w
                                                                  │
                                                        events over /events (SSE)
                                                                  ▼
-                         public/js/main.js ──> world3d.js + buildings.js (Three.js) + hud.js (overlay)
+                         public/js/main.js ──> world3d.js + buildings.js + wonders.js (Three.js) + hud.js (overlay)
 ```
 
 * **The server owns the world.** It runs the economy every 5 seconds, picks plots (homes near parks, producers at the edge, every viewer's builds cluster into a neighborhood), times builds and jobs, runs votes and events, decides when an era ends, and saves.

@@ -14,7 +14,8 @@ import { hexBetween } from '../public/shared/hex.js';
 export const BASE_CAP = 100;
 export const FOOD_PER_POP_MIN = 0.05;
 // Later eras farm and store food better, so each resident needs less.
-export const foodPerPop = (era) => FOOD_PER_POP_MIN * [1, 0.9, 0.8, 0.65, 0.5, 0.4][Math.min(5, era)];
+const FOOD_SHARE = [1, 0.9, 0.85, 0.8, 0.65, 0.5, 0.4];
+export const foodPerPop = (era) => FOOD_PER_POP_MIN * FOOD_SHARE[Math.max(0, Math.min(FOOD_SHARE.length - 1, era))];
 export const START_STOCK = { wood: 70, stone: 45, food: 40 };
 // Wonders leave this share of storage for normal builds (at most
 // RESERVE_MAX of each good, so a town with huge stores still feeds them).
