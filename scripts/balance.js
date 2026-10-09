@@ -122,7 +122,7 @@ console.log('built:', JSON.stringify(byItem));
 // Save the grown island with every time moved so that the end of the run is now.
 if (args.save) {
   const shift = Date.now() - now;
-  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at']);
+  const TIMES = new Set(['createdAt', 'eraStartedAt', 'finishedAt', 'nextVoteAt', 'nextAutoEventAt', 'requestedAt', 'startedAt', 'doneAt', 'firstSeen', 'lastSeen', 'until', 'endsAt', 'at', 'progressAt', 'nextThink', 'lastStep']);
   const move = (o) => {
     if (Array.isArray(o)) return o.forEach(move);
     if (!o || typeof o !== 'object') return;

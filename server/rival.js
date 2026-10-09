@@ -203,7 +203,7 @@ export class Rival {
       this.lastHappy = now;
     }
     const stores = this.stores();
-    E.produce(builds, s.stock, {
+    const out = E.produce(builds, s.stock, {
       employment,
       happyFactor: 0.6 + (0.8 * this.happy) / 100,
       global: 1,
@@ -215,6 +215,8 @@ export class Rival {
       fuel: this.fuel,
       cap,
     }, dt);
+    this.stalled = out.stalled;
+    this.powerRatio = pw.ratio;
     // The crew gathers by hand what the town has least of.
     const raw = RAW.filter((r) => RESOURCES[r].era <= s.era && (r !== 'coal' && r !== 'iron' ? true : this.knowsOre(r)));
     if (raw.length) {
@@ -330,15 +332,18 @@ export class Rival {
       const k = E.makersOf(r, s.era).find((item) => this.plot(item, true, r));
       return k ? { item: k, res: r } : null;
     };
+    // Power first: buildings without it make nothing.
+    const pw = E.power(this.builds, now, this.fuel, this.w.geo);
+    if (pw.demand > pw.supply * 0.98) add(this.powerMaker());
     const w = this.currentWonder();
     const needed = new Set(Object.keys(w && w.status !== 'done' ? ITEMS[w.item].needs : {}));
     for (const k of itemsOfEra(s.era)) for (const r of Object.keys(ITEMS[k].cost)) needed.add(r);
     for (const r of needed) if (RESOURCES[r] && RESOURCES[r].era <= s.era && !this.makes(r)) add(maker(r));
     if ((s.stock.food || 0) < cap * 0.2) add(maker('food'));
     if (s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal * 1.25) add(houseFor(s.era));
-    for (const r of E.unlockedResources(s.era)) if ((s.stock[r] || 0) < cap * 0.12) add(maker(r));
-    const pw = E.power(this.builds, now, this.fuel, this.w.geo);
-    if (pw.demand > pw.supply) add(this.powerMaker());
+    // More makers of a scarce good, but only while the ones it has are
+    // working (not waiting for power or inputs) and not too many already.
+    for (const r of E.unlockedResources(s.era)) if ((s.stock[r] || 0) < cap * 0.12 && this.canUseMore(r, pw)) add(maker(r));
     add(Object.keys(ITEMS).find((k) => ITEMS[k].kind === 'knowledge' && ITEMS[k].era <= s.era && !this.builds.some((b) => b.item === k)));
     if (this.happy < 60) add(Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'decor' && ITEMS[k].era <= s.era).sort((a, b) => ITEMS[b].era - ITEMS[a].era)[0]);
     // A store when goods overflow (not too many), an outpost now and then.
@@ -358,7 +363,8 @@ export class Rival {
     const low = E.unlockedResources(s.era).reduce((a, r) => ((s.stock[r] || 0) < (s.stock[a] || 0) ? r : a), 'wood');
     const decor = Object.keys(ITEMS).filter((k) => ITEMS[k].kind === 'decor' && ITEMS[k].era <= s.era);
     const asWant = (x) => (typeof x === 'string' ? { item: x } : x);
-    const more = [maker(low), popCap < ERAS[s.era].popGoal * 1.8 ? houseFor(s.era) : null, decor[hashStr('d' + now) % decor.length], roomOut ? 'outpost' : maker(low)].map(asWant);
+    const lowMaker = this.canUseMore(low, pw) ? maker(low) : null;
+    const more = [lowMaker, popCap < ERAS[s.era].popGoal * 1.8 ? houseFor(s.era) : null, decor[hashStr('d' + now) % decor.length], roomOut ? 'outpost' : lowMaker].map(asWant);
     const k = hashStr('m' + now) % more.length;
     for (let i = 0; i < more.length; i++) {
       const w = more[(k + i) % more.length];
@@ -374,6 +380,14 @@ export class Rival {
       const fed = Object.keys(inp).every((r) => this.makes(r) || (s.stock[r] || 0) > 30 || (RAW.includes(r) && this.knowsOre(r)));
       return fed && this.plot(k, true);
     }) || null;
+  }
+
+  canUseMore(r, pw) {
+    const makers = this.builds.filter((b) => !b.wonder && ITEMS[b.item].recipe?.out?.[r]);
+    if (makers.length >= 4 + this.s.era * 2) return false;
+    if (makers.some((b) => this.stalled?.[b.id])) return false;
+    if (makers.some((b) => ITEMS[b.item].power < 0) && pw.ratio < 0.95) return false;
+    return true;
   }
 
   // Is there a building that makes this good?
