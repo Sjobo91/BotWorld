@@ -83,7 +83,7 @@ Lighting the Fusion Spire is the finale. After that the town keeps going in the 
 Three bars on screen, all three must be full:
 
 1. **People.** Homes give room (your own home 3 to 5 people, a town hut 6, an arcology 140). People move in while there is food and the town is not miserable, and they eat food every minute.
-2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time and always leaves a fifth of the storage room (at most 250 of each good) for normal builds. Bots on `!help wonder` carry crates to it and make it go faster.
+2. **The wonder.** A big build in the ring around the landing pad. It takes goods a little at a time and always leaves a fifth of the storage room (at most 250 of each good) for normal builds. Bots on `!help wonder` carry crates to it and make it go faster. Nobody builds a wonder alone, so `!build wonder` (or its name, like `!build cathedral`) does the same.
 3. **Knowledge.** Grows with time: an era takes `eraDays` (default 11) days at base speed. Campfires, schools and labs make it up to 50% faster, meteor showers and old tablets add hours at once.
 
 This is what stretches the game to about two months: chat can speed it up, but even a busy chat cannot rush through an era in a day. The balance script (`npm run balance`) plays the whole game in pretend time:

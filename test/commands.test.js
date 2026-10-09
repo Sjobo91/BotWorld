@@ -23,8 +23,8 @@ test('build understands items, colors, filler words and "near"', () => {
   assert.equal(near.near, 'fountain');
 });
 
-test('wonders cannot be built by hand', () => {
-  assert.equal(parseCommand('!build stonecircle').item, null);
+test('wonders are not built by hand: !build stonecircle hauls to the wonder', () => {
+  assert.deepEqual(parseCommand('!build stonecircle'), { type: 'help', target: 'wonder' });
 });
 
 test('build with an unknown item keeps what it did not understand', () => {
@@ -83,6 +83,12 @@ test('other commands', () => {
   assert.deepEqual(parseCommand('!help'), { type: 'help', id: null });
   assert.deepEqual(parseCommand('!help #4'), { type: 'help', id: 4 });
   assert.deepEqual(parseCommand('!help wonder'), { type: 'help', target: 'wonder' });
+  // Nobody builds a wonder alone: !build wonder (or its name) hauls to it.
+  assert.deepEqual(parseCommand('!build wonder'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build the cathedral'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build stone circle 3'), { type: 'help', target: 'wonder', times: 3 });
+  assert.deepEqual(parseCommand('!help the cathedral'), { type: 'help', target: 'wonder' });
+  assert.equal(parseCommand('!build hut near the wonder').item, 'hut');
   assert.deepEqual(parseCommand('!commands'), { type: 'commands' });
   assert.deepEqual(parseCommand('!home'), { type: 'home' });
   assert.deepEqual(parseCommand('!explore'), { type: 'explore', dir: null, raw: '' });

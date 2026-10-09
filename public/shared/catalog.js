@@ -267,6 +267,13 @@ export function resolveItem(word) {
   if (r !== 'house' && ITEMS[r].kind === 'wonder') return null;
   return r;
 }
+// "wonder", or a wonder's own name ("cathedral", "stone circle"): the whole
+// chat builds those together, so !build wonder means !help wonder.
+const WONDER_WORDS = new Set(['wonder', 'wonders']);
+for (const [k, it] of Object.entries(ITEMS)) {
+  if (it.kind === 'wonder') WONDER_WORDS.add(k).add(it.label.toLowerCase().replace(/\s+/g, ''));
+}
+export const isWonderWord = (word) => WONDER_WORDS.has(String(word || '').toLowerCase().replace(/\s+/g, ''));
 export const resolveColor = (word) => lookup(word, COLORS, COLOR_ALIASES);
 export const resolveHat = (word) => lookup(word, HATS, HAT_ALIASES);
 export const resolveResource = (word) => lookup(word, RESOURCES, { wonder: 'wonder', bread: 'food', logs: 'wood', sticks: 'wood', stick: 'wood', rocks: 'stone', rock: 'stone', brick: 'bricks', ore: 'iron', metal: 'iron', part: 'parts', chip: 'chips' });

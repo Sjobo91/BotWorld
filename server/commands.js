@@ -1,6 +1,6 @@
 // Turns a chat line into a command. Anything that isn't one of ours returns
 // null, so normal chatting is never answered or punished.
-import { resolveColor, resolveHat, resolveItem, resolveResource, EVENTS } from '../public/shared/catalog.js';
+import { isWonderWord, resolveColor, resolveHat, resolveItem, resolveResource, EVENTS } from '../public/shared/catalog.js';
 import { DIRECTIONS, DIRECTION_ALIASES } from '../public/shared/terrain.js';
 
 const FILLER = new Set(['a', 'an', 'the', 'some', 'me', 'my', 'please', 'pls', 'plz', 'new', 'big', 'small', 'little', 'tiny', 'huge', 'nice', 'cute', 'of', 'with', 'and', 'to', 'at', 'on', 'for']);
@@ -63,7 +63,7 @@ export function parseCommand(text) {
     case 'helpbuild': {
       // !help, !help #12, !help wonder
       const w = args.find((a) => !FILLER.has(a));
-      if (w === 'wonder') return withTimes({ type: 'help', target: 'wonder' }, args.slice(1));
+      if (isWonderWord(w)) return withTimes({ type: 'help', target: 'wonder' }, args.slice(1));
       if (w && /^x?\d$/.test(w)) return withTimes({ type: 'help', id: null }, [w]);
       return withTimes({ type: 'help', id: idArg(w) }, args.slice(1));
     }
@@ -189,5 +189,7 @@ function parseBuild(args) {
     if (asDir) { dir = asDir; continue; }
     unknown.push(w);
   }
+  // Wonders are built by the whole chat: !build wonder hauls goods to it.
+  if (!item && args.some((w, i) => isWonderWord(w) || isWonderWord(w + (args[i + 1] || '')))) return withTimes({ type: 'help', target: 'wonder' }, args);
   return { type: 'build', item, color, near, dir, raw: unknown.join(' ') };
 }

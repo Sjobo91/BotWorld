@@ -182,6 +182,9 @@ test('!help with nothing to build hauls to the wonder', () => {
   assert.equal(res.ok, true);
   assert.equal(w.state.jobs.a.kind, 'wonder');
   assert.equal(say(w, bob, '!help wonder', T0).ok, true);
+  // Nobody builds the wonder alone: !build wonder hauls to it as well.
+  assert.equal(say(w, carol, '!build wonder', T0).ok, true);
+  assert.equal(w.state.jobs.c.kind, 'wonder');
 });
 
 test('producers need the right land, and richer land works faster', () => {

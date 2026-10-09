@@ -58,7 +58,7 @@ On screen: goods in storage along the top (with how fast they change), the era p
 | `!home` | Your bot lands and builds your own home, with a flag and a rim in your colour |
 | `!build woodcutter` | Start a town project (at most 3 at a time). Any building of this era or earlier, optionally in a colour |
 | `!help` | Your bot helps build the project that needs it most for 40 seconds. `!help #12` for a certain one |
-| `!help wonder` | Haul goods to the era's wonder |
+| `!help wonder` | Haul goods to the era's wonder (`!build wonder` does the same: the whole chat builds it together) |
 | `!deliver` | One trip with crates to the Merchant Guild's wagon while a Guild order is open (also `!trade`, `!deliver 3`) |
 | `!wood` | One trip: your bot cuts trees in a forest and carries the wood to town (also `!chop`) |
 | `!stone` | One trip to break stone in the rocky hills (also `!mine`) |
