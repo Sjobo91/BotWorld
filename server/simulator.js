@@ -16,7 +16,7 @@ export function line(world, name) {
   const id = 'sim:' + name.toLowerCase();
   const me = s.builders[id];
   if (world && !world.homeOf(id) && Math.random() < 0.7) return pick(['!home', '!build house']);
-  if (s.vote && Math.random() < 0.5) return pick(['!vote ', '!']) + (1 + Math.floor(Math.random() * 3));
+  if (s.vote && Math.random() < 0.5) return pick(['!vote ', '!']) + (1 + Math.floor(Math.random() * (s.vote.options?.length || 3)));
   if (world && world.builds.some((b) => b.damaged && !b.repairBy) && Math.random() < 0.4) return '!repair';
   const r = Math.random();
   // Most pretend viewers follow the "next step" box, like real chat would.
@@ -28,7 +28,7 @@ export function line(world, name) {
     const color = Math.random() < 0.3 ? pick(Object.keys(COLORS)) + ' ' : '';
     return pick(['!build ', '!b ']) + color + item;
   }
-  if (r < 0.82) return pick(['!wood', '!stone', '!food', '!chop', '!mine', '!fish', '!wood 3', '!stone 2', '!work']);
+  if (r < 0.82) return pick(['!wood', '!stone', '!food', '!chop', '!mine', '!fish', '!wood 3', '!stone 2', '!work'].concat(era >= 2 ? ['!marble'] : []));
   if (r < 0.85) return pick(['!upgrade', '!upgrade tools', '!upgrade ' + pick(itemsOfEra(era).filter((k) => k !== 'hut'))]);
   if (r < 0.89) {
     const level = me ? levelFor(me.xp || 0) : 1;

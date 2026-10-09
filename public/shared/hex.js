@@ -1,6 +1,7 @@
 // Axial hex coordinates (pointy top). Plot (0, 0) is the landing pad in the
 // middle of the island; ring n holds the 6n plots at distance n from it.
-// Ring 1 is kept for the six wonders, one per era, around the landing pad.
+// Ring 1 is kept for the wonders of the first six eras, around the landing
+// pad; the Future's wonder rises just outside them, behind the pad.
 
 export const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 export const MAX_RING = 12;
@@ -34,6 +35,12 @@ export function landRingFor(maxBuiltRing) {
   return Math.max(3, Math.min(MAX_RING, maxBuiltRing + 1));
 }
 // The plot of the wonder of era e.
+export const FINAL_WONDER_TILE = [-1, -1];
 export function wonderTile(era) {
-  return ringTiles(WONDER_RING)[era % 6];
+  return era < 6 ? ringTiles(WONDER_RING)[era] : FINAL_WONDER_TILE;
+}
+// Plots no town building may take: the wonder ring, and from the Future on
+// the plot of its wonder.
+export function isWonderPlot(q, r, era) {
+  return hexDist(q, r) <= WONDER_RING || (era >= 6 && q === FINAL_WONDER_TILE[0] && r === FINAL_WONDER_TILE[1]);
 }

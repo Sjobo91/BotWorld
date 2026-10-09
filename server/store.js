@@ -17,7 +17,7 @@ export class Store {
     fs.mkdirSync(this.dir, { recursive: true });
     try {
       const state = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (state && [1, 2, 3].includes(state.version) && Array.isArray(state.builds) && state.builders) return state;
+      if (state && [1, 2, 3, 4].includes(state.version) && Array.isArray(state.builds) && state.builders) return state;
       console.warn('[store] world.json has an unknown shape, starting fresh (old file kept as world.bad.json)');
       fs.copyFileSync(this.file, path.join(this.dir, 'world.bad.json'));
     } catch (err) {

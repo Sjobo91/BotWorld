@@ -3,7 +3,7 @@
   "port": 3000,
   "simulate": false,
   "pace": {
-    "eraDays": 11
+    "eraDays": 2
   },
   "geo": {
     "lat": 52.2,

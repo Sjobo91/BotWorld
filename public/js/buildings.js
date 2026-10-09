@@ -2,11 +2,17 @@
 // shapes, stands on y = 0, faces +z (towards the middle of the island) and
 // fits inside one plot. buildingMesh returns { g, h, anim }: h is about how
 // tall it is (for scaffolding and labels), anim lists the parts that move.
+// Buildings that last through many eras change their look as their town
+// moves on (eralooks.js): pass the era the town has reached.
 import { ITEMS, hashStr } from '../shared/catalog.js';
-import { three, mats, geo, mesh, rng, trimMat, colorOf, stripeMat, oct, addWindows, treeMesh, benchMesh, flowerBed, crenellations } from './meshes.js';
+import { three, mats, geo, mesh, rng, trimMat, colorOf, stripeMat, oct, addWindows, treeMesh, benchMesh, flowerBed, crenellations, mergeGeos, beamGeo, palmMesh } from './meshes.js';
+import { wonderModel, isWonderModel } from './wonders.js';
+import { lookEra, lookModel } from './eralooks.js';
 
 let T = null;
 const box = (w, h, d) => new T.BoxGeometry(w, h, d);
+const boxAt = (w, h, d, x, y, z, ry = 0) => box(w, h, d).rotateY(ry).translate(x, y, z);
+const V = (x, y, z) => new T.Vector3(x, y, z);
 const cyl = (rt, rb, h, n = 12) => new T.CylinderGeometry(rt, rb, h, n);
 const cone = (r, h, n = 12) => new T.ConeGeometry(r, h, n);
 const sph = (r, w = 12, h = 8, ...rest) => new T.SphereGeometry(r, w, h, ...rest);
@@ -208,18 +214,24 @@ const BUILDERS = {
     k.part('totemBeak', () => cone(0.025, 0.07, 4), mats.yellow, 0, 0.6, 0.09).rotation.x = Math.PI / 2;
     return 0.7;
   },
-  // --- Village ------------------------------------------------------------------------
-  cottage(k) {
-    k.part('cotBase', () => box(0.4, 0.22, 0.3), mats.plaster, 0, 0.11, 0);
-    for (const x of [-0.2, 0, 0.2]) k.part('cotBeamV', () => box(0.025, 0.22, 0.305), mats.timber, x, 0.11, 0);
-    k.part('cotBeamH', () => box(0.405, 0.02, 0.305), mats.timber, 0, 0.2, 0);
-    k.part('cotRoof', () => gable(0.46, 0.2, 0.38), k.b.color ? k.trim : mats.roofTile, 0, 0.29, 0);
-    k.part('chimney', () => box(0.06, 0.16, 0.06), mats.brick, 0.12, 0.36, -0.06);
-    k.part('cotDoor', () => box(0.07, 0.13, 0.012), mats.door, -0.08, 0.065, 0.152);
-    for (const x of [0.1]) k.part('cotWin', () => box(0.07, 0.06, 0.012), mats.window, x, 0.12, 0.152);
-    k.part('flowerBox', () => box(0.09, 0.025, 0.03), k.trim, 0.1, 0.08, 0.165);
-    smokeAt(k.anim, 0.12, 0.46, -0.06, 3.5);
-    return 0.48;
+  // --- Ancient Egypt -------------------------------------------------------------------
+  // A flat-roofed house of sun-dried mud brick, a reed shade on the roof
+  // terrace, a stair up the side and a palm by the door.
+  mudhouse(k) {
+    k.part('mhBody', () => box(0.4, 0.24, 0.3), mats.mudLight, 0, 0.12, 0);
+    k.part('mhParapet', () => mergeGeos([boxAt(0.4, 0.03, 0.02, 0, 0.255, -0.14), boxAt(0.4, 0.03, 0.02, 0, 0.255, 0.14), boxAt(0.02, 0.03, 0.3, -0.19, 0.255, 0), boxAt(0.02, 0.03, 0.3, 0.19, 0.255, 0)]), mats.mud, 0, 0, 0);
+    for (const [x, z] of [[0.03, -0.11], [0.16, -0.11], [0.03, 0.02], [0.16, 0.02]]) k.part('mhPost', () => cyl(0.006, 0.006, 0.12, 4), mats.woodDark, x, 0.3, z);
+    k.part('mhShade', () => box(0.17, 0.012, 0.17), k.b.color ? k.trim : mats.reedRoof, 0.095, 0.362, -0.045);
+    k.part('mhStair', () => mergeGeos([0, 1, 2, 3].map((i) => boxAt(0.05, 0.06 * (i + 1), 0.05, -0.225, 0.03 * (i + 1), 0.11 - i * 0.055))), mats.mud, 0, 0, 0);
+    k.part('mhDoor', () => box(0.07, 0.12, 0.012), mats.door, -0.07, 0.06, 0.152);
+    k.part('mhLintel', () => box(0.1, 0.018, 0.02), mats.timber, -0.07, 0.128, 0.153);
+    for (const x of [0.07, 0.14]) k.part('mhWin', () => box(0.035, 0.035, 0.012), mats.window, x, 0.18, 0.152);
+    k.part('mhJar', () => sph(0.03, 8, 6), mats.terracotta, 0.05, 0.035, 0.2).scale.set(1, 1.3, 1);
+    const p = palmMesh();
+    p.position.set(0.27, 0, 0.22);
+    p.scale.setScalar(0.72);
+    k.g.add(p);
+    return 0.42;
   },
   farm(k) {
     k.part('field', () => box(0.62, 0.03, 0.42), mats.soil, 0.04, 0.015, 0.06);
@@ -230,11 +242,29 @@ const BUILDERS = {
     const barn = new T.Group();
     barn.position.set(-0.22, 0, -0.24);
     barn.rotation.y = 0.5;
-    mesh(geo('barnBody', () => box(0.2, 0.16, 0.18)), k.b.color ? k.trim : mats.shipRed, 0, 0.08, 0, barn);
-    mesh(geo('barnRoofS', () => gable(0.22, 0.1, 0.2)), mats.roof, 0, 0.2, 0, barn);
-    mesh(geo('barnDoor', () => box(0.07, 0.1, 0.01)), mats.white, 0, 0.05, 0.091, barn);
+    mesh(geo('barnBody', () => box(0.2, 0.16, 0.18)), k.b.color ? k.trim : mats.mud, 0, 0.08, 0, barn);
+    mesh(geo('barnRoofS', () => gable(0.22, 0.1, 0.2)), mats.straw, 0, 0.2, 0, barn);
+    mesh(geo('barnDoor', () => box(0.07, 0.1, 0.01)), mats.door, 0, 0.05, 0.091, barn);
     k.g.add(barn);
     return 0.3;
+  },
+  // An irrigation canal with a shaduf: a bucket on a long pole lifts the
+  // water into the fields, so the farms around grow more.
+  canal(k) {
+    k.part('caField', () => cyl(0.42, 0.43, 0.02, 6), mats.soil, 0, 0.01, 0);
+    k.part('caBanks', () => mergeGeos([boxAt(0.66, 0.03, 0.035, 0, 0.025, 0.03), boxAt(0.66, 0.03, 0.035, 0, 0.025, 0.15)]), mats.mud, 0, 0, 0);
+    k.part('caWater', () => box(0.66, 0.012, 0.09), mats.waterLight, 0, 0.022, 0.09);
+    for (let i = 0; i < 4; i++) k.part('caCrop', () => box(0.5, 0.045, 0.035), i % 2 ? mats.crop : mats.crop2, 0, 0.042, -0.05 - i * 0.068);
+    k.part('caPost', () => box(0.025, 0.3, 0.025), mats.woodDark, -0.1, 0.15, -0.04);
+    const arm = new T.Group();
+    arm.position.set(-0.1, 0.3, -0.04);
+    mesh(geo('caPole', () => box(0.014, 0.014, 0.36).translate(0, 0, 0.04)), mats.wood, 0, 0, 0, arm);
+    mesh(geo('caWeight', () => blob(0.035)), mats.mud, 0, -0.01, -0.13, arm);
+    mesh(geo('caRope', () => cyl(0.003, 0.003, 0.13, 4)), mats.black, 0, -0.065, 0.2, arm);
+    mesh(geo('caBucket', () => cyl(0.022, 0.017, 0.035, 8)), mats.wood, 0, -0.14, 0.2, arm);
+    k.g.add(arm);
+    k.anim.push({ kind: 'nod', o: arm, base: 0.18, amp: 0.3 });
+    return 0.36;
   },
   windmill(k) {
     k.part('millBody', () => oct(0.12, 0.2, 0.5), mats.wall, 0, 0.25, 0);
@@ -263,14 +293,22 @@ const BUILDERS = {
     smokeAt(k.anim, 0.08, 0.4, -0.06, 2.4);
     return 0.4;
   },
+  // A well of mud brick with a wooden frame and a pulley; water jars wait
+  // beside it under a palm.
   well(k) {
-    k.part('wellRing', () => cyl(0.14, 0.15, 0.12, 12), mats.stone, 0, 0.06, 0);
-    k.part('wellWater', () => cyl(0.11, 0.11, 0.01, 12), mats.waterLight, 0, 0.1, 0);
-    for (const s of [-1, 1]) k.part('wellPost', () => box(0.025, 0.28, 0.025), mats.woodDark, s * 0.13, 0.2, 0);
-    k.part('wellRoof', () => gable(0.36, 0.1, 0.24), k.b.color ? k.trim : mats.roof, 0, 0.36, 0);
-    k.part('wellBar', () => cyl(0.008, 0.008, 0.26, 5), mats.wood, 0, 0.28, 0).rotation.z = Math.PI / 2;
-    k.part('bucket', () => cyl(0.03, 0.025, 0.04, 8), mats.wood, 0, 0.2, 0);
-    return 0.42;
+    k.part('ewRing', () => cyl(0.13, 0.15, 0.11, 12), mats.mudLight, 0, 0.055, 0);
+    k.part('ewRim', () => new T.TorusGeometry(0.135, 0.018, 6, 16).rotateX(Math.PI / 2), mats.mud, 0, 0.11, 0);
+    k.part('ewWater', () => cyl(0.11, 0.11, 0.01, 12), mats.waterLight, 0, 0.095, 0);
+    k.part('ewFrame', () => mergeGeos([boxAt(0.022, 0.3, 0.022, -0.13, 0.15, 0), boxAt(0.022, 0.3, 0.022, 0.13, 0.15, 0), boxAt(0.3, 0.022, 0.022, 0, 0.3, 0)]), mats.woodDark, 0, 0, 0);
+    k.part('ewPulley', () => new T.TorusGeometry(0.025, 0.007, 5, 10), mats.wood, 0, 0.27, 0);
+    k.part('ewRope', () => cyl(0.003, 0.003, 0.1, 4), mats.black, 0.025, 0.22, 0);
+    k.part('ewJug', () => sph(0.025, 8, 6), mats.terracotta, 0.025, 0.16, 0).scale.set(1, 1.3, 1);
+    for (const [x, z, s] of [[0.2, 0.12, 1], [0.25, 0.04, 0.8], [-0.2, 0.14, 0.9]]) k.part('ewJar', () => sph(0.035, 8, 6), mats.terracotta, x, 0.04 * s, z).scale.set(s, s * 1.3, s);
+    const p = palmMesh();
+    p.position.set(-0.22, 0, -0.2);
+    p.scale.setScalar(0.6);
+    k.g.add(p);
+    return 0.36;
   },
   market(k) {
     const stalls = [[-0.16, -0.06, 0.25], [0.16, -0.06, -0.25], [0, 0.16, 0]];
@@ -318,18 +356,94 @@ const BUILDERS = {
     flowerBed(k.g, k.r, 6, 0.12, k.b.color ? k.trim : null);
     return 0.5;
   },
-  barn(k) {
-    k.part('barnBig', () => box(0.46, 0.26, 0.34), k.b.color ? k.trim : mats.shipRed, 0, 0.13, 0);
-    k.part('barnBigRoof', () => gable(0.5, 0.2, 0.38), mats.slate, 0, 0.34, 0);
-    k.part('barnBigDoor', () => box(0.16, 0.18, 0.012), mats.white, 0, 0.09, 0.172);
-    const x1 = k.part('barnX', () => box(0.22, 0.012, 0.014), mats.shipRed, 0, 0.09, 0.18);
-    x1.rotation.z = 0.8;
-    const x2 = k.part('barnX', () => box(0.22, 0.012, 0.014), mats.shipRed, 0, 0.09, 0.18);
-    x2.rotation.z = -0.8;
-    for (const x of [-0.3, 0.3]) k.part('hayBale', () => cyl(0.05, 0.05, 0.08, 10), mats.hay, x, 0.05, 0.12).rotation.z = Math.PI / 2;
-    return 0.44;
+  // A granary as on the Nile: beehive silos of mud on a raised floor, a
+  // ladder up to the hatches and sacks of grain in front.
+  granary(k) {
+    k.part('grFloor', () => box(0.62, 0.05, 0.36), mats.mud, 0, 0.025, -0.04);
+    for (const x of [-0.19, 0, 0.19]) {
+      k.part('grSilo', () => cyl(0.095, 0.105, 0.14, 12), k.b.color && x === 0 ? k.trim : mats.mudLight, x, 0.12, -0.06);
+      k.part('grDome', () => sph(0.095, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.4, 1), mats.mudLight, x, 0.19, -0.06);
+      k.part('grHatch', () => box(0.035, 0.03, 0.01), mats.black, x, 0.3, -0.005);
+    }
+    k.part('grLadder', () => mergeGeos([
+      beamGeo(V(-0.05, 0.05, 0.13), V(-0.05, 0.3, 0.0), 0.012),
+      beamGeo(V(0.05, 0.05, 0.13), V(0.05, 0.3, 0.0), 0.012),
+      ...[0.09, 0.14, 0.19, 0.24].map((y) => boxAt(0.1, 0.01, 0.01, 0, y, 0.13 - ((y - 0.05) / 0.25) * 0.13)),
+    ]), mats.woodDark, 0, 0, 0);
+    for (const [x, z] of [[-0.2, 0.18], [-0.12, 0.2], [0.18, 0.19]]) k.part('grSack', () => sph(0.045, 8, 6), mats.straw, x, 0.04, z).scale.set(1, 0.85, 1);
+    return 0.36;
   },
-  // --- Medieval Town -----------------------------------------------------------------
+  // An obelisk of red granite on a stepped base, with carved signs and a
+  // golden tip.
+  obelisk(k) {
+    k.part('obStep1', () => box(0.28, 0.05, 0.28), mats.limestone, 0, 0.025, 0);
+    k.part('obStep2', () => box(0.2, 0.05, 0.2), mats.limestone, 0, 0.075, 0);
+    k.part('obShaft', () => cyl(0.035, 0.058, 0.62, 4).rotateY(Math.PI / 4), k.b.color ? k.trim : mats.granite, 0, 0.41, 0);
+    k.part('obTip', () => cone(0.05, 0.07, 4).rotateY(Math.PI / 4), mats.gold, 0, 0.755, 0);
+    const half = (y) => (0.058 + ((0.035 - 0.058) * (y - 0.1)) / 0.62) / Math.SQRT2;
+    k.part('obSigns', () => mergeGeos([0.2, 0.29, 0.38, 0.47, 0.56].map((y, i) => boxAt(i % 2 ? 0.018 : 0.024, 0.02, 0.006, 0, y, half(y) + 0.002))), mats.timber, 0, 0, 0);
+    return 0.8;
+  },
+  // --- Roman Empire ------------------------------------------------------------------------
+  // A Roman villa: white walls on a red base, a tiled roof, columns at the
+  // door and a cypress in the garden.
+  villa(k) {
+    k.part('viBody', () => box(0.42, 0.2, 0.28), mats.plaster, 0, 0.1, -0.03);
+    k.part('viDado', () => box(0.425, 0.04, 0.285), mats.terracotta, 0, 0.02, -0.03);
+    k.part('viRoof', () => gable(0.48, 0.12, 0.34), k.b.color ? k.trim : mats.terracotta, 0, 0.24, -0.03);
+    for (const x of [-0.09, -0.03, 0.03, 0.09]) k.part('viCol', () => cyl(0.012, 0.014, 0.17, 8), mats.marble, x, 0.085, 0.16);
+    k.part('viPorchTop', () => box(0.22, 0.025, 0.07), mats.marble, 0, 0.182, 0.145);
+    k.part('viPediment', () => gable(0.07, 0.06, 0.22).rotateY(Math.PI / 2), mats.marble, 0, 0.214, 0.145);
+    k.part('viDoor', () => box(0.06, 0.12, 0.012), mats.door, 0, 0.06, 0.112);
+    for (const x of [-0.16, 0.16]) k.part('viWin', () => box(0.04, 0.05, 0.012), mats.window, x, 0.12, 0.112);
+    k.part('viAmphora', () => sph(0.028, 8, 6), mats.terracotta, -0.24, 0.04, 0.18).scale.set(1, 1.5, 1);
+    const t = treeMesh(true);
+    t.position.set(0.25, 0, 0.2);
+    t.scale.set(0.6, 1.1, 0.6);
+    k.g.add(t);
+    return 0.42;
+  },
+  // A quarry of white marble: stepped cuts, finished blocks, a column being
+  // carved and a Roman treadwheel crane.
+  marblequarry(k) {
+    k.part('mqRim', () => cyl(0.36, 0.38, 0.05, 6), mats.marbleShade, 0, 0.025, 0);
+    k.part('mqStep', () => cyl(0.26, 0.26, 0.052, 6), mats.marble, 0, 0.03, 0);
+    k.part('mqFloor', () => cyl(0.16, 0.16, 0.054, 6), mats.marbleShade, 0, 0.032, 0);
+    for (const [x, z, up] of [[-0.06, 0.24, 0], [0.06, 0.25, 0], [0, 0.24, 1], [0.27, -0.12, 0]]) {
+      const b = k.part('mqBlock', () => box(0.1, 0.07, 0.08), mats.marble, x, 0.085 + up * 0.07, z);
+      b.rotation.y = k.r() * 0.4 - 0.2;
+    }
+    k.part('mqColumn', () => cyl(0.028, 0.028, 0.24, 10), mats.marble, 0.22, 0.08, 0.16).rotation.z = Math.PI / 2;
+    k.part('mqDrum', () => cyl(0.03, 0.03, 0.07, 10), mats.marble, 0.3, 0.085, 0.02);
+    k.part('mqCrane', () => mergeGeos([
+      beamGeo(V(-0.24, 0.05, -0.2), V(-0.17, 0.44, -0.16), 0.02),
+      beamGeo(V(-0.1, 0.05, -0.2), V(-0.17, 0.44, -0.16), 0.02),
+      beamGeo(V(-0.17, 0.44, -0.16), V(0.02, 0.4, 0.02), 0.016),
+    ]), mats.woodDark, 0, 0, 0);
+    k.part('mqRope', () => cyl(0.003, 0.003, 0.22, 4), mats.black, 0.02, 0.29, 0.02);
+    k.part('mqLoad', () => box(0.07, 0.05, 0.06), mats.marble, 0.02, 0.16, 0.02);
+    const wheel = new T.Group();
+    wheel.position.set(-0.17, 0.14, -0.28);
+    mesh(geo('mqWheel', () => new T.TorusGeometry(0.1, 0.012, 5, 18)), mats.wood, 0, 0, 0, wheel);
+    for (let i = 0; i < 4; i++) mesh(geo('mqSpoke', () => box(0.2, 0.008, 0.008)), mats.woodDark, 0, 0, 0, wheel).rotation.z = (i * Math.PI) / 4;
+    k.g.add(wheel);
+    k.anim.push({ kind: 'spinZ', o: wheel, speed: 0.6 });
+    return 0.46;
+  },
+  // A Roman temple of marble: a podium with steps, a row of columns, the
+  // pediment and a red tiled roof.
+  temple(k) {
+    k.part('tePodium', () => box(0.4, 0.07, 0.56), mats.marbleShade, 0, 0.035, -0.04);
+    k.part('teSteps', () => mergeGeos([boxAt(0.3, 0.024, 0.05, 0, 0.012, 0.27), boxAt(0.3, 0.048, 0.03, 0, 0.024, 0.255)]), mats.marbleShade, 0, 0, 0);
+    k.part('teCella', () => box(0.3, 0.26, 0.32), mats.marble, 0, 0.2, -0.1);
+    for (const x of [-0.15, -0.09, -0.03, 0.03, 0.09, 0.15]) k.part('teCol', () => cyl(0.015, 0.018, 0.26, 10), mats.marble, x, 0.2, 0.18);
+    k.part('teBeam', () => box(0.38, 0.04, 0.52), mats.marble, 0, 0.35, -0.04);
+    k.part('tePediment', () => gable(0.52, 0.12, 0.38).rotateY(Math.PI / 2), mats.marble, 0, 0.41, -0.04);
+    for (const s of [-1, 1]) k.part('teTiles', () => box(0.235, 0.012, 0.54), k.b.color ? k.trim : mats.terracotta, s * 0.095, 0.432, -0.04).rotation.z = -s * 0.56;
+    k.part('teDoor', () => box(0.07, 0.14, 0.01), mats.door, 0, 0.14, 0.061);
+    return 0.52;
+  },
+  // --- Middle Ages --------------------------------------------------------------------
   townhouse(k) {
     for (const [x, w, hh] of [[-0.12, 0.22, 0.42], [0.12, 0.22, 0.36]]) {
       const g = new T.Group();
@@ -380,15 +494,24 @@ const BUILDERS = {
     k.anim.push({ kind: 'flag', o: k.part('flag', () => box(0.12, 0.07, 0.005), k.trim, 0.06, top + 0.18, 0) });
     return top + 0.22;
   },
+  // A Roman school: a hall with a porch of columns under red tiles, a
+  // sundial and a basket of scrolls in the yard.
   school(k) {
-    k.part('schoolBody', () => box(0.46, 0.22, 0.3), mats.brick, 0, 0.11, 0);
-    k.part('schoolRoof', () => gable(0.5, 0.16, 0.34), mats.slate, 0, 0.29, 0);
-    k.part('belfry', () => box(0.1, 0.16, 0.1), mats.plaster, 0, 0.42, 0.04);
-    k.part('belfryRoof', () => cone(0.09, 0.12, 4), k.trim, 0, 0.56, 0.04).rotation.y = Math.PI / 4;
-    k.part('bell', () => cone(0.025, 0.04, 8), mats.yellow, 0, 0.42, 0.095);
-    k.part('schoolDoor', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.152);
-    for (const x of [-0.15, 0.15]) k.part('schoolWin', () => box(0.08, 0.08, 0.012), mats.window, x, 0.12, 0.152);
-    return 0.6;
+    const tiles = k.b.color ? k.trim : mats.terracotta;
+    k.part('scPodium', () => box(0.52, 0.04, 0.42), mats.travertine, 0, 0.02, -0.02);
+    k.part('scHall', () => box(0.44, 0.2, 0.22), mats.plaster, 0, 0.14, -0.1);
+    k.part('scRoof', () => gable(0.48, 0.12, 0.26), tiles, 0, 0.28, -0.1);
+    k.part('scCols', () => mergeGeos([-0.18, -0.06, 0.06, 0.18].map((x) => cyl(0.014, 0.017, 0.16, 8).translate(x, 0.12, 0.12))), mats.marble, 0, 0, 0);
+    k.part('scBeam', () => box(0.44, 0.022, 0.022), mats.marble, 0, 0.2, 0.12);
+    k.part('scPorch', () => box(0.48, 0.018, 0.16).rotateX(0.18), tiles, 0, 0.222, 0.075);
+    k.part('scDoor', () => box(0.07, 0.12, 0.012), mats.door, 0, 0.1, 0.012);
+    k.part('scWins', () => mergeGeos([-0.14, 0.14].map((x) => boxAt(0.05, 0.05, 0.012, x, 0.16, 0.012))), mats.window, 0, 0, 0);
+    k.part('scDialPost', () => cyl(0.022, 0.028, 0.08, 8), mats.marble, 0.2, 0.04, 0.28);
+    k.part('scDial', () => cyl(0.045, 0.045, 0.01, 14), mats.travertine, 0.2, 0.085, 0.28);
+    k.part('scGnomon', () => box(0.006, 0.035, 0.04).translate(0, 0.017, 0), mats.gold, 0.2, 0.09, 0.28);
+    k.part('scCapsa', () => cyl(0.03, 0.03, 0.06, 10), mats.wood, -0.2, 0.03, 0.27);
+    k.part('scScrolls', () => mergeGeos([[-0.01, -0.008], [0.012, 0.006], [-0.004, 0.014]].map(([x, z]) => cyl(0.008, 0.008, 0.06, 6).translate(x, 0, z))), mats.plaster, -0.2, 0.07, 0.27);
+    return 0.42;
   },
   harbor(k) {
     k.part('quay', () => box(0.5, 0.05, 0.22), mats.stone, 0, 0.025, -0.12);
@@ -406,24 +529,30 @@ const BUILDERS = {
     for (let i = 0; i < 3; i++) k.part('barrel', () => cyl(0.03, 0.03, 0.06, 8), mats.wood, 0.12 + i * 0.065, 0.08, -0.14);
     return 0.42;
   },
+  // The Pharos of Alexandria in small: a square tower, an octagon and a
+  // round lantern, Tritons on the corners and a fire burning on top.
+  // Later eras build it anew (see eralooks.js).
   lighthouse(k) {
-    const bands = [[0.17, 0.2, 0.2], [0.145, 0.17, 0.2], [0.125, 0.145, 0.2]];
-    bands.forEach(([rt, rb, hh], i) => k.part('lhBand' + i, () => cyl(rt, rb, hh, 12), i % 2 ? mats.white : k.trim, 0, hh / 2 + i * hh, 0));
-    k.part('lhGallery', () => cyl(0.17, 0.17, 0.025, 12), mats.black, 0, 0.61, 0);
-    k.part('lhGlass', () => cyl(0.09, 0.09, 0.1, 10), mats.glass, 0, 0.67, 0);
-    k.part('lhLamp', () => sph(0.05, 10, 8), mats.lamp, 0, 0.67, 0);
-    k.part('lhRoof', () => cone(0.12, 0.1, 10), k.trim, 0, 0.77, 0);
-    k.part('door', () => box(0.08, 0.13, 0.012), mats.door, 0, 0.065, 0.2);
-    const glow = new T.Sprite(mats.glow);
-    glow.position.set(0, 0.67, 0);
-    glow.scale.set(1.1, 1.1, 1);
-    k.g.add(glow);
-    const beam = new T.Group();
-    beam.position.y = 0.67;
-    mesh(geo('beam', () => new T.ConeGeometry(0.22, 2.4, 12, 1, true)), mats.beam, 0, 0, 1.2, beam).rotation.x = -Math.PI / 2;
-    k.g.add(beam);
-    k.anim.push({ kind: 'beam', o: beam });
-    return 0.85;
+    k.part('phBase', () => box(0.46, 0.05, 0.46), mats.travertineDark, 0, 0.025, 0);
+    k.part('phTier1', () => new T.CylinderGeometry(0.15, 0.2, 0.36, 4).rotateY(Math.PI / 4), mats.limestone, 0, 0.23, 0);
+    k.part('phSlits', () => mergeGeos([[0.17, 0.13], [0.3, 0.118]].map(([y, z]) => boxAt(0.03, 0.05, 0.01, 0, y, z))), mats.black, 0, 0, 0);
+    k.part('phDoor', () => box(0.06, 0.1, 0.012), mats.door, 0, 0.1, 0.137);
+    k.part('phCornice1', () => box(0.25, 0.025, 0.25), mats.travertine, 0, 0.42, 0);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) k.part('phTriton', () => new T.CapsuleGeometry(0.012, 0.03, 3, 6), mats.gold, x * 0.105, 0.465, z * 0.105);
+    k.part('phTier2', () => oct(0.095, 0.11, 0.2), mats.limestone, 0, 0.5325, 0);
+    k.part('phCornice2', () => oct(0.12, 0.12, 0.02), mats.travertine, 0, 0.6425, 0);
+    k.part('phTier3', () => cyl(0.065, 0.075, 0.1, 12), mats.limestone, 0, 0.7025, 0);
+    k.part('phBowl', () => cyl(0.07, 0.05, 0.03, 12), mats.gold, 0, 0.7675, 0);
+    const f1 = k.part('lkFlame1', () => blob(0.05).scale(1, 1.9, 1).translate(0, 0.015, 0), mats.flame, 0, 0.8, 0);
+    const f2 = k.part('lkFlame2', () => blob(0.03).scale(1, 1.9, 1), mats.flame2, 0, 0.8, 0);
+    k.anim.push({ kind: 'fire', f1, f2 });
+    for (const [m, sz] of [[mats.fireGlow, 0.8], [mats.glow, 1.3]]) {
+      const glow = new T.Sprite(m);
+      glow.position.set(0, 0.84, 0);
+      glow.scale.set(sz, sz, 1);
+      k.g.add(glow);
+    }
+    return 0.9;
   },
   fountain(k) {
     k.part('basin', () => cyl(0.3, 0.32, 0.09, 16), mats.statue, 0, 0.045, 0);
@@ -447,7 +576,24 @@ const BUILDERS = {
     k.g.add(fig);
     return 0.7;
   },
-  // --- Industrial Age -------------------------------------------------------------------
+  // A medieval university: a stone hall with tall windows, a tower with a
+  // steep roof, and a green quad with a tree.
+  university(k) {
+    k.part('unQuad', () => box(0.66, 0.012, 0.5), mats.grass, 0, 0.006, 0);
+    k.part('unHall', () => box(0.44, 0.22, 0.2), mats.gothic, -0.05, 0.11, -0.1);
+    k.part('unHallRoof', () => gable(0.46, 0.13, 0.22), mats.slate, -0.05, 0.263, -0.1);
+    k.part('unWindows', () => mergeGeos([-0.21, -0.13, 0.03, 0.11].map((x) => boxAt(0.03, 0.1, 0.01, x, 0.12, 0.001))), mats.window, 0, 0, 0);
+    k.part('unDoor', () => box(0.06, 0.11, 0.012), mats.door, -0.05, 0.055, 0.001);
+    k.part('unTower', () => box(0.14, 0.44, 0.14), mats.gothic, 0.22, 0.22, -0.06);
+    k.part('unTowerRoof', () => cone(0.11, 0.2, 4).rotateY(Math.PI / 4), k.b.color ? k.trim : mats.slate, 0.22, 0.54, -0.06);
+    k.part('unTowerWin', () => box(0.03, 0.07, 0.01), mats.window, 0.22, 0.34, 0.012);
+    const t = treeMesh(false);
+    t.position.set(-0.2, 0, 0.17);
+    t.scale.setScalar(0.8);
+    k.g.add(t);
+    return 0.66;
+  },
+  // --- Industrial Revolution -------------------------------------------------------------
   apartments(k) {
     k.part('aptBody', () => box(0.48, 0.56, 0.36), mats.brick, 0, 0.28, 0);
     k.part('aptBand', () => box(0.49, 0.03, 0.37), k.trim, 0, 0.19, 0);
@@ -522,7 +668,7 @@ const BUILDERS = {
     k.part('wtBand', () => cyl(0.162, 0.162, 0.02, 14), mats.white, 0, 0.49, 0);
     return 0.66;
   },
-  // --- Electric City -----------------------------------------------------------------------
+  // --- Modern Age --------------------------------------------------------------------------
   skyscraper(k) {
     const h = 1.05 + k.r() * 0.35;
     k.part('skyBase' + Math.round(h * 20), () => box(0.36, h, 0.32), mats.towerGlass, 0, h / 2, 0);
@@ -734,104 +880,12 @@ const BUILDERS = {
     }
     return 0.3;
   },
-  // --- Wonders --------------------------------------------------------------------------------
-  stonecircle(k) {
-    k.part('scGround', () => cyl(0.46, 0.47, 0.02, 20), mats.grass, 0, 0.01, 0);
-    const n = 9;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const st = k.part('scStone', () => box(0.07, 0.34, 0.1), mats.stone, Math.cos(a) * 0.34, 0.17, Math.sin(a) * 0.34);
-      st.rotation.y = -a;
-      if (i % 2 === 0) {
-        const b2 = (((i + 1) / n) * Math.PI * 2 + a) / 2;
-        const lin = k.part('scLintel', () => box(0.26, 0.05, 0.08), mats.stoneDark, Math.cos(b2) * 0.34, 0.365, Math.sin(b2) * 0.34);
-        lin.rotation.y = -b2 + Math.PI / 2;
-      }
-    }
-    k.part('scAltar', () => box(0.16, 0.08, 0.1), mats.stoneDark, 0, 0.04, 0);
-    k.part('scFire', () => cone(0.04, 0.1, 6), mats.flame, 0, 0.13, 0);
-    return 0.42;
-  },
-  greathall(k) {
-    k.part('ghallBody', () => box(0.62, 0.24, 0.34), mats.wood, 0, 0.12, 0);
-    k.part('ghallRoof', () => gable(0.68, 0.32, 0.44), mats.straw, 0, 0.37, 0);
-    for (const s of [-1, 1]) {
-      const head = k.part('dragonHead', () => cone(0.03, 0.14, 5), mats.woodDark, s * 0.34, 0.56, 0);
-      head.rotation.z = -s * 0.9;
-    }
-    k.part('ghallDoor', () => box(0.12, 0.17, 0.012), mats.door, 0, 0.085, 0.172);
-    for (const x of [-0.24, -0.08, 0.08, 0.24]) k.part('ghallPost', () => cyl(0.018, 0.018, 0.24, 6), mats.timber, x, 0.12, 0.19);
-    for (const x of [-0.18, 0.18]) k.part('banner', () => box(0.06, 0.12, 0.008), x < 0 ? mats.shipRed : mats.yellow, x, 0.14, 0.2);
-    return 0.6;
-  },
-  cathedral(k) {
-    k.part('nave', () => box(0.3, 0.32, 0.56), mats.stone, 0, 0.16, -0.04);
-    k.part('naveRoof', () => { const g = gable(0.6, 0.22, 0.34); g.rotateY(Math.PI / 2); return g; }, mats.slate, 0, 0.4, -0.04);
-    k.part('spireTower', () => box(0.18, 0.5, 0.18), mats.stone, 0, 0.25, 0.22);
-    k.part('spire', () => cone(0.13, 0.45, 4), mats.slate, 0, 0.72, 0.22).rotation.y = Math.PI / 4;
-    k.part('rose', () => cyl(0.06, 0.06, 0.012, 16), mats.window, 0, 0.36, 0.312).rotation.x = Math.PI / 2;
-    k.part('cathDoor', () => box(0.08, 0.14, 0.012), mats.door, 0, 0.07, 0.312);
-    for (const z of [-0.2, 0, 0.18]) for (const s of [-1, 1]) k.part('buttress', () => box(0.04, 0.22, 0.05), mats.stoneDark, s * 0.17, 0.11, z - 0.04);
-    k.part('cross', () => box(0.012, 0.08, 0.012), mats.yellow, 0, 0.98, 0.22);
-    return 1.0;
-  },
-  clocktower(k) {
-    k.part('ctShaft', () => box(0.26, 0.9, 0.26), mats.brick, 0, 0.45, 0);
-    k.part('ctBand', () => box(0.28, 0.04, 0.28), mats.stoneDark, 0, 0.92, 0);
-    k.part('ctTop', () => box(0.3, 0.24, 0.3), mats.stone, 0, 1.06, 0);
-    k.part('ctRoof', () => cone(0.24, 0.36, 4), mats.slate, 0, 1.36, 0).rotation.y = Math.PI / 4;
-    const hands = [];
-    for (let i = 0; i < 4; i++) {
-      const a = (i * Math.PI) / 2;
-      const face = new T.Group();
-      face.position.set(Math.sin(a) * 0.152, 1.06, Math.cos(a) * 0.152);
-      face.rotation.y = a;
-      mesh(geo('ctFace', () => cyl(0.09, 0.09, 0.012, 20)), mats.clockFace, 0, 0, 0, face).rotation.x = Math.PI / 2;
-      const hour = new T.Group();
-      hour.position.z = 0.008;
-      mesh(geo('ctHour', () => box(0.012, 0.05, 0.004)), mats.black, 0, 0.025, 0, hour);
-      const min = new T.Group();
-      min.position.z = 0.01;
-      mesh(geo('ctMin', () => box(0.008, 0.075, 0.004)), mats.black, 0, 0.037, 0, min);
-      face.add(hour, min);
-      k.g.add(face);
-      hands.push({ hour, min });
-    }
-    k.anim.push({ kind: 'clock', hands });
-    return 1.55;
-  },
-  skyline(k) {
-    k.part('stBase', () => cyl(0.16, 0.24, 0.12, 12), mats.concrete, 0, 0.06, 0);
-    k.part('stShaft', () => cyl(0.05, 0.08, 1.9, 12), mats.concrete, 0, 1.07, 0);
-    k.part('stPod', () => sph(0.17, 16, 12), mats.glassBlue, 0, 1.55, 0).scale.set(1, 0.6, 1);
-    k.part('stDeck', () => new T.TorusGeometry(0.17, 0.025, 8, 24), k.b.color ? k.trim : mats.neonCyan, 0, 1.55, 0).rotation.x = Math.PI / 2;
-    k.part('stNeedle', () => cyl(0.008, 0.02, 0.6, 6), mats.metal, 0, 2.3, 0);
-    const light = k.part('stLight', () => sph(0.025, 8, 6), mats.redLight, 0, 2.62, 0);
-    k.anim.push({ kind: 'blink', o: light });
-    return 2.65;
-  },
-  spire(k) {
-    k.part('spBase', () => cyl(0.36, 0.42, 0.1, 6), mats.whiteGloss, 0, 0.05, 0);
-    const crystal = k.part('spCrystal', () => { const g = new T.OctahedronGeometry(0.22, 0); g.scale(1, 5.5, 1); return g; }, mats.neonCyan, 0, 1.3, 0);
-    k.anim.push({ kind: 'pulse', o: crystal });
-    for (let i = 0; i < 3; i++) {
-      const ring = k.part('spRing' + i, () => new T.TorusGeometry(0.3 - i * 0.06, 0.012, 6, 32), i === 1 ? mats.neonPink : mats.holo, 0, 0.7 + i * 0.6, 0);
-      ring.rotation.x = Math.PI / 2 + 0.2 * (i - 1);
-      k.anim.push({ kind: 'spinY', o: ring, speed: 0.4 + i * 0.3 });
-    }
-    const beam = new T.Group();
-    beam.position.y = 2.5;
-    mesh(geo('spBeam', () => new T.CylinderGeometry(0.02, 0.12, 6, 10, 1, true)), mats.beam, 0, 3, 0, beam);
-    k.g.add(beam);
-    k.anim.push({ kind: 'beamUp', o: beam });
-    return 2.6;
-  },
 };
 
 // Buildings fill most of their plot (wonders are sized for their ring), and
 // grow a little with every level.
 const KIND_SCALE = { wonder: 1, house: 1.25, decor: 1.2 };
-export function buildingMesh(b, level) {
+export function buildingMesh(b, level, era) {
   T = three();
   const g = new T.Group();
   const body = new T.Group();
@@ -839,7 +893,7 @@ export function buildingMesh(b, level) {
   const anim = [];
   const color = colorOf(b);
   const lv = level || b.level || 1;
-  const kind = ITEMS[b.item]?.kind;
+  const kind = b.wonder ? 'wonder' : ITEMS[b.item]?.kind;
   const scale = (KIND_SCALE[kind] || 1.3) * (kind === 'wonder' || b.home ? 1 : 1 + 0.05 * (lv - 1));
   body.scale.setScalar(scale);
   const k = {
@@ -852,13 +906,15 @@ export function buildingMesh(b, level) {
     lv,
     part: (name, make, m, x, y, z) => mesh(geo(name, make), m, x, y, z, body),
   };
-  const make = BUILDERS[b.item] || ((kk) => { kk.part('crate', () => box(1, 1, 1), mats.wood, 0, 0.1, 0).scale.setScalar(0.2); return 0.25; });
+  const own = BUILDERS[b.item] || ((kk) => wonderModel(b.item, kk) ?? (kk.part('crate', () => box(1, 1, 1), mats.wood, 0, 0.1, 0).scale.setScalar(0.2), 0.25));
+  const look = lookEra(b.item, era);
+  const make = (kk) => lookModel(b.item, look, kk) ?? own(kk);
   const h = make(k) * scale;
   // Upgraded town buildings fly pennants: silver at level 2, gold at level 3.
   if (lv > 1 && !b.home && kind !== 'wonder') levelPennants(k, lv);
   g.traverse((o) => {
     if (o.isMesh) {
-      o.castShadow = o.material !== mats.beam && o.material !== mats.holo;
+      o.castShadow = o.material !== mats.beam && o.material !== mats.holo && !o.material.userData.noShadow;
       o.receiveShadow = true;
       o.userData.buildId = b.id;
     }
@@ -866,7 +922,7 @@ export function buildingMesh(b, level) {
   return { g, h, anim };
 }
 
-export const hasModel = (item) => !!BUILDERS[item];
+export const hasModel = (item) => !!BUILDERS[item] || isWonderModel(item);
 
 const pennantMats = {};
 function levelPennants(k, lv) {

@@ -3,7 +3,7 @@
 // events, the build queue, the weekly leaderboard, the ticker, !me cards
 // and the big banners for wonders, new eras and the finale.
 // Viewer names and text only ever go in as text, never as HTML.
-import { ITEMS, ERAS, RESOURCES, EVENTS, TOOLS, itemsOfEra } from '../shared/catalog.js';
+import { ITEMS, ERAS, RESOURCES, EVENTS, TOOLS, itemsOfEra, theName, TheName, whatItDoes, wondersOf } from '../shared/catalog.js';
 import { GATHER, angleOf } from '../shared/terrain.js';
 
 const DAY = 864e5;
@@ -47,6 +47,8 @@ export function weekKey(ms) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7))).toISOString().slice(0, 10);
 }
 const resEm = (r) => (r === 'power' ? '⚡' : RESOURCES[r] ? RESOURCES[r].emoji : '');
+// 24%, but 0.4% for a bar that has only just started.
+const pct = (x) => (x > 0 && x < 0.1 ? (Math.floor(x * 1000) / 10).toFixed(1) : String(Math.floor(x * 100))) + '%';
 const resLabel = (r) => (r === 'power' ? 'power' : RESOURCES[r] ? RESOURCES[r].label.toLowerCase() : r);
 
 export function createHud(state, now, opts) {
@@ -94,6 +96,7 @@ export function createHud(state, now, opts) {
     };
     row('!home', 'get your own home and bot');
     row('!wood !stone !food', 'one trip: chop, mine, pick');
+    if (state.era >= RESOURCES.marble.era) row('!marble', 'cut marble in the hills');
     if (state.era >= RESOURCES.coal.era) row('!coal !iron', 'dig ore from a deposit');
     row('!build ' + starter, 'start a town project');
     row('!help', 'build it, more bots go faster');
@@ -101,9 +104,10 @@ export function createHud(state, now, opts) {
     row('!upgrade tools', 'better tools, bigger loads');
     row('!explore', 'scout the fog for new land');
     if (state.econ?.guild) row('!deliver', 'haul for a Merchant Guild order');
+    row('!info ' + (keys.find((k) => ITEMS[k].kind === 'decor') || starter), 'what a building is for');
     row('!me', 'find your bot · !wood 3 does 3');
     renderSources();
-    $('howBuildTitle').textContent = 'Build in the ' + ERAS[state.era].name;
+    $('howBuildTitle').textContent = 'Build in ' + ERAS[state.era].the;
     $('howBuildCmd').textContent = '!build ' + starter;
     $('queueCmd').textContent = '!build ' + starter;
     const items = $('items');
@@ -112,11 +116,14 @@ export function createHud(state, now, opts) {
     for (const key of keys) {
       const it = ITEMS[key];
       const li = el('li', 'item' + (want.has(key) ? ' wanted' : ''));
+      li.title = it.label + ': ' + whatItDoes(key);
       const cost = el('span', 'cost');
       for (const [r, n] of Object.entries(it.cost)) cost.append(el('span', null, resEm(r) + n));
       li.append(el('span', 'em', it.emoji), el('span', 'key', key), cost);
       items.append(li);
     }
+    spot = 0;
+    renderSpotlight();
     const quick = $('quick');
     quick.textContent = '';
     for (const c of ['!home', '!build ' + starter, '!help', '!wood', '!stone', '!food', '!wood 3', '!explore', '!help wonder', '!upgrade ' + starter, '!upgrade tools', '!upgrade', '!stop', '!vote 1', '!repair', '!me', '!dance']) {
@@ -126,6 +133,20 @@ export function createHud(state, now, opts) {
       quick.append(b);
     }
   }
+  // Under the buildings, one at a time: what it is for (stream viewers cannot
+  // hover over the list).
+  let spot = 0;
+  function renderSpotlight() {
+    const keys = itemsOfEra(state.era);
+    const box = $('itemSpot');
+    if (!box || !keys.length) return;
+    const key = keys[spot % keys.length];
+    const it = ITEMS[key];
+    box.textContent = '';
+    box.append(el('span', 'em', it.emoji), el('b', null, it.label), el('span', null, whatItDoes(key)));
+    $('items').querySelectorAll('.item').forEach((li, i) => li.classList.toggle('spot', i === spot % keys.length));
+  }
+  setInterval(() => { spot++; renderSpotlight(); }, 4000);
   // Every good the town can have yet: how to gather it by hand, and the
   // building that makes it all day.
   function renderSources() {
@@ -157,9 +178,11 @@ export function createHud(state, now, opts) {
     if (!race || !race.rival) { box.hidden = true; return; }
     box.hidden = false;
     const r = race.rival;
+    const mine = state.econ?.wonder;
+    const wonderEm = (item, pending) => (item && !pending && ITEMS[item] ? ITEMS[item].emoji : '🏛️');
     const rows = [
-      { name: 'BotWorld', who: 'chat', color: '#3b7ddd', p: race.you },
-      { name: r.name, who: 'AI', color: '#d9534f', p: r.progress },
+      { name: 'BotWorld', who: 'chat', color: '#3b7ddd', p: race.you, wem: wonderEm(mine?.item, mine?.pending) },
+      { name: r.name, who: 'AI', color: '#d9534f', p: r.progress, wem: wonderEm(r.wonderItem, r.wonderPending) },
     ];
     // Ahead is whoever is further along the road to the Future.
     const lead = race.you.total >= r.progress.total ? 0 : 1;
@@ -172,18 +195,32 @@ export function createHud(state, now, opts) {
       dot.style.background = x.color;
       who.append(dot, el('b', null, x.name), el('small', null, ' ' + x.who));
       const era = ERAS[Math.min(ERAS.length - 1, x.p.era)];
-      li.append(who, el('span', 'rera', era.emoji + ' ' + era.name + ' ' + Math.round(x.p.frac * 100) + '%'));
+      li.append(who, el('span', 'rera', era.emoji + ' ' + era.name + ' ' + pct(x.p.frac)));
       const bar = el('span', 'bar');
       const fill = el('span');
       fill.style.width = Math.round(100 * x.p.frac) + '%';
       fill.style.background = x.color;
       bar.append(fill);
       li.append(bar);
+      // The next era needs all three, so the bar shows the slowest one.
+      const parts = x.p.parts;
+      if (parts && x.p.frac < 1) {
+        const row = el('span', 'rparts');
+        for (const [em, k, title] of [['👥', 'people', 'People'], [x.wem, 'wonder', 'Wonder'], ['📚', 'knowledge', 'Knowledge']]) {
+          const part = el('span', parts[k] <= x.p.frac + 1e-9 ? 'slow' : null, em + ' ' + pct(parts[k]));
+          part.title = title;
+          row.append(part);
+        }
+        li.append(row);
+      }
       list.append(li);
     });
     const a = angleOf(r.origin);
     const way = COMPASS[Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
-    $('raceNote').textContent = r.finished ? r.name + ' lit their Fusion Spire first. BotWorld can still finish the race!'
+    // Who finished first: the rival only won if BotWorld had not finished yet.
+    const rivalFirst = r.finished && !(state.finished && (state.finishedAt || 0) <= (r.finishedAt || Infinity));
+    $('raceNote').textContent = rivalFirst ? r.name + ' finished ' + (r.wonderItem ? theName(r.wonderItem) : 'their last wonder') + ' first.' + (state.finished ? ' BotWorld made it too!' : ' BotWorld can still finish the race!')
+      : state.finished ? 'BotWorld won the race to the Future!' + (r.finished ? ' ' + r.name + ' finished later.' : '')
       : r.met ? r.name + ' lies to the ' + way + ' with ' + r.builds + ' buildings. Claim the land between: !build outpost ' + way
       : 'An AI town far to the ' + way + ', past the fog, races BotWorld to the Future. !explore ' + way + ' to find it.';
     renderGuild(r.name);
@@ -322,7 +359,9 @@ export function createHud(state, now, opts) {
       if (w) {
         const it = ITEMS[w.item];
         const short = w.short && w.short.length ? 'waiting for ' + w.short.map((r) => resEm(r) + ' ' + resLabel(r)).join(', ') : '!help wonder to help haul';
-        goals.append(goal(it.emoji, it.label, Math.floor(w.progress * 100) + '%', w.progress, w.progress >= 1 ? '' : short, w.progress >= 1));
+        const voting = state.vote?.kind === 'wonder' && state.vote.era === state.era;
+        const choose = w.pending ? wondersOf(state.era).map((k) => ITEMS[k].label).join(' or ') + (voting ? '? Vote: !vote 1 or !vote 2' : '? Chat votes soon') : '';
+        goals.append(goal(w.pending ? '🏛️' : it.emoji, w.pending ? 'Wonder' : it.label, Math.floor(w.progress * 100) + '%', w.progress, w.progress >= 1 ? '' : choose || short, w.progress >= 1));
       }
       const k = econ.knowledge / econ.knowledgeNeed;
       const left = (econ.knowledgeNeed - econ.knowledge) / Math.max(0.01, econ.knowledgeRate);
@@ -344,7 +383,8 @@ export function createHud(state, now, opts) {
       const li = el('li', 'need');
       const it = ITEMS[n.item];
       const why = {
-        power: 'More power!',
+        // Coal for idle coal plants, or more power plants.
+        power: n.res === 'power' ? 'More power!' : (RESOURCES[n.res]?.label || n.res) + ' for power!',
         hungry: 'People are hungry!',
         wonder: 'The wonder needs ' + resLabel(n.res),
         build: 'Builds wait for ' + resLabel(n.res),
@@ -362,12 +402,18 @@ export function createHud(state, now, opts) {
     const box = $('vote');
     box.hidden = !v;
     if (!v) return;
+    const wonder = v.kind === 'wonder';
+    box.classList.toggle('wonder-vote', wonder);
+    $('voteTitle').textContent = wonder ? '🗳️ Which wonder for ' + ERAS[v.era].the + '?' : '🗳️ Chat vote!';
+    const note = $('voteNote');
+    note.hidden = !wonder;
+    if (wonder) note.textContent = (v.rival ? v.rival + ' builds the other one. ' : '') + 'Both need the same goods.';
     const list = $('voteList');
     list.textContent = '';
     const total = v.counts.reduce((a, b) => a + b, 0) || 1;
     const best = Math.max(...v.counts);
     v.options.forEach((key, i) => {
-      const ev = EVENTS[key];
+      const ev = wonder ? { emoji: ITEMS[key].emoji, label: ITEMS[key].label, text: ITEMS[key].place ? 'as in ' + ITEMS[key].place : 'a wonder of ' + ERAS[v.era].the } : EVENTS[key];
       const li = el('li', 'vopt' + (best > 0 && v.counts[i] === best ? ' lead' : ''));
       const main = el('span', 'v-main');
       main.append(el('b', null, ev.emoji + ' ' + ev.label), el('small', null, ev.text));
@@ -451,6 +497,8 @@ export function createHud(state, now, opts) {
     }
     if (rows.length > max) list.append(el('li', 'more', '+' + (rows.length - max) + ' more'));
     $('queueEmpty').hidden = rows.length > 0;
+    // Nothing going: start what the town needs most, else this era's first producer.
+    if (!rows.length) $('queueCmd').textContent = state.econ?.plan?.find((st) => st.kind === 'build')?.cmd || $('howBuildCmd').textContent;
   }
 
   // --- Top builders this week ------------------------------------------------------------------
@@ -591,7 +639,7 @@ export function createHud(state, now, opts) {
     banner({
       kind: 'era',
       emoji: e.emoji,
-      title: 'Welcome to the ' + e.name + '!',
+      title: 'Welcome to ' + e.the + '!',
       text: e.tagline + '. New buildings to try:',
       items: itemsOfEra(era),
       foot: evolved ? evolved + ' old buildings are rebuilding themselves for the new era.' : 'Type !build house for a brand new ' + ITEMS[e.house].label.toLowerCase() + '.',
@@ -601,11 +649,18 @@ export function createHud(state, now, opts) {
   function wonderBanner(item) {
     const it = ITEMS[item];
     if (!it) return;
-    banner({ kind: 'wonder', emoji: it.emoji, title: 'The ' + it.label + ' is complete!', text: 'Thank you, haulers. The wonder of the ' + ERAS[it.era].name + ' stands.', ms: 9000 });
+    banner({ kind: 'wonder', emoji: it.emoji, title: TheName(item) + ' is complete!', text: 'Thank you, haulers. The wonder of ' + ERAS[it.era].the + ' stands.', ms: 9000 });
   }
-  function finaleBanner() {
+  // Chat chose the era's wonder (the rival builds the other).
+  function pickBanner(ev) {
+    const it = ITEMS[ev.item];
+    if (!it) return;
+    banner({ kind: 'wonder', emoji: it.emoji, title: 'BotWorld builds ' + theName(ev.item) + '!', text: (ev.how === 'vote' ? 'Chat chose it for ' : 'The wonder of ') + ERAS[ev.era].the + (it.place ? ', as in ' + it.place : '') + '.', foot: ev.other && state.econ?.race?.rival ? state.econ.race.rival.name + ' builds ' + theName(ev.other) + '. Haul with !help wonder' : 'Haul with !help wonder', ms: 10000 });
+  }
+  function finaleBanner(item) {
     const days = Math.max(1, Math.round(((state.finishedAt || now()) - state.createdAt) / DAY));
-    banner({ kind: 'finale', emoji: '✨', title: 'The Fusion Spire is lit!', text: 'From sticks and stones to a city of light in ' + days + ' days. Thank you, chat!', foot: 'Keep building: the Future is yours.', ms: 30000 });
+    const it = ITEMS[item];
+    banner({ kind: 'finale', emoji: it ? it.emoji : '✨', title: it?.finale || 'The last wonder stands!', text: 'From sticks and stones to a city of light in ' + days + ' days. Thank you, chat!', foot: 'Keep building: the Future is yours.', ms: 30000 });
   }
 
   // --- Timelapse ------------------------------------------------------------------------------
@@ -686,6 +741,7 @@ export function createHud(state, now, opts) {
     showMe,
     eraBanner,
     wonderBanner,
+    pickBanner,
     finaleBanner,
     timelapse,
     gazette,

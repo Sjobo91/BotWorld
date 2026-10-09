@@ -12,6 +12,10 @@ function setup(config, env = {}) {
   return { w, g, out };
 }
 
+test('the finale headline keeps its two sentences apart', () => {
+  assert.equal(templateHeadline([{ kind: 'finale', item: 'spire' }], null, 6), 'The Fusion Spire is lit! From sticks and stones to a city of light');
+});
+
 test('templates always have a headline, even on a quiet day', () => {
   for (let i = 0; i < 20; i++) {
     const h = templateHeadline([], null, 0);
@@ -27,7 +31,7 @@ test('the gazette notes what happened and writes about it without a key', async 
   assert.equal(g.facts.length, 2);
   const item = await g.publish();
   assert.equal(item.by, 'template');
-  assert.match(item.text, /Village|[Ss]torm|wind/);
+  assert.match(item.text, /Egypt|[Ss]torm|wind/);
   assert.deepEqual(out.map((e) => e.type), ['gazette']);
   assert.equal(g.facts.length, 0);
   assert.equal(g.latest, item);

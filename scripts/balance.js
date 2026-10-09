@@ -1,10 +1,11 @@
-// Plays BotWorld for months of pretend time in a few seconds, to see how
+// Plays BotWorld for weeks of pretend time in a few seconds, to see how
 // long each era takes for a given chat. Use it after changing numbers in
 // public/shared/catalog.js or the pace in botworld.config.json.
 //
 //   npm run balance                       5 regular viewers
 //   npm run balance -- --viewers=30       a busy channel
 //   npm run balance -- --viewers=2 --days=120 --eraDays=9
+//   npm run balance -- --difficulty=1.2   a harder rival (limits.rivalDifficulty)
 //
 // It can also make a ready-grown island to look at:
 //   npm run balance -- --untilEra=3 --save=data-preview
@@ -28,11 +29,15 @@ Math.random = rnd;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 
 const T0 = Date.UTC(2026, 9, 1, 8);
-const world = new World(freshState(T0, SEED), { pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined });
+const world = new World(freshState(T0, SEED), {
+  pace: args.eraDays ? { eraDays: Number(args.eraDays) } : undefined,
+  limits: args.difficulty ? { rivalDifficulty: Number(args.difficulty) } : undefined,
+});
 const log = [];
 world.on((e) => {
   if (e.type === 'era') log.push({ day: (now - T0) / 864e5, era: e.era });
-  if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale' });
+  if (e.type === 'finale') log.push({ day: (now - T0) / 864e5, era: 'finale', item: e.item });
+  if (e.type === 'notice' && e.kind === 'wonderpick') log.push({ day: (now - T0) / 864e5, text: e.text, pick: true });
   if (e.type === 'notice' && e.kind === 'rival') log.push({ day: (now - T0) / 864e5, text: e.text });
 });
 
@@ -49,7 +54,7 @@ function choose(v) {
   const s = world.state;
   const say = (text) => world.handleChat({ id: v.id, name: v.name }, text, now);
   if (!world.homeOf(v.id)) return say('!home');
-  if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * 3)));
+  if (s.vote && rnd() < 0.7) return say('!vote ' + (1 + Math.floor(rnd() * s.vote.options.length)));
   if (world.builds.some((b) => b.damaged && !b.repairBy) && rnd() < 0.5) return say('!repair');
   const job = s.jobs[v.id];
   // Busy bots: chat sometimes lines up more, often just watches.
@@ -85,6 +90,8 @@ const end = T0 + DAYS * 864e5;
 let lastDay = -1;
 const daily = [];
 const UNTIL_ERA = args.untilEra != null ? Number(args.untilEra) : Infinity;
+// A row of the table every few days: daily at a short pace, every 5 at 9.5.
+const TABLE_EVERY = Math.max(1, Math.round(world.pace.eraDays / 2));
 for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now += STEP) {
   for (const v of viewers) {
     if (now >= nextAct.get(v.id)) {
@@ -94,7 +101,7 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
   }
   world.tick(now);
   const day = Math.floor((now - T0) / 864e5);
-  if (day !== lastDay && day % 5 === 0 && world.econ) {
+  if (day !== lastDay && day % TABLE_EVERY === 0 && world.econ) {
     lastDay = day;
     const e = world.econ;
     daily.push({
@@ -112,13 +119,13 @@ for (; now < end && !world.state.finished && world.state.era < UNTIL_ERA; now +=
   }
 }
 
-console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays);
+console.log('BotWorld balance: ' + VIEWERS + ' viewers, ' + HOURS_ONLINE + ' h online a day each, a command every ~' + ACT_EVERY_MIN + ' min, eraDays ' + world.pace.eraDays + ', rival difficulty ' + world.rivalDifficulty);
 console.table(daily);
-for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, the Fusion Spire is lit' : 'entered the ' + ERAS[l.era].name));
+for (const l of log) console.log('day ' + l.day.toFixed(1) + ': ' + (l.pick ? '[vote] ' + l.text : l.text ? '[rival] ' + l.text : l.era === 'finale' ? 'FINALE, ' + ITEMS[l.item].finale : 'entered ' + ERAS[l.era].the));
 if (world.rival) console.log('rival:', JSON.stringify(world.rival.summary()), 'town progress', JSON.stringify(world.raceProgress()));
 const guild = world.state.contracts;
 if (guild && guild.n) console.log('Guild orders: ' + guild.n + ' posted, BotWorld won ' + guild.town + ', ' + (world.rival ? world.rival.s.name : 'the rival') + ' won ' + guild.rival);
-if (!world.state.finished) console.log('after ' + DAYS + ' days: still in the ' + ERAS[world.state.era].name);
+if (!world.state.finished) console.log('after ' + DAYS + ' days: still in ' + ERAS[world.state.era].the);
 const byItem = {};
 for (const b of world.builds) if (b.built) byItem[b.item] = (byItem[b.item] || 0) + 1;
 console.log('built:', JSON.stringify(byItem));

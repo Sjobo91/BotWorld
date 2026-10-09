@@ -14,7 +14,8 @@ import { hexBetween } from '../public/shared/hex.js';
 export const BASE_CAP = 100;
 export const FOOD_PER_POP_MIN = 0.05;
 // Later eras farm and store food better, so each resident needs less.
-export const foodPerPop = (era) => FOOD_PER_POP_MIN * [1, 0.9, 0.8, 0.65, 0.5, 0.4][Math.min(5, era)];
+const FOOD_SHARE = [1, 0.9, 0.85, 0.8, 0.65, 0.5, 0.4];
+export const foodPerPop = (era) => FOOD_PER_POP_MIN * FOOD_SHARE[Math.max(0, Math.min(FOOD_SHARE.length - 1, era))];
 export const START_STOCK = { wood: 70, stone: 45, food: 40 };
 // Wonders leave this share of storage for normal builds (at most
 // RESERVE_MAX of each good, so a town with huge stores still feeds them).
@@ -111,12 +112,14 @@ function adjacencyBoost(b, boosters) {
 }
 
 // Runs every producer for dt seconds. Mutates stock, progress and fuel.
-// Returns what was made and used, and which buildings produced something.
+// Returns what was made and used, which buildings produced something, and
+// which stood still (starved: the inputs they wait for).
 export function produce(builds, stock, ctx, dt) {
   const made = {};
   const used = {};
   const pops = [];
   const stalled = {};
+  const starved = {};
   const boosters = builds.filter((o) => isUp(o) && itemOf(o)?.boost);
   for (const b of builds) {
     if (!isUp(b)) continue;
@@ -143,6 +146,7 @@ export function produce(builds, stock, ctx, dt) {
       const full = outKeys.length > 0 && outKeys.every((r) => (stock[r] || 0) >= ctx.cap);
       if (missing.length || full) {
         stalled[b.id] = missing.length ? 'needs ' + missing.join(', ') : 'storage full';
+        if (missing.length) starved[b.id] = missing;
         if (it.power > 0) ctx.fuel.set(b.id, false);
         prog = Math.min(prog, 1);
         break;
@@ -159,7 +163,7 @@ export function produce(builds, stock, ctx, dt) {
     }
     ctx.progress.set(b.id, prog);
   }
-  return { made, used, pops, stalled };
+  return { made, used, pops, stalled, starved };
 }
 
 // Moves goods from storage into the wonder, a little at a time, in step with

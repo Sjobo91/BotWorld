@@ -4,7 +4,7 @@
 //   /?stream=1    the broadcast view for OBS: 1920x1080, camera directs itself
 // Extra options: &sound=1 (start with sound), &quality=low (no shadows, for
 // weak or GPU-less machines), &time=21:30 (pretend it is that time, for testing).
-import { ITEMS, ERAS, EVENTS, RESOURCES, TOOLS } from '../shared/catalog.js';
+import { ITEMS, ERAS, EVENTS, RESOURCES, TOOLS, theName, whatItDoes } from '../shared/catalog.js';
 import { GATHER } from '../shared/terrain.js';
 import { createWorld } from './world3d.js';
 import { createHud } from './hud.js';
@@ -162,7 +162,7 @@ function handle(ev) {
       return;
     case 'vote':
       state.vote = ev.vote;
-      if (ev.winner && EVENTS[ev.winner]) hud.toast('vote', '🗳️', 'Chat chose ', EVENTS[ev.winner].emoji + ' ' + EVENTS[ev.winner].label + '!');
+      if (ev.winner && ev.kind !== 'wonder' && EVENTS[ev.winner]) hud.toast('vote', '🗳️', 'Chat chose ', EVENTS[ev.winner].emoji + ' ' + EVENTS[ev.winner].label + '!');
       break;
     case 'event':
       state.event = ev.event;
@@ -193,13 +193,13 @@ function handle(ev) {
       state.eraHistory = state.eraHistory.concat([{ era: ev.era, at: ev.at }]);
       world?.eraChanged(ev.era);
       hud.eraBanner(ev.era, ev.evolved);
-      hud.toast('era', ERAS[ev.era].emoji, 'BotWorld', ' entered the ' + ERAS[ev.era].name + '!');
+      hud.toast('era', ERAS[ev.era].emoji, 'BotWorld', ' entered ' + ERAS[ev.era].the + '!');
       break;
     case 'finale':
       state.finished = true;
       state.finishedAt = ev.at;
       world?.finale();
-      hud.finaleBanner();
+      hud.finaleBanner(ev.item);
       break;
     case 'gazette':
       hud.gazette(ev.item);
@@ -220,10 +220,14 @@ function handle(ev) {
       else if (ev.kind === 'rival') hud.toast('event', '⚔️', '', ev.text);
       else if (ev.kind === 'repair') hud.toast('done', '🔧', ev.user || 'someone', ' ' + ev.text + '!');
       else if (ev.kind === 'wonder') {
-        const w = state.econ?.wonder;
-        hud.wonderBanner(w ? w.item : ERAS[state.era].wonder);
+        hud.wonderBanner(ev.item || state.econ?.wonder?.item);
         hud.toast('done', '🏛️', '', ev.text);
-      } else hud.toast('warn', '💬', ev.user ? '@' + ev.user + ' ' : '', ev.text);
+      } else if (ev.kind === 'wondervote') hud.toast('vote', '🗳️', '', ev.text);
+      else if (ev.kind === 'wonderpick') {
+        hud.pickBanner(ev);
+        hud.toast('vote', ITEMS[ev.item]?.emoji || '🏛️', '', ev.text);
+      } else if (ev.kind === 'info') hud.toast('help', 'ℹ️', ev.user ? ev.user + ': ' : '', ev.text);
+      else hud.toast('warn', '💬', ev.user ? '@' + ev.user + ' ' : '', ev.text);
       return;
     default:
       return;
@@ -244,7 +248,9 @@ function announce(b, prev) {
   if (!prev && b.home) {
     hud.toast('build', '🏡', who, ' is building their own home (#' + b.id + ')');
   } else if (!prev && b.project) {
-    hud.toast('build', '🔨', who, ' started ' + withArticle(describe(b)) + ' (#' + b.id + '). Help build it: !help');
+    // What it is for, so chat knows what it is helping with.
+    const does = ITEMS[b.item] ? whatItDoes(b.item).replace(/^./, (c) => c.toLowerCase()) : '';
+    hud.toast('build', '🔨', who, ' started ' + withArticle(describe(b)) + ' (#' + b.id + ')' + (does ? ': ' + does : '') + '. Help build it: !help');
   } else if (!prev && b.status === 'queued') {
     const wait = b.waitingFor && b.waitingFor.length ? ', waiting for ' + b.waitingFor.map((r) => RESOURCES[r].emoji + ' ' + RESOURCES[r].label.toLowerCase()).join(' and ') : '';
     hud.toast('build', '🔨', who, ' is building ' + withArticle(describe(b)) + ' (#' + b.id + ')' + wait);
@@ -279,11 +285,11 @@ function announceJob(userId, job) {
   }
   const at = state.builds.get(job.buildId);
   const label = at && ITEMS[at.item] ? ITEMS[at.item].label.toLowerCase() : 'island';
+  if (job.kind === 'wonder') { hud.toast('job', '📦', who, ' is hauling goods to ' + (at && ITEMS[at.item] && !at.pending ? theName(at.item) : 'the wonder') + '.'); return; }
   if (job.kind === 'explore') { hud.toast('job', '🧭', who, ' set off to explore the fog.'); return; }
   if (job.kind === 'deliver') { hud.toast('job', '📜', who, ' is hauling ' + (RESOURCES[job.res] ? RESOURCES[job.res].emoji + ' ' + RESOURCES[job.res].label.toLowerCase() : 'goods') + ' to the Guild wagon.'); return; }
   if (job.kind === 'build') { hud.toast('job', '🔨', who, ' is helping build the ' + label + '.'); return; }
-  if (job.kind === 'wonder') hud.toast('job', '📦', who, ' is hauling goods to the ' + label + '.');
-  else if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
+  if (job.kind === 'repair') hud.toast('job', '🔧', who, ' is repairing the ' + label + '.');
   else hud.toast('job', '⚒️', who, ' is helping at the ' + label + (job.res && RESOURCES[job.res] ? ' (' + RESOURCES[job.res].emoji + ')' : '') + '.');
 }
 

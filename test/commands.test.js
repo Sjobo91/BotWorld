@@ -23,8 +23,13 @@ test('build understands items, colors, filler words and "near"', () => {
   assert.equal(near.near, 'fountain');
 });
 
-test('wonders are not built by hand: !build stonecircle hauls to the wonder', () => {
-  assert.deepEqual(parseCommand('!build stonecircle'), { type: 'help', target: 'wonder' });
+test('wonders are not built by hand: !build pyramid hauls to the wonder', () => {
+  assert.deepEqual(parseCommand('!build pyramid'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build the pyramids'), { type: 'help', target: 'wonder' });
+  // Two words, even when the second is a building of its own.
+  assert.deepEqual(parseCommand('!build eiffel tower'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build big ben'), { type: 'help', target: 'wonder' });
+  assert.equal(parseCommand('!build tower').item, 'tower');
 });
 
 test('build with an unknown item keeps what it did not understand', () => {
@@ -85,9 +90,16 @@ test('other commands', () => {
   assert.deepEqual(parseCommand('!help wonder'), { type: 'help', target: 'wonder' });
   // Nobody builds a wonder alone: !build wonder (or its name) hauls to it.
   assert.deepEqual(parseCommand('!build wonder'), { type: 'help', target: 'wonder' });
-  assert.deepEqual(parseCommand('!build the cathedral'), { type: 'help', target: 'wonder' });
-  assert.deepEqual(parseCommand('!build stone circle 3'), { type: 'help', target: 'wonder', times: 3 });
-  assert.deepEqual(parseCommand('!help the cathedral'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build the colosseum'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!build great pyramid 3'), { type: 'help', target: 'wonder', times: 3 });
+  assert.deepEqual(parseCommand('!help the colosseum'), { type: 'help', target: 'wonder' });
+  // Wonder names of more than one word, small words and all.
+  assert.deepEqual(parseCommand('!help great wall'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!help big ben 3'), { type: 'help', target: 'wonder', times: 3 });
+  assert.deepEqual(parseCommand('!help sydney opera house'), { type: 'help', target: 'wonder' });
+  assert.deepEqual(parseCommand('!info big ben'), { type: 'info', words: ['bigben'] });
+  assert.deepEqual(parseCommand('!what is the ziggurat of ur'), { type: 'info', words: ['ziggurat'] });
+  assert.deepEqual(parseCommand('!info a kiln'), { type: 'info', words: ['kiln'] });
   assert.equal(parseCommand('!build hut near the wonder').item, 'hut');
   assert.deepEqual(parseCommand('!commands'), { type: 'commands' });
   assert.deepEqual(parseCommand('!home'), { type: 'home' });

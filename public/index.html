@@ -35,8 +35,9 @@
       <ol class="next-list" id="nextList"></ol>
     </section>
     <section class="panel vote" id="vote" hidden aria-label="Chat vote">
-      <h2><span>🗳️ Chat vote!</span> <span class="vote-time" id="voteTime"></span></h2>
+      <h2><span id="voteTitle">🗳️ Chat vote!</span> <span class="vote-time" id="voteTime"></span></h2>
       <ol class="vote-list" id="voteList"></ol>
+      <p class="vote-note" id="voteNote" hidden></p>
     </section>
     <div class="eventbar" id="eventBar" hidden role="status">
       <span class="em" id="eventEmoji"></span>
@@ -61,6 +62,7 @@
       <h2 id="howBuildTitle">Build together</h2>
       <p class="big">Start one with <code id="howBuildCmd">!build woodcutter</code>, then everyone <code>!help</code></p>
       <ul class="items" id="items"></ul>
+      <p class="item-spot" id="itemSpot" aria-live="off"></p>
     </div>
   </section>
 

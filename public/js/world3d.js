@@ -8,9 +8,12 @@ import { makeMap, decodeBits, isExplored, TERRAIN, MAP_RADIUS, START_RADIUS, GAT
 import { sunAt, seasonAt } from '../shared/sun.js';
 import { initMeshes, mats, geo, mesh, std, rng, glowTexture, scaffoldMesh, stakeMesh, shipMesh, botMesh, hatMesh, treeMesh, benchMesh, trimMat, NATURE } from './meshes.js';
 import { buildingMesh } from './buildings.js';
+import { lookEra } from './eralooks.js';
 import { createAudio } from './audio.js';
 
 const R = 0.62;
+// The stream's overview frames at most this many rings round the pad.
+const VIEW_RINGS = 16;
 const SQ3 = Math.sqrt(3);
 const PATH_TOP = 0.035;
 const TILE_TOP = 0.07;
@@ -39,10 +42,13 @@ const POI_DEFS = {
   market: ['drink', 'drink'], park: ['sit', 'sit'], campfire: ['sit', 'sit', 'sit'], garden: ['water'], farm: ['water'],
   greenhouse: ['water'], fountain: ['look', 'look'], well: ['look'], statue: ['look'], totem: ['look'], lighthouse: ['look'],
   tower: ['look'], windmill: ['look'], stadium: ['sit', 'sit'], holopark: ['look', 'look'], school: ['look'],
-  stonecircle: ['look', 'look'], greathall: ['sit'], cathedral: ['look'], clocktower: ['look'], skyline: ['look'], spire: ['look', 'look'],
+  obelisk: ['look'], temple: ['look', 'sit'], canal: ['water'], university: ['look'],
+  stonehenge: ['look', 'look'], moai: ['look', 'look'], pyramid: ['look', 'look'], ziggurat: ['look'], colosseum: ['look', 'sit'], greatwall: ['look'],
+  notredame: ['look'], angkorwat: ['look'], eiffel: ['look', 'look'], bigben: ['look'], empirestate: ['look'], operahouse: ['sit', 'look'],
+  spire: ['look', 'look'], elevator: ['look', 'look'],
 };
-const RES_COLORS = { wood: '#8a5a3b', stone: '#9aa1aa', food: '#e0a040', bricks: '#b5583b', coal: '#2b2b2e', iron: '#7d8794', steel: '#aab4c0', parts: '#c9a227', chips: '#2bb3b3' };
-const WATER_JOBS = new Set(['farm', 'gatherer', 'garden', 'greenhouse', 'vertifarm']);
+const RES_COLORS = { wood: '#8a5a3b', stone: '#9aa1aa', food: '#e0a040', bricks: '#b5583b', marble: '#f1eee8', coal: '#2b2b2e', iron: '#7d8794', steel: '#aab4c0', parts: '#c9a227', chips: '#2bb3b3' };
+const WATER_JOBS = new Set(['farm', 'gatherer', 'garden', 'greenhouse', 'vertifarm', 'canal']);
 const FISH_JOBS = new Set(['fisher', 'harbor']);
 // leaf: broad trees, leaf2: birches and blossom, ever: firs (always green).
 const SEASON_LOOK = {
@@ -181,7 +187,7 @@ export async function createWorld(stage, overlay, opts) {
   function C3(hex) { return new T.Color(hex); }
   const landColor = {};
   for (const [k, v] of Object.entries(LAND)) landColor[k] = new T.Color(v.c);
-  const layout = { map: null, seed: null, tiles: [], index: new Map(), extent: 6, knownR: 6, townR: 3, pierEnd: null, railR: 0, seaAngle: 0, coastD: 0, townTiles: [] };
+  const layout = { map: null, seed: null, tiles: [], index: new Map(), extent: 6, viewR: 6, knownR: 6, townR: 3, pierEnd: null, railR: 0, seaAngle: 0, coastD: 0, townTiles: [] };
   let known = new Uint8Array(0);
   let world = null;
   let baseMesh = null;
@@ -251,16 +257,34 @@ export async function createWorld(stage, overlay, opts) {
 
   // Everything that depends on what is explored: the town size, paths, the
   // pier and benches, the camera limits.
+  // The town is chat's own buildings: not the rival's (often still in the
+  // fog), and not the odd outpost far out, which gets its own visit on the
+  // camera tour instead. So the overview frames the town as it grows.
   function updateTownSize() {
-    let far = START_RADIUS;
     let knownFar = START_RADIUS;
     for (const t of layout.tiles) if (known[t.i]) knownFar = Math.max(knownFar, t.d);
-    for (const v of builds.values()) far = Math.max(far, hexDist(v.b.q, v.b.r) + 2);
+    const ds = [];
+    for (const v of builds.values()) if (!v.b.rival) ds.push(hexDist(v.b.q, v.b.r));
+    ds.sort((a, b) => a - b);
+    const core = ds.length ? ds[Math.min(ds.length - 1, Math.floor(ds.length * 0.9))] : 0;
+    const far = Math.max(START_RADIUS, core + 2);
     layout.extent = Math.min(MAP_RADIUS, far);
+    // The establishing shot stops growing at a size where buildings can still
+    // be told apart; a city bigger than that is shown district by district.
+    layout.viewR = Math.min(layout.extent, VIEW_RINGS);
+    // Every building chat owns, out to the farthest outpost: the wide shot.
+    layout.allR = Math.min(MAP_RADIUS, Math.max(layout.viewR, (ds.length ? ds[ds.length - 1] : 0) + 1.5));
     layout.knownR = knownFar;
     layout.townR = (Math.max(3, far - 1) * SQ3 + 1) * R;
-    layout.railR = Math.max(3, far - 1.4) * SQ3 * R;
+    // The railway circles just outside most of the town, moved out to the
+    // first ring where it passes no building (the outer tenth reaches past it).
+    const rs = [];
+    for (const v of builds.values()) if (!v.b.rival) { const p = hexToWorld(v.b.q, v.b.r); rs.push(Math.hypot(p.x, p.z)); }
+    let rail = Math.max(3, far - 1.4) * SQ3 * R;
+    while (rs.some((d) => Math.abs(d - rail) < 0.8 * R)) rail += 0.2 * R;
+    layout.railR = rail;
     layout.townTiles = layout.tiles.filter((t) => known[t.i] && walkTile(t) && t.d <= layout.extent);
+    updateLimits();
   }
   function afterExplore(full) {
     updateTownSize();
@@ -864,7 +888,9 @@ export async function createWorld(stage, overlay, opts) {
     if (!world) return;
     const built = [...builds.values()].filter((v) => v.b.built && ITEMS[v.b.item]?.train);
     const style = built.some((v) => v.b.item === 'maglev') ? 'maglev' : built.length ? 'steam' : null;
-    if (train && train.style === style) return;
+    // Rebuilt when the style changes or the town grows past the rails.
+    if (train && train.style === style && train.rr === layout.railR) return;
+    const train0 = train;
     if (train) world.remove(train.g);
     train = null;
     if (!style) return;
@@ -892,7 +918,7 @@ export async function createWorld(stage, overlay, opts) {
       cars.push(c);
     }
     world.add(g);
-    train = { g, cars, style, a: rand() * Math.PI * 2, puff: 0 };
+    train = { g, cars, style, rr, a: train0 ? train0.a : rand() * Math.PI * 2, puff: 0 };
   }
   function stepTrain(dt) {
     if (!train) return;
@@ -972,11 +998,16 @@ export async function createWorld(stage, overlay, opts) {
     for (const id of [...poiUser.keys()]) if (!live.has(id)) poiUser.delete(id);
   }
 
+  // Old buildings take the look of the era their town has reached: the
+  // town's for chat's buildings, the rival's for the rival's.
+  const rivalEra = () => data.econ?.race?.rival?.era ?? era;
+  const eraOf = (b) => (b.rival ? rivalEra() : era);
   function setBody(v, item, level, celebrate) {
-    const key = item + ':' + level;
+    const style = lookEra(item, eraOf(v.b));
+    const key = item + ':' + level + ':' + style;
     if (v.body && v.key === key) return;
     if (v.body) v.root.remove(v.body);
-    const made = buildingMesh({ ...v.b, item, level }, level);
+    const made = buildingMesh({ ...v.b, item, level }, level, style);
     v.body = made.g;
     v.h = made.h;
     v.anim = made.anim;
@@ -985,6 +1016,44 @@ export async function createWorld(stage, overlay, opts) {
     if (celebrate) v.grow = 0.25;
     if (v.damaged) v.body.rotation.z = 0.07;
     renderer.shadowMap.needsUpdate = true;
+  }
+  // A new era: rebuild what looks different now (a log cabin becomes a
+  // sawmill, a pharos a striped lighthouse). Live, the town rebuilds in a
+  // wave from the landing pad outwards, each building with a puff of dust;
+  // on a load or a reconnect it simply is the new era.
+  const restyles = [];
+  const itemOf = (v) => (v.b.pending ? 'wondersite' : v.b.item);
+  function restyle(v, celebrate) {
+    setBody(v, itemOf(v), v.b.level || 1, celebrate);
+    if (v.b.built && !v.b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
+  }
+  function queueRestyle(v) {
+    const p = v.root.position;
+    if (!restyles.some((r) => r.v === v)) restyles.push({ v, at: performance.now() + 700 + Math.hypot(p.x, p.z) * 260 });
+  }
+  function refreshLooks(rival, wave) {
+    for (const v of builds.values()) {
+      if (!v.body || !!v.b.rival !== rival) continue;
+      const item = itemOf(v);
+      if (v.key === item + ':' + (v.b.level || 1) + ':' + lookEra(item, eraOf(v.b))) continue;
+      if (wave && !still) queueRestyle(v);
+      else restyle(v, false);
+    }
+  }
+  function stepRestyles() {
+    if (!restyles.length) return;
+    const t = performance.now();
+    let n = 0;
+    for (let i = 0; i < restyles.length && n < 8; i++) {
+      const r = restyles[i];
+      if (t < r.at) continue;
+      restyles.splice(i--, 1);
+      const v = r.v;
+      if (builds.get(v.id) !== v || !v.body) continue;
+      restyle(v, true);
+      dust(v.root.position.x, v.root.position.y, v.root.position.z, 0.4);
+      n++;
+    }
   }
   function clearBody(v) {
     if (v.body) v.root.remove(v.body);
@@ -1054,9 +1123,21 @@ export async function createWorld(stage, overlay, opts) {
       builds.set(b.id, v);
     }
     v.b = b;
+    // Moved (off a wonder's plot): stand in the new place.
+    if (prev && (prev.q !== b.q || prev.r !== b.r)) {
+      const p = hexToWorld(b.q, b.r);
+      const t = layout.index.get(b.q + ',' + b.r);
+      v.root.position.set(p.x, t && !isWater(t) ? LAND[t.t].top : TILE_TOP, p.z);
+      v.root.rotation.y = Math.atan2(-p.x, -p.z);
+    }
     const finished = live && prev && prev.status !== 'done' && b.status === 'done';
+    // A finished building that turns into its version of the new era (only
+    // a new era does that) rebuilds in the era's wave instead of all at once.
+    const evolved = live && prev && v.body && prev.built && b.built && !b.wonder && prev.item !== b.item && !still;
     // Houses being upgraded keep standing as they are until the new one is done.
-    if (b.wonder || b.built || b.status === 'building') setBody(v, b.item, b.level || 1, finished && !!prev.upgrade);
+    // A wonder chat has not chosen yet is a building site.
+    if (evolved) queueRestyle(v);
+    else if (b.wonder || b.built || b.status === 'building') setBody(v, b.pending ? 'wondersite' : b.item, b.level || 1, finished && !!prev.upgrade);
     else clearBody(v);
     if (v.body && b.built && !b.wonder) v.body.scale.y = v.grow < 1 ? v.grow : 1;
     setScaffold(v, b.status === 'building');
@@ -1765,6 +1846,9 @@ export async function createWorld(stage, overlay, opts) {
         else if (a.kind === 'blink') a.o.visible = Math.sin(t * 3 + v.id) > 0;
         else if (a.kind === 'pulse') a.o.scale.setScalar(1 + Math.sin(t * 2.5 + v.id) * 0.06);
         else if (a.kind === 'hover') a.o.position.y = a.y + Math.sin(t * 1.4 + v.id) * 0.04;
+        else if (a.kind === 'nod') a.o.rotation.x = a.base + Math.sin(t * 0.9 + v.id) * a.amp;
+        else if (a.kind === 'climb') a.o.position.y = a.y0 + ((1 - Math.cos(t * 0.25 + v.id)) / 2) * a.span;
+        else if (a.kind === 'twinkle') a.o.visible = night > 0.3 && lit && Math.sin(t * 7 + a.ph) > 0.2;
         else if (a.kind === 'drone') {
           const k = t * 0.8 + a.ph;
           a.o.position.set(a.x + Math.cos(k) * 0.12, 0.25 + Math.sin(k * 1.7) * 0.06, a.z + Math.sin(k) * 0.12);
@@ -2072,6 +2156,10 @@ export async function createWorld(stage, overlay, opts) {
     if (still) return;
     burst({ x, y, z, count: 140, colors: ['#f2c230', '#e5608a', '#3b7ddd', '#47ad6b', '#ff8c42', '#ffffff'], speed: 1.4, life: 2.6, size: 0.04, gravity: 2.2, drag: 0.8 });
   }
+  // The town's wonder of the last era: where the finale happens.
+  function finalWonder() {
+    return [...builds.values()].find((v) => v.b.wonder && !v.b.rival && ITEMS[v.b.item]?.era === ERAS.length - 1) || null;
+  }
   function fireworks(x, z, n = 2) {
     if (still) return;
     for (let i = 0; i < n; i++) {
@@ -2250,7 +2338,7 @@ export async function createWorld(stage, overlay, opts) {
       ev.festT -= dt;
       if (ev.festT <= 0) {
         ev.festT = 1.2;
-        const s = [...builds.values()].find((v) => v.b.item === 'spire');
+        const s = finalWonder();
         fireworks(s ? s.root.position.x : 0, s ? s.root.position.z : 0, 1);
       }
     }
@@ -2285,6 +2373,13 @@ export async function createWorld(stage, overlay, opts) {
       mesh(geo('steamCabin', () => new T.BoxGeometry(0.18, 0.1, 0.22)), mats.white, 0, 0.13, -0.05, g);
       mesh(geo('steamFunnel', () => new T.CylinderGeometry(0.03, 0.035, 0.16, 8)), mats.shipRed, 0, 0.24, 0.05, g);
       g.userData.smoke = true;
+    } else if (style === 'galley') {
+      // A Roman galley: a long hull, a square sail and a row of oars a side.
+      mesh(geo('galleyHull', () => new T.BoxGeometry(0.2, 0.08, 0.66)), mats.wood, 0, 0.02, 0, g);
+      mesh(geo('galleyRam', () => new T.BoxGeometry(0.06, 0.04, 0.12)), mats.woodDark, 0, 0.0, 0.36, g);
+      mesh(geo('galleyMast', () => new T.CylinderGeometry(0.008, 0.008, 0.46, 5)), mats.woodDark, 0, 0.28, 0, g);
+      mesh(geo('galleySail', () => new T.BoxGeometry(0.28, 0.2, 0.005)), mats.sail, 0, 0.36, 0.02, g);
+      for (const s of [-1, 1]) for (let i = 0; i < 5; i++) mesh(geo('galleyOar', () => new T.BoxGeometry(0.16, 0.008, 0.012)), mats.woodDark, s * 0.15, 0.0, -0.2 + i * 0.1, g).rotation.z = s * 0.35;
     } else if (style === 'motor') {
       mesh(geo('motorHull', () => new T.BoxGeometry(0.18, 0.07, 0.48)), mats.white, 0, 0.02, 0, g);
       mesh(geo('motorCabin', () => new T.BoxGeometry(0.14, 0.07, 0.14)), mats.glassBlue, 0, 0.09, -0.04, g);
@@ -2449,7 +2544,8 @@ export async function createWorld(stage, overlay, opts) {
     }
     const L = v.label;
     const b = v.b;
-    const item = ITEMS[b.item] || { label: b.item, emoji: '📦' };
+    // A wonder nobody has chosen yet is just "Wonder" until chat votes.
+    const item = b.pending ? { ...ITEMS[b.item], label: 'Wonder' } : ITEMS[b.item] || { label: b.item, emoji: '📦' };
     const bd = data.builders.get(b.ownerId);
     let title;
     let sub;
@@ -2465,7 +2561,7 @@ export async function createWorld(stage, overlay, opts) {
       const pr = progressOf(b);
       title = item.label + (b.status === 'done' ? '' : ' ' + Math.floor(pr * 100) + '%');
       const short = data.econ?.wonder?.id === b.id ? data.econ.wonder.short : [];
-      sub = b.status === 'done' ? 'Wonder of the ' + ERAS[item.era].name : short.length ? 'needs ' + short.map(resName).join(', ') : 'wonder · !help wonder to haul';
+      sub = b.status === 'done' ? 'Wonder of ' + ERAS[item.era].the : b.pending ? 'chat votes which one · !help wonder to haul' : short.length ? 'needs ' + short.map(resName).join(', ') : 'wonder · !help wonder to haul';
       if (b.status !== 'done') bar = pr;
     } else if (v.damaged) {
       title = '🔧 ' + item.label + ' is broken';
@@ -2491,7 +2587,7 @@ export async function createWorld(stage, overlay, opts) {
       const to = b.upgrade ? ITEMS[b.upgrade.item] : null;
       title = (to && to !== item ? item.label + ' → ' + to.label : item.label + (b.upgrade ? ' → level ' + b.upgrade.level : '')) + ' #' + b.id;
       const founder = data.builders.get(b.founderId);
-      sub = b.evolving ? 'the ' + ERAS[era].name + ' is here' : bd ? bd.name + (b.home ? "'s home" : '') : founder ? 'started by ' + founder.name : 'town';
+      sub = b.evolving ? ERAS[era].the + ' is here' : bd ? bd.name + (b.home ? "'s home" : '') : founder ? 'started by ' + founder.name : 'town';
       if (b.status === 'queued') sub += b.waitingFor?.length ? ' · waiting for ' + b.waitingFor.map(resName).join(', ') : ' · waiting for a builder';
       if (b.status === 'building') bar = progressOf(b);
     }
@@ -2651,14 +2747,18 @@ export async function createWorld(stage, overlay, opts) {
     camera.setViewOffset(fullW, fullH, dx < 0 ? -2 * dx : 0, dy < 0 ? -2 * dy : 0, w, h);
     camera.updateProjectionMatrix();
     view = { visW, visH, f: h / 2 / tb };
-    controls.maxDistance = opts.stream ? fitDistance() * 1.9 : Math.max(fitDistance() * 1.9, fitDistance(layout.knownR) * 1.3);
+    updateLimits();
+  }
+  // How far out the camera may go: enough to see the whole town as it grows.
+  function updateLimits() {
+    controls.maxDistance = opts.stream ? Math.max(fitDistance() * 1.9, fitDistance(layout.allR) * 1.1) : Math.max(fitDistance() * 1.9, fitDistance(layout.knownR) * 1.3);
   }
   // How far back the camera has to be to see the town (or rings tiles out).
   function fitDistance(rings) {
-    const s = (rings || layout.extent) * SQ3 * R + R;
+    const s = (rings || layout.viewR) * SQ3 * R + R;
     const dW = (s * view.f) / (view.visW / 2);
     const dH = ((s * Math.sin(elevation()) + 0.6) * view.f) / (view.visH / 2);
-    return Math.max(3, Math.min(80, Math.max(dW, dH) * 0.95));
+    return Math.max(3, Math.min(120, Math.max(dW, dH) * 0.95));
   }
   function frameCamera() {
     focus = null;
@@ -2739,10 +2839,24 @@ export async function createWorld(stage, overlay, opts) {
   }
   // In stream mode the camera directs itself: it flies to whatever chat just
   // did, and otherwise slowly tours the island.
-  const tour = { next: 0, i: 0, track: null, lastEvent: 0, prio: 0 };
+  const tour = { next: 0, i: 0, track: null, lastEvent: 0, prio: 0, wideNext: 0, wideUntil: 0 };
+  // Every couple of minutes the stream pulls back for a wide shot of the
+  // whole town, every building chat owns however far it has spread, and holds
+  // it while the camera slowly circles; small events wait until it is done.
+  const WIDE_EVERY = 150000;
+  const WIDE_HOLD = 12000;
+  function wideShot(t) {
+    tour.wideNext = t + WIDE_EVERY;
+    tour.wideUntil = t + WIDE_HOLD;
+    tour.next = t + WIDE_HOLD;
+    tour.track = null;
+    tour.prio = 0;
+    flyTo(0, 0, fitDistance(layout.allR), 3500);
+  }
   function interest(prio, x, z, want, track, hold) {
     if (!opts.stream || lapse) return;
     const t = performance.now();
+    if (t < tour.wideUntil && prio < 8) return;
     if (t - tour.lastEvent < 6000 && prio < tour.prio) return;
     tour.lastEvent = t;
     tour.prio = prio;
@@ -2754,17 +2868,25 @@ export async function createWorld(stage, overlay, opts) {
     if (!opts.stream || still || lapse) return;
     const t = performance.now();
     controls.autoRotate = !tour.track;
+    // The first wide shot a minute in, then every WIDE_EVERY; it waits for a
+    // flight to land and for a big moment (a new era, the finale) to end.
+    if (!tour.wideNext) tour.wideNext = t + 60000;
+    if (t >= tour.wideNext && !focus && !(tour.prio >= 8 && t < tour.next)) { wideShot(t); return; }
     if (t < tour.next) return;
     tour.next = t + 15000;
     tour.prio = 0;
     tour.track = null;
     tour.i++;
-    const all = [...builds.values()];
+    // Only what can be seen: the rival's buildings stay hidden in the fog.
+    const all = [...builds.values()].filter((v) => v.root.visible);
     const busy = all.filter((v) => v.b.status === 'building' && !v.b.wonder);
     const done = all.filter((v) => v.b.built && !v.b.wonder);
     const walkers = [...bots.values()].filter((b) => b.mode === 'walk' || b.mode === 'work' || b.mode === 'job' || b.mode === 'act');
-    const wonder = all.find((v) => v.b.wonder && v.b.item === ERAS[era].wonder);
-    const step = tour.i % 6;
+    const wonder = all.find((v) => v.b.wonder && !v.b.rival && ITEMS[v.b.item]?.era === era);
+    // Outposts and buildings out past the overview: the town's far reaches.
+    const remote = done.filter((v) => !v.b.rival && hexDist(v.b.q, v.b.r) > layout.viewR - 1);
+    const step = tour.i % 7;
+    if (step === 6 && remote.length) { const v = pick(remote); flyTo(v.root.position.x, v.root.position.z, 9, 3200); return; }
     const rv = data.econ?.race?.rival;
     const rvTile = rv?.met ? layout.index.get(rv.origin.q + ',' + rv.origin.r) : null;
     if (step === 5 && rvTile && known[rvTile.i]) { flyTo(rvTile.x, rvTile.z, 9, 3200); return; }
@@ -2874,8 +2996,9 @@ export async function createWorld(stage, overlay, opts) {
   }
 
   // --- Eras -----------------------------------------------------------------------------------
-  function applyEra(e) {
+  function applyEra(e, wave) {
     era = Math.max(0, Math.min(ERAS.length - 1, e || 0));
+    refreshLooks(false, wave);
     mats.path.color.set(look().path);
     mats.bot.color.set(look().bot);
     rebuildLamps();
@@ -2904,6 +3027,7 @@ export async function createWorld(stage, overlay, opts) {
     for (const p of [...porters]) stepBot(p, t, dt);
     for (const n of rivalBots) stepBot(n, t, dt);
     stepBuilds(t, dt);
+    stepRestyles();
     stepTrain(dt);
     stepEvents(t, dt);
     stepGuild(t, dt);
@@ -3036,7 +3160,10 @@ export async function createWorld(stage, overlay, opts) {
       else if (b && b.mode === 'walk' && job) decide(b);
     },
     setEconomy(econ) {
+      const was = rivalEra();
+      const known = !!data.econ?.race?.rival;
       data.econ = econ;
+      if (rivalEra() !== was) refreshLooks(true, known);
       syncRivalBots();
     },
     produce(list) {
@@ -3088,7 +3215,7 @@ export async function createWorld(stage, overlay, opts) {
       else flyTo(target.x, target.z, Math.min(camera.position.distanceTo(controls.target), 7), 1400);
     },
     eraChanged(e) {
-      applyEra(e);
+      applyEra(e, true);
       fireworks(0, 0, 8);
       for (const b of bots.values()) if (b.mode !== 'arrive' && b.mode !== 'walk' && b.mode !== 'work') party(b);
       interest(9, 0, 0, fitDistance(), null, 14000);
@@ -3096,7 +3223,7 @@ export async function createWorld(stage, overlay, opts) {
     },
     finale() {
       data.finale = true;
-      const s = [...builds.values()].find((v) => v.b.item === 'spire');
+      const s = finalWonder();
       if (s) interest(10, s.root.position.x, s.root.position.z, 6, null, 30000);
     },
     timelapse: startTimelapse,
@@ -3129,6 +3256,15 @@ export async function createWorld(stage, overlay, opts) {
       for (let i = 0; i < baseMesh.count; i++) { baseMesh.getMatrixAt(i, e); e.decompose(p, q, sc); if (sc.y < 0.05) flat++; }
       return { count: baseMesh.count, flat, sphere: baseMesh.boundingSphere ? baseMesh.boundingSphere.radius : null, frustum: baseMesh.frustumCulled, visible: baseMesh.visible, inScene: !!baseMesh.parent };
     },
+    // The whole town at once, as the stream's establishing shot shows it
+    // (or just rings round the pad).
+    overview(rings) {
+      flyTo(0, 0, fitDistance(rings), 800);
+    },
+    // The stream's wide shot of every building chat owns, right now.
+    wide() {
+      wideShot(performance.now());
+    },
     debug() {
       return {
         era,
@@ -3137,8 +3273,12 @@ export async function createWorld(stage, overlay, opts) {
         builds: [...builds.values()].map((v) => ({ id: v.id, item: v.b.item, status: v.b.status, key: v.key, scaleY: v.body ? +v.body.scale.y.toFixed(2) : 0 })),
         camera: { d: +camera.position.distanceTo(controls.target).toFixed(2), y: +camera.position.y.toFixed(2), tx: +controls.target.x.toFixed(2), tz: +controls.target.z.toFixed(2), fit: +fitDistance().toFixed(2), max: +controls.maxDistance.toFixed(2) },
         knownR: layout.knownR,
+        extent: layout.extent,
+        viewR: layout.viewR,
+        allR: layout.allR,
         explored: known.reduce((a, b) => a + b, 0),
         train: train ? train.style : null,
+        railR: +layout.railR.toFixed(3),
         guild: guild.g ? { x: +guild.g.position.x.toFixed(2), z: +guild.g.position.z.toFixed(2), k: +guild.k.toFixed(2) } : null,
         season,
       };

@@ -6,8 +6,8 @@
 // project: someone starts it (!build farm), everyone helps (!help), and the
 // more bots help, the faster it rises. Around the town lies a big world in
 // fog, explored by scouts (!explore), with forests, hills, ore and ruins.
-import { ITEMS, ERAS, EVENTS, HATS, PALETTE, RESOURCES, HOME_LEVELS, BUILD_LEVELS, TOOLS, toolsOf, hashStr, houseFor, itemsOfEra, levelFor, titleFor, xpForLevel, evolvedItem } from '../public/shared/catalog.js';
-import { WONDER_RING, hexDist, hexKey, ringTiles, wonderTile } from '../public/shared/hex.js';
+import { ITEMS, ERAS, EVENTS, HATS, PALETTE, RESOURCES, HOME_LEVELS, BUILD_LEVELS, TOOLS, toolsOf, hashStr, houseFor, itemsOfEra, levelFor, titleFor, xpForLevel, evolvedItem, wondersOf, otherWonder, theName, TheName, whatItDoes, resolveItem, resolveResource, resolveWonder } from '../public/shared/catalog.js';
+import { WONDER_RING, hexDist, hexKey, isWonderPlot, ringTiles, wonderTile } from '../public/shared/hex.js';
 import * as M from '../public/shared/terrain.js';
 import { parseCommand } from './commands.js';
 import * as E from './economy.js';
@@ -39,13 +39,19 @@ export const DEFAULT_LIMITS = {
   deliverSec: 30,
   voteEveryMin: 60,
   voteSec: 180,
+  // Which wonder BotWorld builds: chat votes when an era comes into sight.
+  wonderVoteSec: 300,
   autoEventEveryMin: 150,
 };
 // eraDays: how long an era takes at base speed. Schools and labs can make
-// knowledge up to 1.5x faster, and helpers speed up the wonder.
-export const DEFAULT_PACE = { eraDays: 11 };
+// knowledge up to 1.5x faster, and helpers speed up the wonder. 2 days an
+// era make a season of about two weeks; 9.5 one of about two months.
+export const DEFAULT_PACE = { eraDays: 2 };
 
 const ECON_STEP_SEC = 5;
+// How long a building that stood idle for want of an input counts as idle:
+// it gets a little now and then, so one economy step can miss it.
+const IDLE_MEMORY_MS = 3 * 60e3;
 const WALK_BASE_SEC = 3;
 const WALK_SEC_PER_RING = 1.5;
 // Bot-seconds of work a town project needs per second of its build time:
@@ -84,7 +90,7 @@ const isProducerLike = (it) => ['producer', 'power', 'storage'].includes(it.kind
 
 export function freshState(now, seed) {
   return {
-    version: 3,
+    version: 4,
     createdAt: now,
     seq: 0,
     builds: [],
@@ -109,6 +115,8 @@ export function freshState(now, seed) {
     contract: null,
     contracts: G.freshContracts(),
     nextContractAt: now + 45 * 60e3,
+    // The wonder chat chose for each era (the rival builds the other one).
+    picks: {},
   };
 }
 
@@ -155,10 +163,55 @@ export function migrate(state, now) {
     s.found = [];
     s.version = 3;
   }
+  if (s.version === 3) migrateV3(s);
   const fresh = freshState(now, s.mapSeed);
   for (const k of Object.keys(fresh)) if (s[k] === undefined) s[k] = fresh[k];
   for (const r of Object.keys(E.START_STOCK)) if (typeof s.stock[r] !== 'number') s.stock[r] = 0;
   return s;
+}
+
+// Version 4 brought the eras of history: the Village became Ancient Egypt,
+// the Roman Empire came in between, and every era got two wonders to choose
+// from. Old eras, buildings and wonders move to their new places.
+const V3_ERA = [0, 1, 3, 4, 5, 6];
+const V3_ITEMS = { cottage: 'mudhouse', barn: 'granary', stonecircle: 'stonehenge', greathall: 'pyramid', cathedral: 'notredame', clocktower: 'bigben', skyline: 'empirestate' };
+function migrateV3(s) {
+  const era = (e) => V3_ERA[Math.max(0, Math.min(V3_ERA.length - 1, e || 0))];
+  const fix = (list, townEra) => {
+    for (const b of list) {
+      for (const o of [b, b.upgrade]) {
+        if (!o) continue;
+        o.item = V3_ITEMS[o.item] || o.item;
+        // Windmills come with the Middle Ages now: before that, a canal.
+        if (o.item === 'windmill' && townEra < ITEMS.windmill.era) o.item = 'canal';
+      }
+    }
+  };
+  s.era = era(s.era);
+  s.eraHistory = (s.eraHistory || []).map((h) => ({ ...h, era: era(h.era) }));
+  fix(s.builds, s.era);
+  s.picks = {};
+  for (const b of s.builds) {
+    if (!b.wonder) continue;
+    const e = ITEMS[b.item].era;
+    [b.q, b.r] = wonderTile(e);
+    s.picks[e] = b.item;
+  }
+  if (s.vote && s.vote.kind !== 'wonder') s.vote = null;
+  const rv = s.rival;
+  if (rv) {
+    rv.era = era(rv.era);
+    rv.history = (rv.history || []).map((h) => ({ ...h, era: era(h.era) }));
+    rv.eraFirst = Object.fromEntries(Object.entries(rv.eraFirst || {}).map(([e, who]) => [era(Number(e)), who]));
+    fix(rv.builds, rv.era);
+    for (const b of rv.builds) {
+      if (!b.wonder) continue;
+      const e = ITEMS[b.item].era;
+      if (s.picks[e]) b.item = otherWonder(s.picks[e]);
+      else s.picks[e] = otherWonder(b.item);
+    }
+  }
+  s.version = 4;
 }
 
 export function cleanName(name) {
@@ -179,6 +232,7 @@ export class World {
     this.progress = new Map();
     this.fuel = new Map();
     this.stalled = {};
+    this.starved = {}; // buildings idle of late, by id: the inputs they wait for and when
     this.rates = {};
     this.handMade = {}; // goods gathered by hand since the last economy step
     this.happy = 50;
@@ -247,13 +301,29 @@ export class World {
     this.emit({ type: 'rival', rival: this.rival.summary(), met: true });
   }
 
-  // The ring around the landing pad is for wonders; anything an old save
-  // left there moves out.
-  relocateWonderRing() {
-    for (const b of this.builds) {
-      if (b.wonder || hexDist(b.q, b.r) > WONDER_RING) continue;
-      const plot = this.choosePlot(b.item, { home: b.home, salt: b.id });
-      if (plot) { b.q = plot.q; b.r = plot.r; this.dirty = true; }
+  // The plots of the wonders are for wonders: anything standing there (from
+  // an old save, or where the Future's wonder will rise) moves out, or makes
+  // way when there is no room left.
+  relocateWonderRing(now = Date.now()) {
+    for (const b of [...this.builds]) {
+      if (b.wonder || !isWonderPlot(b.q, b.r, this.state.era)) continue;
+      let plot = this.choosePlot(b.item, { home: b.home, salt: b.id });
+      // A full town: it takes the place of something the town can spare,
+      // as a new building would (a home always may, so nobody loses theirs).
+      const spare = plot ? null : this.spareFor(b.item, !!b.home);
+      if (spare) {
+        plot = M.tileAt(this.map, spare.q, spare.r);
+        this.makeWay(spare, b.item, now);
+      }
+      if (plot) {
+        b.q = plot.q;
+        b.r = plot.r;
+        if (!b.home) this.placeStats(b);
+        this.changed({ type: 'build', build: b });
+      } else {
+        this.removeBuild(b.id, now);
+        this.emit({ type: 'notice', kind: 'clear', text: 'The ' + label(b.item) + ' (#' + b.id + ') makes way for the wonder of ' + ERAS[this.state.era].the + '.' });
+      }
     }
   }
 
@@ -292,8 +362,13 @@ export class World {
     return this.pace.eraDays * 1440;
   }
   currentWonder() {
-    const key = ERAS[this.state.era].wonder;
-    return this.builds.find((b) => b.wonder && b.item === key) || null;
+    const era = this.state.era;
+    return this.builds.find((b) => b.wonder && ITEMS[b.item].era === era) || null;
+  }
+  // "the Great Pyramid", "Stonehenge", or just "the wonder" while chat has
+  // not chosen yet.
+  wonderTitle(w) {
+    return w.pending ? 'the wonder' : theName(w.item);
   }
   homeOf(userId) {
     return this.builds.find((b) => b.home && b.ownerId === userId) || null;
@@ -373,6 +448,7 @@ export class World {
       case 'dance': return this.dance(u, now);
       case 'me': return this.me(u, now);
       case 'commands': return this.commands(now);
+      case 'info': return this.info(cmd, u, now);
       case 'demolish': return this.refuse(u, now, 'Town buildings belong to everyone. Mods can !remove #id.');
       case 'remove': return this.remove(cmd, u);
       case 'event': return this.forceEvent(cmd, u, now);
@@ -456,7 +532,7 @@ export class World {
     const home = this.homeOf(u.id);
     if (!home) return this.refuse(u, now, 'You have no home yet. Type !home to build one!');
     if (home.status !== 'done') return this.refuse(u, now, 'Your home (#' + home.id + ') is still being built.');
-    if ((home.level || 1) >= HOME_LEVELS) return this.refuse(u, now, 'Your home is as big as it gets in the ' + ERAS[this.state.era].name + '. A new era makes it grow again!');
+    if ((home.level || 1) >= HOME_LEVELS) return this.refuse(u, now, 'Your home is as big as it gets in ' + ERAS[this.state.era].the + '. A new era makes it grow again!');
     const cost = scaleCost(ITEMS[home.item].cost, 0.4 * (home.level || 1));
     const tooBig = this.tooBigForStorage(cost);
     if (tooBig) return this.refuse(u, now, tooBig);
@@ -523,7 +599,7 @@ export class World {
     const next = TOOLS[tier + 1];
     if (!next) return this.refuse(u, now, 'Your bot has the best tools there are!');
     const level = levelFor(me?.xp || 0);
-    if (next.era > s.era) return this.refuse(u, now, next.label + ' come with the ' + ERAS[next.era].name + '. Until then: !wood, !stone, !help');
+    if (next.era > s.era) return this.refuse(u, now, next.label + ' come with ' + ERAS[next.era].the + '. Until then: !wood, !stone, !help');
     if (level < next.level) return this.refuse(u, now, next.label + ' need level ' + next.level + ', you are level ' + level + '. Every trip and every !help gives XP.');
     const missing = this.missing(next.cost);
     if (missing.length) return this.refuse(u, now, next.label + ' need ' + this.missingText(next.cost) + ' from the town storage.');
@@ -538,10 +614,10 @@ export class World {
   // --- Town projects: started by one, built by all --------------------------------------------
   build(cmd, u, now) {
     const s = this.state;
-    if (!cmd.item) return this.refuse(u, now, 'Try !build ' + itemsOfEra(s.era)[1] + '. In the ' + ERAS[s.era].name + ' the town can build: ' + itemsOfEra(s.era).join(', ') + '.');
+    if (!cmd.item) return this.refuse(u, now, 'Try !build ' + itemsOfEra(s.era)[1] + '. In ' + ERAS[s.era].the + ' the town can build: ' + itemsOfEra(s.era).join(', ') + '.');
     const item = cmd.item === 'house' ? houseFor(s.era) : cmd.item;
     const it = ITEMS[item];
-    if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in the ' + ERAS[it.era].name + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
+    if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in ' + ERAS[it.era].the + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
     const active = this.projects();
     const urgent = this.urgentRoom(item, active);
     if (active.length >= this.limits.maxProjects && !urgent) {
@@ -644,7 +720,7 @@ export class World {
     const job = this.state.jobs[u.id];
     if (job && job.kind !== 'gather' && job.kind !== 'build') return this.refuse(u, now, 'Your bot is busy right now (#' + (job.buildId || '…') + ').');
     if (job) this.endJob(u.id, false, now, false);
-    return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.shiftSec * 1000 }, now, ITEMS[w.item].label);
+    return this.startJob(u, { buildId: w.id, kind: 'wonder', until: now + this.limits.shiftSec * 1000 }, now, this.wonderTitle(w));
   }
 
   // !deliver start (moderators): the Guild posts its next order right away.
@@ -791,7 +867,7 @@ export class World {
     const makers = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[target] && (!b.ores || b.ores.includes(target)));
     if (!makers.length) {
       const who = RESOURCES[target].from;
-      if (RESOURCES[target].era > s.era) return this.refuse(u, now, RESOURCES[target].label + ' arrives in the ' + ERAS[RESOURCES[target].era].name + '.');
+      if (RESOURCES[target].era > s.era) return this.refuse(u, now, RESOURCES[target].label + ' arrives in ' + ERAS[RESOURCES[target].era].the + '.');
       return this.refuse(u, now, 'Nobody makes ' + res(target) + ' yet. Start ' + withArticle(label(who)) + ': !build ' + who);
     }
     const open = makers.filter((b) => this.helpersAt(b.id) < E.MAX_HELPERS);
@@ -811,7 +887,7 @@ export class World {
     if (kind === 'food' && !spots.length) { kind = 'fish'; spots = this.gatherSpots(kind); }
     const g = M.GATHER[kind];
     const r = g.res;
-    if (RESOURCES[r].era > s.era) return this.refuse(u, now, RESOURCES[r].label + ' arrives in the ' + ERAS[RESOURCES[r].era].name + '.');
+    if (RESOURCES[r].era > s.era) return this.refuse(u, now, RESOURCES[r].label + ' arrives in ' + ERAS[RESOURCES[r].era].the + '.');
     if (!spots.length) return this.refuse(u, now, 'Nobody has found ' + g.land + ' yet. Try !explore');
     const t = spots[hashStr(u.id + ':' + Math.floor(now / 1000)) % spots.length];
     if (s.jobs[u.id]) this.endJob(u.id, false, now, false);
@@ -857,7 +933,7 @@ export class World {
 
   // A finished building that makes this good (or power) and can go up a level.
   upgradable(r) {
-    return this.builds.find((b) => !b.home && !b.wonder && b.status === 'done' && b.built && (b.level || 1) < BUILD_LEVELS && (r === 'power' ? ITEMS[b.item].power > 0 : ITEMS[b.item].recipe?.out?.[r])) || null;
+    return this.builds.find((b) => !b.home && !b.wonder && b.status === 'done' && b.built && (b.level || 1) < BUILD_LEVELS && !this.starved[b.id] && (r === 'power' ? ITEMS[b.item].power > 0 : ITEMS[b.item].recipe?.out?.[r] && (!b.ores || b.ores.includes(r)))) || null;
   }
 
   // The command that gathers this good by hand, if the town knows where.
@@ -903,7 +979,8 @@ export class World {
     if (job.kind === 'explore') return { ok: true, message: u.name + ' sets off to explore.' };
     if (job.kind === 'deliver') return { ok: true, message: u.name + ' hauls ' + toolsOf(this.state.builders[u.id]).load + ' crates of ' + res(job.res) + ' to the Guild wagon.' };
     if (job.kind === 'hand') return { ok: true, message: u.name + ' goes out to ' + where + ' and brings back ' + toolsOf(this.state.builders[u.id]).load + ' ' + res(job.res) + ' in about ' + Math.round((job.until - now) / 1000) + ' seconds.' };
-    const verb = { wonder: 'is hauling goods to the', repair: 'is repairing the', build: 'is helping build the' }[job.kind] || 'is helping at the';
+    if (job.kind === 'wonder') return { ok: true, message: u.name + ' is hauling goods to ' + where + ' (#' + job.buildId + ').' };
+    const verb = { repair: 'is repairing the', build: 'is helping build the' }[job.kind] || 'is helping at the';
     return { ok: true, message: u.name + ' ' + verb + ' ' + (where || 'town') + ' (#' + job.buildId + ').' };
   }
 
@@ -965,10 +1042,16 @@ export class World {
   // --- Votes and events --------------------------------------------------------------
   vote(cmd, u, now) {
     const v = this.state.vote;
-    // Mods can start a vote right away with !vote start.
+    // Mods can start a vote right away with !vote start (a wonder to choose
+    // comes first).
     if (cmd.start) {
       if (!u.mod && !u.broadcaster) return { ok: false, message: '' };
       if (v) return { ok: false, message: 'A vote is already running.' };
+      const due = this.wonderPickDue();
+      if (due != null) {
+        this.startWonderVote(due, now);
+        return { ok: true, message: 'Wonder vote started: !1 or !2.' };
+      }
       if (this.state.event) { this.state.event = null; this.changed({ type: 'event', event: null }); }
       this.startVote(now);
       return { ok: true, message: 'Vote started: !1, !2 or !3.' };
@@ -977,12 +1060,14 @@ export class World {
       const mins = Math.max(1, Math.round((this.state.nextVoteAt - now) / 60e3));
       return this.refuse(u, now, 'No vote right now. The next one starts in about ' + mins + ' min.');
     }
-    if (!cmd.option) return this.refuse(u, now, 'Vote with !vote 1, !vote 2 or !vote 3.');
+    const n = v.options.length;
+    if (!cmd.option || cmd.option > n) return this.refuse(u, now, n === 2 ? 'Vote with !vote 1 or !vote 2.' : 'Vote with !vote 1, !vote 2 or !vote 3.');
     const first = v.votes[u.id] == null;
     v.votes[u.id] = cmd.option - 1;
     if (first && this.state.builders[u.id]) this.grant(u.id, 1, now);
     this.changed({ type: 'vote', vote: this.voteView() });
-    return { ok: true, message: u.name + ' voted for ' + EVENTS[v.options[cmd.option - 1]].label + '.' };
+    const key = v.options[cmd.option - 1];
+    return { ok: true, message: u.name + ' voted for ' + (v.kind === 'wonder' ? theName(key) : EVENTS[key].label) + '.' };
   }
 
   voteView() {
@@ -990,7 +1075,66 @@ export class World {
     if (!v) return null;
     const counts = v.options.map(() => 0);
     for (const i of Object.values(v.votes)) counts[i]++;
-    return { options: v.options, counts, endsAt: v.endsAt };
+    const view = { kind: v.kind || 'event', options: v.options, counts, endsAt: v.endsAt };
+    if (v.kind === 'wonder') Object.assign(view, { era: v.era, rival: this.rival ? this.rival.s.name : null });
+    return view;
+  }
+
+  // --- Which wonder: chat chooses, the rival builds the other ----------------------------
+  // The first era, from the town's own up to the furthest town, whose wonder
+  // chat has not chosen yet. Eras behind the town are done (a save from
+  // before the eras of history skipped the Roman Empire: no vote for it).
+  wonderPickDue() {
+    const s = this.state;
+    const top = Math.max(s.era, this.rival ? this.rival.s.era : 0);
+    for (let e = s.era; e <= top; e++) if (!s.picks[e]) return e;
+    return null;
+  }
+
+  startWonderVote(era, now) {
+    const [a, b] = wondersOf(era);
+    this.state.vote = { kind: 'wonder', era, options: [a, b], votes: {}, startedAt: now, endsAt: now + this.limits.wonderVoteSec * 1000 };
+    const ahead = this.rival && this.rival.s.era >= era && this.state.era < era ? this.rival.s.name + ' reached ' + ERAS[era].the + '! ' : '';
+    const from = (k) => (ITEMS[k].place ? ' (' + ITEMS[k].place + ')' : '');
+    const text = ahead + 'Which wonder will BotWorld build in ' + ERAS[era].the + '? !vote 1 ' + TheName(a) + from(a) + ' or !vote 2 ' + TheName(b) + from(b) + (this.rival ? '. ' + this.rival.s.name + ' builds the other one.' : '.');
+    this.emit({ type: 'notice', kind: 'wondervote', text });
+    this.changed({ type: 'vote', vote: this.voteView() });
+  }
+
+  // Chat chose (or, with nobody voting, chance did): the town builds key,
+  // the rival the other one.
+  pickWonder(era, key, now, how = 'vote') {
+    const s = this.state;
+    if (s.picks[era]) return;
+    s.picks[era] = key;
+    const w = this.builds.find((b) => b.wonder && ITEMS[b.item].era === era);
+    if (w) {
+      w.item = key;
+      delete w.pending;
+      this.changed({ type: 'build', build: w });
+    }
+    const other = otherWonder(key);
+    if (this.rival) this.rival.pickWonder(era, other);
+    if (s.vote?.kind === 'wonder' && s.vote.era === era) {
+      s.vote = null;
+      this.changed({ type: 'vote', vote: null });
+    }
+    const theirs = this.rival ? ' ' + this.rival.s.name + ' builds ' + theName(other) + '.' : '';
+    const text = how === 'vote'
+      ? 'Chat chose ' + theName(key) + ' for ' + ERAS[era].the + '!' + theirs
+      : 'BotWorld builds ' + theName(key) + ' in ' + ERAS[era].the + '.' + theirs;
+    this.emit({ type: 'notice', kind: 'wonderpick', era, item: key, other, how, text });
+    this.dirty = true;
+  }
+
+  // A wonder finished before chat had chosen: the votes cast so far decide,
+  // or chance when nobody voted.
+  autoPick(era, now) {
+    if (this.state.picks[era]) return;
+    const v = this.state.vote;
+    if (v?.kind === 'wonder' && v.era === era) return this.resolveWonderVote(this.voteView(), now);
+    const options = wondersOf(era);
+    this.pickWonder(era, options[Math.floor(Math.random() * options.length)], now, 'auto');
   }
 
   eligibleEvents() {
@@ -1002,12 +1146,13 @@ export class World {
     const calm = pool.filter((k) => !EVENTS[k].chaos).sort(() => Math.random() - 0.5);
     const wild = pool.filter((k) => EVENTS[k].chaos).sort(() => Math.random() - 0.5);
     const options = Math.random() < 0.6 && wild.length ? [calm[0], calm[1], wild[0]] : calm.slice(0, 3);
-    this.state.vote = { options: options.sort(() => Math.random() - 0.5), votes: {}, startedAt: now, endsAt: now + this.limits.voteSec * 1000 };
+    this.state.vote = { kind: 'event', options: options.sort(() => Math.random() - 0.5), votes: {}, startedAt: now, endsAt: now + this.limits.voteSec * 1000 };
     this.changed({ type: 'vote', vote: this.voteView() });
   }
 
   resolveVote(now) {
     const view = this.voteView();
+    if (view.kind === 'wonder') return this.resolveWonderVote(view, now);
     this.state.vote = null;
     this.state.nextVoteAt = now + this.limits.voteEveryMin * 60e3;
     const best = Math.max(...view.counts);
@@ -1021,10 +1166,22 @@ export class World {
     this.startEvent(winner, now);
   }
 
+  resolveWonderVote(view, now) {
+    const s = this.state;
+    s.vote = null;
+    // Events wait a little after a wonder vote, so the two never pile up.
+    s.nextVoteAt = Math.max(s.nextVoteAt, now + 15 * 60e3);
+    const best = Math.max(...view.counts);
+    const top = view.options.filter((_, i) => view.counts[i] === best);
+    const winner = top[Math.floor(Math.random() * top.length)];
+    this.changed({ type: 'vote', vote: null, winner, kind: 'wonder' });
+    this.pickWonder(view.era, winner, now, best > 0 ? 'vote' : 'auto');
+  }
+
   forceEvent(cmd, u, now) {
     if (!u.mod && !u.broadcaster) return { ok: false, message: '' };
     if (!cmd.key) return { ok: false, message: 'Events: ' + Object.keys(EVENTS).join(', ') };
-    if (this.state.vote) { this.state.vote = null; this.changed({ type: 'vote', vote: null, winner: null }); }
+    if (this.state.vote && this.state.vote.kind !== 'wonder') { this.state.vote = null; this.changed({ type: 'vote', vote: null, winner: null }); }
     this.startEvent(cmd.key, now);
     return { ok: true, message: 'Started ' + EVENTS[cmd.key].label + '.' };
   }
@@ -1072,7 +1229,15 @@ export class World {
       s.event = null;
       this.changed({ type: 'event', event: null });
     }
-    if (!s.vote && !s.event && now >= s.nextVoteAt) {
+    // A wonder to choose comes before any event vote, as soon as someone
+    // is around to vote.
+    const due = this.wonderPickDue();
+    if (due != null && !s.vote) {
+      for (const t of this.recent.values()) {
+        if (now - t < 30 * 60e3) { this.startWonderVote(due, now); break; }
+      }
+    }
+    if (!s.vote && !s.event && due == null && now >= s.nextVoteAt) {
       let active = 0;
       for (const t of this.recent.values()) if (now - t < 30 * 60e3) active++;
       if (active >= 2) this.startVote(now);
@@ -1156,6 +1321,45 @@ export class World {
     if (this.onCooldown('help', this.limits.helpCooldownSec, now)) return { ok: true, message: text };
     this.emit({ type: 'notice', kind: 'help', text });
     void u;
+    return { ok: true, message: text };
+  }
+
+  // !info totem: what a building, wonder or good is for, on screen for all.
+  info(cmd, u, now) {
+    const s = this.state;
+    const words = cmd.words || [];
+    if (!words.length) return this.commands(now, u);
+    const joined = words.join('');
+    const list = (bag) => {
+      const parts = Object.entries(bag || {}).map(([r, n]) => n + ' ' + RESOURCES[r].label.toLowerCase());
+      return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] || 'nothing';
+    };
+    let text = null;
+    const w = this.currentWonder();
+    const wonder = joined === 'wonder' || joined === 'wonders' ? (w && !w.pending ? w.item : 'pending') : resolveWonder(joined) || words.map(resolveWonder).find(Boolean);
+    const resource = resolveResource(joined);
+    if (wonder === 'pending') {
+      const [a, b] = wondersOf(s.era);
+      text = '🏛️ The wonder of ' + ERAS[s.era].the + ': chat chooses ' + theName(a) + ' or ' + theName(b) + '. It needs ' + list(ITEMS[a].needs) + '. Haul with !help wonder.';
+    } else if (wonder) {
+      const it = ITEMS[wonder];
+      const who = s.picks[it.era] === wonder ? 'BotWorld builds it.' : s.picks[it.era] ? (this.rival ? this.rival.s.name + ' builds it.' : '') : 'Chat chooses between it and ' + theName(otherWonder(wonder)) + '.';
+      text = it.emoji + ' ' + TheName(wonder) + (it.place ? ' (' + it.place + ')' : '') + ': a wonder of ' + ERAS[it.era].the + '. It needs ' + list(it.needs) + '. ' + who;
+    } else if (resource && resource !== 'wonder') {
+      const r = RESOURCES[resource];
+      const maker = ITEMS[r.from];
+      text = r.emoji + ' ' + r.label + ': ' + withArticle(maker.label.toLowerCase()) + ' makes it (' + r.where + ')' + (M.GATHER[resource] ? ', or gather it by hand with !' + resource : ', and !work ' + resource + ' helps there') + '.' + (r.era > s.era ? ' Comes with ' + ERAS[r.era].the + '.' : '');
+    } else {
+      let key = resolveItem(joined) || words.map(resolveItem).find(Boolean);
+      if (key === 'house') key = houseFor(s.era);
+      if (key) {
+        const it = ITEMS[key];
+        const site = M.siteOf(key).why;
+        text = it.emoji + ' ' + it.label + ': ' + whatItDoes(key).replace(/^./, (c) => c.toLowerCase()) + '. Costs ' + list(it.cost) + '.' + (site ? ' Needs ' + site + ' nearby.' : '') + (it.era > s.era ? ' Comes with ' + ERAS[it.era].the + '.' : ' !build ' + key);
+      }
+    }
+    if (!text) return this.refuse(u, now, 'Not sure what "' + words.join(' ') + '" is. Try !info totem, !info marble or !info wonder.');
+    if (!this.onCooldown('info:' + u.id, 8, now)) this.emit({ type: 'notice', kind: 'info', user: u.name, text });
     return { ok: true, message: text };
   }
 
@@ -1385,11 +1589,12 @@ export class World {
       const fraction = (speed * dt) / 60 / (this.pace.eraDays * 1440 * 0.85);
       this.wonderShort = E.deliverToWonder(w, s.stock, { fraction, cap });
       if (E.wonderProgress(w) >= 0.9999) {
+        if (w.pending) this.autoPick(s.era, now);
         w.status = 'done';
         w.built = true;
         w.doneAt = now;
         this.changed({ type: 'build', build: w });
-        this.emit({ type: 'notice', kind: 'wonder', text: 'The ' + ITEMS[w.item].label + ' is complete!' });
+        this.emit({ type: 'notice', kind: 'wonder', item: w.item, text: TheName(w.item) + ' is complete!' });
       }
     }
     if (!s.finished) s.knowledge = Math.min(this.knowledgeNeed(), s.knowledge + ((1 + E.knowledgeBoost(builds)) * dt) / 60);
@@ -1403,6 +1608,8 @@ export class World {
       this.handMade = {};
     }
     this.stalled = out.stalled;
+    for (const [id, goods] of Object.entries(out.starved)) this.starved[id] = { goods, at: now };
+    for (const [id, st] of Object.entries(this.starved)) if (now - st.at > IDLE_MEMORY_MS) delete this.starved[id];
     const needs = this.needs(cap, pw);
     const explored = M.exploredCount(this.map, this.bits);
     this.econ = {
@@ -1420,7 +1627,7 @@ export class World {
       knowledge: Math.floor(s.knowledge),
       knowledgeNeed: this.knowledgeNeed(),
       knowledgeRate: Math.round((1 + E.knowledgeBoost(builds)) * 100) / 100,
-      wonder: w ? { id: w.id, item: w.item, progress: Math.round(E.wonderProgress(w) * 1000) / 1000, short: w.status === 'done' ? [] : this.wonderShort, helpers: helpers.get(w.id) || 0 } : null,
+      wonder: w ? { id: w.id, item: w.item, pending: !!w.pending, progress: Math.round(E.wonderProgress(w) * 1000) / 1000, short: w.status === 'done' ? [] : this.wonderShort, helpers: helpers.get(w.id) || 0 } : null,
       stalled: out.stalled,
       needs,
       projects: this.projects().map((b) => ({ id: b.id, item: b.item, status: b.status, progress: Math.round((b.progress / b.work) * 1000) / 1000, helpers: this.helpersAt(b.id), waitingFor: b.waitingFor || [], founder: this.nameOf(b.upgrade ? b.upgradeBy : b.founderId), level: b.upgrade ? b.upgrade.level : null })),
@@ -1441,8 +1648,21 @@ export class World {
   }
 
   // Is there a known, free spot for this building (or one it can take over)?
-  hasSite(item) {
-    return !!this.choosePlot(item, { quick: true }) || !!this.spareFor(item, true);
+  // For a mine that should dig one ore (res), a spot by that ore.
+  hasSite(item, res = null) {
+    const ore = M.siteOf(item).ore && (res === 'coal' || res === 'iron') ? res : null;
+    return !!this.choosePlot(item, { quick: true, ore }) || !!this.spareFor(item, true, ore);
+  }
+
+  // What buildings of a kind stand idle for (steel mills waiting for coal):
+  // the input most of the idle ones miss, or null when none is idle.
+  idleFor(is) {
+    const miss = {};
+    for (const b of this.builds) {
+      const goods = this.starved[b.id]?.goods;
+      if (goods && is(b)) for (const r of goods) miss[r] = (miss[r] || 0) + 1;
+    }
+    return Object.keys(miss).sort((a, b) => miss[b] - miss[a])[0] || null;
   }
 
   // What the town needs now (the plan shows it): only that may take the
@@ -1465,15 +1685,28 @@ export class World {
   needs(cap, pw) {
     const s = this.state;
     const out = [];
-    const add = (r, why) => {
+    const powerShort = pw.demand > pw.supply * 1.02;
+    // A building that uses power makes nothing while power is short.
+    const runs = (k) => !(powerShort && ITEMS[k].power < 0);
+    const add = (r, why, depth = 0) => {
       if (out.some((n) => n.res === r)) return;
-      // The best maker that has a known spot, else the best one (and a hint to explore).
+      // The best maker that has a known spot, one that works right now if
+      // there is one; else the best one (and a hint to explore).
       const makers = r === 'power' ? E.powerMakers(this.builds, s.era) : E.makersOf(r, s.era);
       if (!makers.length) return;
-      const item = makers.find((k) => this.hasSite(k)) || makers[0];
-      out.push({ res: r, why, item, site: this.hasSite(item), where: M.siteOf(item).why || null });
+      const order = makers.filter(runs).concat(makers.filter((k) => !runs(k)));
+      const found = order.find((k) => this.hasSite(k, r));
+      const item = found || order[0];
+      // Another one would stand idle like the ones the town has (coal plants
+      // and steel mills without coal, factories without power): what they
+      // wait for is what the town needs. Food stays, though: people eat
+      // every minute, and chat can always pick some by hand.
+      const wait = this.idleFor((b) => b.item === item) || (runs(item) ? null : 'power');
+      if (wait && r !== 'food' && depth < 3) return add(wait, why, depth + 1);
+      const where = (M.siteOf(item).ore && M.GATHER[r]?.land) || M.siteOf(item).why || null;
+      out.push({ res: r, why, item, site: !!found, where });
     };
-    if (pw.demand > pw.supply * 1.02) add('power', 'power');
+    if (powerShort) add('power', 'power');
     const food = s.stock.food || 0;
     if (food < cap * 0.15 && (this.rates.food || 0) <= 0.5) add('food', 'hungry');
     for (const r of this.wonderShort || []) add(r, 'wonder');
@@ -1494,11 +1727,15 @@ export class World {
       const name = ITEMS[p.item].label;
       if (p.status === 'building') add({ kind: 'help', id: p.id, item: p.item, text: 'Help build the ' + name, cmd: many ? '!help #' + p.id : '!help' });
       else if (p.waitingFor?.length) {
-        const r = p.waitingFor[0];
+        const want = p.waitingFor[0];
+        // Its makers stand idle for an input (steel mills without coal): fetch that.
+        const idle = this.idleFor((b) => !!ITEMS[b.item].recipe?.out?.[want]);
+        const r = idle && RESOURCES[idle] ? idle : want;
+        const text = 'The ' + name + ' needs ' + RESOURCES[want].label.toLowerCase() + (r !== want ? ', made with ' + RESOURCES[r].label.toLowerCase() : '');
         const hand = this.handCmd(r);
-        const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r]);
-        if (hand) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: hand });
-        else if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text: 'The ' + name + ' needs ' + RESOURCES[r].label.toLowerCase(), cmd: '!work ' + r });
+        const made = this.builds.some((b) => E.isUp(b) && ITEMS[b.item].recipe?.out?.[r] && (!b.ores || b.ores.includes(r)));
+        if (hand) add({ kind: 'gather', id: p.id, item: p.item, res: r, text, cmd: hand });
+        else if (made) add({ kind: 'gather', id: p.id, item: p.item, res: r, text, cmd: '!work ' + r });
         else add({ kind: 'build', item: RESOURCES[r].from, res: r, text: 'Nobody makes ' + RESOURCES[r].label.toLowerCase() + ' yet', cmd: '!build ' + RESOURCES[r].from });
       }
     }
@@ -1526,7 +1763,7 @@ export class World {
       const far = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe && (reach.get(b.id) ?? 1) < 0.75);
       if (far.length) add({ kind: 'build', item: 'outpost', text: far.length + (far.length === 1 ? ' producer is' : ' producers are') + ' far from a store: build an outpost', cmd: '!build outpost' });
     }
-    if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, text: 'Haul goods to the ' + ITEMS[w.item].label, cmd: '!help wonder' });
+    if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, pending: !!w.pending, text: 'Haul goods to ' + this.wonderTitle(w), cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
     add({ kind: 'explore', text: 'Explore the fog, there is more to find', cmd: '!explore' });
     // What the town is stuck on goes near the top, ahead of more !help; a
@@ -1547,7 +1784,7 @@ export class World {
     if (s.era >= ERAS.length - 1) {
       s.finished = true;
       s.finishedAt = now;
-      this.changed({ type: 'finale', at: now });
+      this.changed({ type: 'finale', at: now, item: w.item });
       return;
     }
     s.era++;
@@ -1559,17 +1796,21 @@ export class World {
     this.changed({ type: 'era', era: s.era, at: now, evolved });
     if (this.rival && this.rival.s.era < s.era) {
       this.rival.s.eraFirst[s.era] = 'town';
-      this.emit({ type: 'notice', kind: 'rival', text: 'BotWorld reached the ' + ERAS[s.era].name + ' before ' + this.rival.s.name + '!' });
+      this.emit({ type: 'notice', kind: 'rival', text: 'BotWorld reached ' + ERAS[s.era].the + ' before ' + this.rival.s.name + '!' });
     }
   }
 
+  // The era's wonder rises on its plot as soon as the era starts. Until chat
+  // has chosen which one, it is just a wonder: both need the same goods.
   ensureWonder(now) {
     const s = this.state;
-    const key = ERAS[s.era].wonder;
-    let w = this.builds.find((b) => b.wonder && b.item === key);
+    let w = this.currentWonder();
     if (w) return w;
+    this.relocateWonderRing(now);
     const [q, r] = wonderTile(s.era);
-    w = { id: ++s.seq, item: key, wonder: true, color: null, level: 1, q, r, ownerId: null, status: 'building', requestedAt: now, startedAt: now, walkSec: 0, buildSec: 0, doneAt: null, cost: {}, delivered: {}, built: false };
+    const pick = s.picks[s.era];
+    w = { id: ++s.seq, item: pick || wondersOf(s.era)[0], wonder: true, color: null, level: 1, q, r, ownerId: null, status: 'building', requestedAt: now, startedAt: now, walkSec: 0, buildSec: 0, doneAt: null, cost: {}, delivered: {}, built: false };
+    if (!pick) w.pending = true;
     this.builds.push(w);
     this.changed({ type: 'build', build: w });
     return w;
@@ -1659,24 +1900,27 @@ export class World {
   // Where should this go? Explored land only, on the right ground. Homes
   // cluster near the middle, producers go where the forest, hills or ore are
   // richest, parks and statues near homes.
-  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false, dir = null } = {}) {
+  choosePlot(item, { home = false, ownerId = null, near = null, salt = 0, quick = false, dir = null, ore = null } = {}) {
     const at = new Map(this.builds.map((b) => [hexKey(b.q, b.r), b]));
     const it = ITEMS[item];
     if (it.zone === 'far') return this.outpostPlot(at, dir, salt, quick);
     const site = M.siteOf(item);
     const prod = isProducerLike(it) || !!site.near || !!site.ore;
     const stores = prod && it.kind !== 'storage' ? this.stores() : null;
-    // A new mine goes for the ore no mine digs yet.
-    const lacking = site.ore ? ['coal', 'iron'].filter((r) => !this.builds.some((b) => E.isUp(b) && b.ores?.includes(r))) : [];
+    // A new mine goes for the ore no mine digs yet, or the one the town is
+    // short of (ore: only a spot by that ore will do).
+    const lacking = site.ore ? ['coal', 'iron'].filter((r) => r === ore || !this.builds.some((b) => E.isUp(b) && b.ores?.includes(r)) || this.econ?.needs?.some((n) => n.res === r)) : [];
     let best = null;
     let bestScore = Infinity;
     const theirs = this.rivalLand();
     const taken = this.rival ? this.allTaken() : null;
     const mine = theirs.size ? (n) => this.known(n) && !theirs.has(n.i) : this.known;
+    const era = this.state.era;
     for (const t of this.map.tiles) {
-      if (t.d <= WONDER_RING || !this.known(t) || theirs.has(t.i)) continue;
+      if (isWonderPlot(t.q, t.r, era) || !this.known(t) || theirs.has(t.i)) continue;
       const key = hexKey(t.q, t.r);
       if (at.has(key) || (taken && taken.has(key)) || !M.siteOk(this.map, item, t, mine)) continue;
+      if (ore && site.ore && !M.oresNear(this.map, t).includes(ore)) continue;
       if (quick) return t;
       let s;
       if (prod) {
@@ -1709,7 +1953,7 @@ export class World {
   // the town needs (need), which may also replace a spare producer of goods
   // the stores are full of. Homes, stores, power, knowledge, food and
   // wonders stay.
-  spareFor(item, need = false) {
+  spareFor(item, need = false, ore = null) {
     const it = ITEMS[item];
     if (it.zone === 'far') return null;
     const theirs = this.rivalLand();
@@ -1722,7 +1966,8 @@ export class World {
       const sc = spare(b);
       if (sc == null || sc >= bestScore) continue;
       const t = M.tileAt(this.map, b.q, b.r);
-      if (!t || t.d <= WONDER_RING || theirs.has(t.i) || !M.siteOk(this.map, item, t, mine)) continue;
+      if (!t || isWonderPlot(t.q, t.r, this.state.era) || theirs.has(t.i) || !M.siteOk(this.map, item, t, mine)) continue;
+      if (ore && !M.oresNear(this.map, t).includes(ore)) continue;
       bestScore = sc;
       best = b;
     }

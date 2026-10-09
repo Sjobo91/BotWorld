@@ -1,6 +1,6 @@
 // Turns a chat line into a command. Anything that isn't one of ours returns
 // null, so normal chatting is never answered or punished.
-import { isWonderWord, resolveColor, resolveHat, resolveItem, resolveResource, EVENTS } from '../public/shared/catalog.js';
+import { isWonderWord, resolveColor, resolveHat, resolveItem, resolveResource, wonderIn, EVENTS } from '../public/shared/catalog.js';
 import { DIRECTIONS, DIRECTION_ALIASES } from '../public/shared/terrain.js';
 
 const FILLER = new Set(['a', 'an', 'the', 'some', 'me', 'my', 'please', 'pls', 'plz', 'new', 'big', 'small', 'little', 'tiny', 'huge', 'nice', 'cute', 'of', 'with', 'and', 'to', 'at', 'on', 'for']);
@@ -61,9 +61,9 @@ export function parseCommand(text) {
     case 'join':
     case 'assist':
     case 'helpbuild': {
-      // !help, !help #12, !help wonder
+      // !help, !help #12, !help wonder, !help big ben
       const w = args.find((a) => !FILLER.has(a));
-      if (isWonderWord(w)) return withTimes({ type: 'help', target: 'wonder' }, args.slice(1));
+      if (isWonderWord(w) || wonderIn(args)) return withTimes({ type: 'help', target: 'wonder' }, args.slice(1));
       if (w && /^x?\d$/.test(w)) return withTimes({ type: 'help', id: null }, [w]);
       return withTimes({ type: 'help', id: idArg(w) }, args.slice(1));
     }
@@ -88,9 +88,9 @@ export function parseCommand(text) {
       return withTimes({ type: 'work', target: 'stone' }, args);
     case 'mine':
     case 'dig': {
-      // !mine is stone, !mine coal and !mine iron dig ore.
+      // !mine is stone, !mine marble, !mine coal and !mine iron dig the rest.
       const r = args.length ? resolveResource(args[0]) : null;
-      return withTimes({ type: 'work', target: r === 'coal' || r === 'iron' ? r : 'stone' }, args);
+      return withTimes({ type: 'work', target: r === 'coal' || r === 'iron' || r === 'marble' ? r : 'stone' }, args);
     }
     case 'food':
     case 'berries':
@@ -101,6 +101,8 @@ export function parseCommand(text) {
     case 'fish':
     case 'fishing':
       return withTimes({ type: 'work', target: 'food', how: 'fish' }, args);
+    case 'marble':
+      return withTimes({ type: 'work', target: 'marble' }, args);
     case 'coal':
       return withTimes({ type: 'work', target: 'coal' }, args);
     case 'iron':
@@ -125,6 +127,17 @@ export function parseCommand(text) {
     case 'contract':
       if (args[0] === 'start' || args[0] === 'now') return { type: 'deliver', start: true };
       return withTimes({ type: 'deliver' }, args);
+    // !info totem, !what is a kiln, !info marble: what something is for.
+    case 'info':
+    case 'what':
+    case 'whatis':
+    case 'explain':
+    case 'about':
+    {
+      // A wonder's name keeps its small words ("big ben", "ziggurat of ur").
+      const wonder = wonderIn(args);
+      return { type: 'info', words: wonder ? [wonder] : args.filter((a) => !FILLER.has(a) && a !== 'is' && a !== 'does' && a !== 'do') };
+    }
     case 'vote':
     case 'v': {
       if (args[0] === 'start' || args[0] === 'now') return { type: 'vote', option: null, start: true };
@@ -148,7 +161,6 @@ export function parseCommand(text) {
     case 'commands':
     case 'botworld':
     case 'how':
-    case 'info':
       return { type: 'commands' };
     case 'demolish':
     case 'destroy':
@@ -189,7 +201,9 @@ function parseBuild(args) {
     if (asDir) { dir = asDir; continue; }
     unknown.push(w);
   }
-  // Wonders are built by the whole chat: !build wonder hauls goods to it.
-  if (!item && args.some((w, i) => isWonderWord(w) || isWonderWord(w + (args[i + 1] || '')))) return withTimes({ type: 'help', target: 'wonder' }, args);
+  // Wonders are built by the whole chat: !build wonder (or "!build eiffel
+  // tower", even though a tower is a building too) hauls goods to it.
+  const two = args.findIndex((w, i) => i + 1 < args.length && isWonderWord(w + args[i + 1]));
+  if ((two >= 0 && (!item || item === resolveItem(args[two + 1]))) || (!item && args.some((w) => isWonderWord(w)))) return withTimes({ type: 'help', target: 'wonder' }, args);
   return { type: 'build', item, color, near, dir, raw: unknown.join(' ') };
 }
