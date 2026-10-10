@@ -23,8 +23,9 @@
   --edge: 1.5rem;
   color-scheme: light;
 }
-html[data-stream="1"] { font-size: calc(100vw / 120); }
-html:not([data-stream="1"]) { font-size: clamp(11px, calc(100vw / 120), 16px); }
+/* Everything on screen is sized in rem: one place to make the HUD bigger or smaller. */
+html[data-stream="1"] { font-size: calc(100vw / 140); }
+html:not([data-stream="1"]) { font-size: clamp(10px, calc(100vw / 140), 14px); }
 html, body { height: 100%; margin: 0; }
 body {
   background: #9fd3ee;

@@ -21,8 +21,7 @@ const LABOR = 6;
 const RAW = ['wood', 'stone', 'food', 'marble', 'coal', 'iron'];
 // Its pace at difficulty 1, before leaning. At full pace it beat two and
 // five regulars to the Future in the balance races. At 0.75, two days an
-// era, five regulars win every time by a few hours, and two regulars win
-// about half the races; either way it is close.
+// era, two and five regulars win, by a few hours; it stays close.
 const BASE_SPEED = 0.75;
 
 // A home on the far side: land away from the sea, about 27 tiles out, with

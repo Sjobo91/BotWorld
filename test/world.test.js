@@ -271,16 +271,19 @@ test('no plot is ever shared, the pad and the wonder ring stay free, and land su
     say(w, { id: 'h' + i, name: 'h' + i }, '!home', now);
     now += 10;
   }
+  // As many town buildings as 40 homes have room for.
   const items = ['woodcutter', 'quarry', 'gatherer', 'fisher', 'campfire', 'stockpile', 'totem', 'hut'];
   for (let i = 0; i < 40; i++) {
-    now = finish(w, { id: 'p' + i, name: 'p' + i }, items[i % items.length], now);
+    const item = items.slice(i % items.length).concat(items).find((k) => !w.crowded(k));
+    if (!item) break;
+    now = finish(w, { id: 'p' + i, name: 'p' + i }, item, now);
   }
   const normal = w.builds.filter((b) => !b.wonder);
   const keys = normal.map((b) => hexKey(b.q, b.r));
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(normal.every((b) => hexDist(b.q, b.r) >= 2));
   for (const b of normal) assert.ok(M.siteOk(w.map, b.item, M.tileAt(w.map, b.q, b.r)), b.item + ' on ' + M.tileAt(w.map, b.q, b.r).t);
-  assert.ok(normal.length >= 70);
+  assert.ok(normal.length >= 65, String(normal.length));
 });
 
 test('people move in, work, and producers make goods up to the storage limit', () => {
@@ -782,6 +785,49 @@ test('idle buildings point at what they wait for: a mine by coal, not more coal 
   assert.ok(res.build.ores.includes('coal'), 'the new mine goes where it can dig coal: ' + res.build.ores);
 });
 
+test('a village has a few of each kind: past that, !build makes one bigger', () => {
+  const { w } = makeWorld();
+  let now = finish(w, alice, 'campfire', T0);
+  rich(w);
+  // One campfire is plenty for a town without homes: the next one is an upgrade.
+  const more = say(w, bob, '!build campfire', now);
+  assert.equal(more.ok, true, more.message);
+  assert.match(more.message, /BotWorld has 1 campfires?, plenty for a town its size/);
+  const fire = w.builds.find((b) => b.item === 'campfire');
+  assert.equal(fire.upgrade?.level, 2);
+  assert.equal(w.builds.filter((b) => b.item === 'campfire').length, 1);
+  // Every one as big as it gets: a friendly no.
+  Object.assign(fire, { level: 3, status: 'done', built: true });
+  delete fire.upgrade;
+  const no = say(w, carol, '!build campfire', now + 1000);
+  assert.equal(no.ok, false);
+  assert.match(no.message, /each as big as it gets/);
+  // More homes make room for more.
+  for (let i = 0; i < 8; i++) w.builds.push({ id: ++w.state.seq, item: 'hut', project: true, level: 1, q: 9, r: i - 4, status: 'done', built: true });
+  assert.equal(w.crowded('campfire'), null);
+});
+
+test('town homes only while people need the room, and makers of a good the town is short of', () => {
+  const { w } = makeWorld();
+  let now = T0;
+  for (let i = 0; i < 14; i++) { rich(w); say(w, { id: 'v' + i, name: 'v' + i }, '!home', now); now += 10; }
+  now = run(w, now, 10 * 60e3);
+  assert.ok(w.crowded('hut')?.room, 'fourteen homes have room for the Stone Age: ' + E.popCapacity(w.builds));
+  const hut = say(w, alice, '!build hut', now);
+  assert.equal(hut.ok, false);
+  assert.match(hut.message, /roof over their head/);
+  // Two quarries is the Stone Age limit for a small town...
+  now = finish(w, alice, 'quarry', now);
+  now = finish(w, bob, 'quarry', now);
+  rich(w);
+  w.economy(now, 0);
+  assert.ok(w.crowded('quarry'));
+  // ...unless the town runs out of stone.
+  w.state.stock.stone = 0;
+  w.economy(now, 0);
+  assert.equal(w.crowded('quarry'), null);
+});
+
 test('outposts go out to rich land, and producers far from a store make less', () => {
   const { w } = makeWorld();
   revealAll(w);
@@ -901,7 +947,8 @@ test('a full town makes room: old decor gives way, stores and homes stay', () =>
   assert.deepEqual([res.build.q, res.build.r], [fire.q, fire.r]);
   assert.ok(events.some((e) => e.type === 'notice' && /old campfire .* makes way for a hut/.test(e.text)));
   // Decor only gives way to newer decor, stores never do, and only what the
-  // town needs may take the place of decor.
+  // town needs may take the place of decor (limits aside: a second store).
+  w.crowded = () => null;
   const again = say(w, { id: 'e', name: 'erin' }, '!build campfire', now);
   assert.equal(again.ok, false);
   assert.match(again.message, /No free land left/);
