@@ -28,8 +28,21 @@ BotWorld is one long game that chat plays together. It starts with a landing pad
 | Power | 15 | Modern Age | 8 parts | 6 | 2x |
 | Laser | 20 | Future | 6 chips | 8 | 2.5x |
 
-* **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings fly a silver (level 2) or gold (level 3) pennant.
+* **Building upgrades.** `!upgrade woodcutter` (or `!upgrade #12`) starts a town project that takes a finished building to level 2, and later 3. It costs 1.5 times the building's price (2.25 times for level 3) and half its work per level, is built with `!help` like any project, and the building keeps working meanwhile. Every level makes 50% more of what it gives: goods, power, storage room, people or knowledge. Upgraded buildings grow a tenth per level and fly a silver (level 2) or gold (level 3) pennant.
 * **The land decides where.** The server picks the best known spot: woodcutters next to a forest, quarries next to rocky hills (marble quarries too, best by mountains), gatherers next to berries, fishers and harbors on the water, mines near a coal or iron deposit, farms on grassland. A spot with more of the right land around it produces more (up to 60% more, or 40% less on a poor spot). If no right spot is known yet, the town is told to explore.
+* **A real village, not a carpet of huts.** A town has a few of each kind of building, more as it grows (`crowded` in `server/world.js`):
+
+| Kind | How many the town may have |
+| --- | --- |
+| Decor and special buildings (campfire, totem, park, statue, windmill, station) | 1, and 1 more for every 8 homes |
+| Knowledge (school, university, lab) | 1, and 1 more for every 12 homes |
+| Makers of goods (woodcutter, quarry, farm, mine) | 1 more each era, and 1 more for every 10 homes; always one more while the town is short of their good |
+| Stores (stockpile, granary, warehouse) | 1 more each era, and 1 more for every 15 homes |
+| Outposts | 3, and 2 more each era |
+| Power plants | while power is short, else 1 for every 20 homes |
+| Town homes (huts, villas, apartments) | while the homes have less room than the era's people and every job need, and half as much again |
+
+  Homes count both viewers' own homes and the town's. Past the limit, `!build campfire` makes the smallest campfire a level bigger instead (a normal upgrade project), with a line on stream saying why; when every one is at level 3, chat is told the town needs more homes before more campfires. In the demo, 14 pretend viewers built 544 buildings in 12 hours of the Stone Age (76 huts, 65 totems, 63 campfires, 56 quarries, 49 outposts) and 440 people for a goal of 25; with the limits they build a village of 36 (2 campfires, 2 totems, 5 quarries, 3 outposts) and upgrade it.
 * **A full town makes room.** When no free spot is left, a new building takes the place of one the town can spare, with a notice on stream. While people are content (happiness 80 or more), old decor makes way for anything: decor from an older era first (a campfire in the Future), then the commonest. When they are not, only what the town needs right now (what the plan box asks for, a new viewer's home, homes when people wait to move in) may replace decor. What the town needs may also replace a spare producer of goods the stores are full of (one of three or more), and newer decor may always replace older decor. Homes, stores, power plants, schools, food makers and wonders always stay; `!upgrade` grows a full town further.
 
 ## Outposts and the whole world
@@ -57,7 +70,7 @@ The economic battle between the two towns happens at the Guild's wagon on the la
 * **Hauling.** `!deliver` sends your bot on a 30 second trip with crates from the pad to the wagon; when it is back, each crate it carried fills a fortieth of the order (2 crates with stone tools, 8 with laser tools, so a trip fills 5% to 20%). `!deliver 3` lines up three trips. The townsfolk haul 1.5% a minute on their own. The goods come out of the town's stock: no bricks, no delivery (the plan box then says how to make some).
 * **The rival** hauls 1.5% a minute plus 2.5% a minute with a full crew (half that with a small one), times its lean towards a close race, out of its own stock. On its own it fills an order in about 20 to 35 minutes, so a chat that ignores the Guild loses, and one or two bots that keep hauling win.
 * **Winning.** The first town to fill the order wins, or, when time runs out, whoever delivered more. The Guild pays one and a half times the goods' worth (a good is worth 1 plus its era: wood 1, bricks 2, marble 3, iron 4, steel 5, chips 6) in the two goods the winner has least of, and its scholars share 30 minutes of knowledge. Every bot that hauled for a winning order gets 8 XP (and 3 per trip). The loser gets its crates back. The score of orders won stays in the race panel, and the Gazette reports the wins.
-* **Balance.** In the balance runs chat wins seven orders in ten with two regular viewers (32 of 46 over the game) and three in four with five (64 of 83). Cogsworth takes the orders chat is not around for.
+* **Balance.** In the balance runs chat wins seven orders in ten with two regular viewers (33 of 46 over the game) and four in five with five (81 of 99). Cogsworth takes the orders chat is not around for.
 
 ## What chat sees
 
@@ -99,15 +112,15 @@ This sets the length of the game: chat can speed an era up, but not much past it
 | Era starts | 2 viewers | Cogsworth | 5 viewers | Cogsworth |
 | --- | --- | --- | --- | --- |
 | 🐪 Ancient Egypt | day 1.9 | day 1.9 | day 1.7 | day 1.8 |
-| 🏛️ Roman Empire | day 3.6 | day 3.6 | day 3.6 | day 3.5 |
-| 🏰 Middle Ages | day 5.6 | day 5.3 | day 5.3 | day 5.3 |
+| 🏛️ Roman Empire | day 3.8 | day 3.7 | day 3.6 | day 3.5 |
+| 🏰 Middle Ages | day 5.6 | day 5.5 | day 5.3 | day 5.3 |
 | 🏭 Industrial Revolution | day 7.6 | day 7.3 | day 7.3 | day 7.0 |
-| 🏙️ Modern Age | day 10.0 | day 9.4 | day 9.0 | day 8.9 |
-| ✨ Future | day 11.8 | day 11.4 | day 10.9 | day 10.7 |
-| Finale (the Future's wonder done) | day 13.3 | 98% of its knowledge | day 12.0 | 80% of its knowledge |
-| Guild orders won | 32 of 46 | 14 | 64 of 83 | 19 |
+| 🏙️ Modern Age | day 9.7 | day 9.3 | day 10.7 | day 9.2 |
+| ✨ Future | day 11.7 | day 11.3 | day 12.6 | day 11.8 |
+| Finale (the Future's wonder done) | day 13.0 | 90% of its knowledge | day 13.7 | 92% of its knowledge |
+| Guild orders won | 33 of 46 | 13 | 81 of 99 | 18 |
 
-Each pretend viewer is online an hour and a half a day and types a command about every minute, and votes in every wonder vote. At two days an era the eras wait on building as much as on knowledge, so a bigger chat is a little faster: the finale came on day 13.3 with two regulars and day 12.0 with five, in a town of about 180 and 390 buildings. Cogsworth plays in the same runs: it enters most eras a few hours before chat (so chat usually votes on a wonder the moment Cogsworth gets there), and chat catches up in the Future. When chat's finale came, Cogsworth had its wonder and its people but not yet all of its knowledge. Over four seeds, five regulars won every race (Cogsworth at 80 to 88% of its last knowledge bar, a few hours behind), and two regulars won two and lost two, each by a few hours at most. At 9.5 days an era (about two months) the races stayed fair without a new difficulty: five regulars reached the finale on day 55.8 with Cogsworth at 96% of its last knowledge bar, and two regulars on day 54.3 with Cogsworth at 74%.
+Each pretend viewer is online an hour and a half a day and types a command about every minute, and votes in every wonder vote. At two days an era the eras wait on building as much as on knowledge: the finale came on day 13.0 with two regulars and day 13.7 with five (12.6 to 13.7 over four seeds; this seed is the slow one), in a village of about 120 and 170 buildings. Cogsworth plays in the same runs: it enters most eras a few hours before chat (so chat usually votes on a wonder the moment Cogsworth gets there), and chat catches up in the Future. When chat's finale came, Cogsworth had its wonder and its people but not yet all of its knowledge. Over four seeds both won every race, a few hours ahead: five regulars with Cogsworth at 81 to 92% of its last knowledge bar, two regulars at 88 to 98%. (Before the building limits two regulars won only half, because their goods went into piles of campfires and huts.) At 9.5 days an era (about two months) chat wins more clearly: five regulars reached the finale on day 53.1 and two regulars on day 53.8, both with Cogsworth at 72% of its last knowledge bar, about two days behind. For a closer race at that pace, raise `limits.rivalDifficulty` a little.
 
 When an era starts, older buildings that have a modern version rebuild themselves (a gatherer becomes a farm, a totem an obelisk and later a statue, an irrigation canal a windmill, huts become mud brick houses, a coal plant becomes a fusion reactor), homes become the new kind of home, and the town looks different: the roads, street lights, boats, bots and even the air change with the era.
 

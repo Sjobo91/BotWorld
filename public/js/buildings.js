@@ -883,7 +883,7 @@ const BUILDERS = {
 };
 
 // Buildings fill most of their plot (wonders are sized for their ring), and
-// grow a little with every level.
+// grow a tenth with every level: the town grows up as well as out.
 const KIND_SCALE = { wonder: 1, house: 1.25, decor: 1.2 };
 export function buildingMesh(b, level, era) {
   T = three();
@@ -894,7 +894,7 @@ export function buildingMesh(b, level, era) {
   const color = colorOf(b);
   const lv = level || b.level || 1;
   const kind = b.wonder ? 'wonder' : ITEMS[b.item]?.kind;
-  const scale = (KIND_SCALE[kind] || 1.3) * (kind === 'wonder' || b.home ? 1 : 1 + 0.05 * (lv - 1));
+  const scale = (KIND_SCALE[kind] || 1.3) * (kind === 'wonder' || b.home ? 1 : 1 + 0.1 * (lv - 1));
   body.scale.setScalar(scale);
   const k = {
     g: body,

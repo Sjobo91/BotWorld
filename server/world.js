@@ -85,6 +85,7 @@ const label = (item) => ITEMS[item].label.toLowerCase();
 const scaleCost = (cost, f) => Object.fromEntries(Object.entries(cost).map(([r, n]) => [r, Math.max(1, Math.ceil(n * f))]));
 const withArticle = (s) => (/^[aeiou]/i.test(s) ? 'an ' : 'a ') + s;
 const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const plural = (s) => (/[^aeiou]y$/.test(s) ? s.slice(0, -1) + 'ies' : /s$/.test(s) ? s : s + 's');
 const rndPick = (id) => (hashStr(id + ':' + Math.floor(Date.now() / 60e3)) % 1000) / 1000;
 const isProducerLike = (it) => ['producer', 'power', 'storage'].includes(it.kind);
 
@@ -591,6 +592,56 @@ export class World {
     return { ok: true, message: u.name + ' is upgrading the ' + label(b.item) + ' (#' + b.id + ') to level ' + (level + 1) + (wait ? '. It needs ' + wait : '') + '. Everyone can help: !help', build: b };
   }
 
+  // How many of a kind the town can use. A real village has a few of each,
+  // and more as it grows: decor and special buildings one more for every 8
+  // homes, schools and labs for every 12, makers of goods one more an era and
+  // for every 10 homes (and always one more while the town is short of their
+  // good), stores one more an era, outposts two, power plants while power is
+  // short, and town homes while people need the room. Null when there is
+  // room for one more, else how many it has.
+  crowded(item) {
+    const it = ITEMS[item];
+    if (!it || it.kind === 'wonder') return null;
+    const s = this.state;
+    const e = this.econ;
+    const kind = evolvedItem(item, s.era);
+    const count = this.builds.filter((x) => !x.home && !x.wonder && evolvedItem(x.item, s.era) === kind).length;
+    const homes = this.builds.filter((x) => x.built && ITEMS[x.item]?.kind === 'house').length;
+    const cap = E.capacity(this.builds);
+    const short = (r) => e?.needs?.some((n) => n.res === r) || (s.stock[r] || 0) < cap * 0.15;
+    let max;
+    if (it.kind === 'house') {
+      // Room for the era's people and every job, and half as much again.
+      const need = Math.max(ERAS[s.era].popGoal, E.jobsNeeded(this.builds)) * 1.5;
+      return E.popCapacity(this.builds) < need ? null : { count, room: true };
+    }
+    if (it.kind === 'producer') {
+      if (Object.keys(it.recipe?.out || {}).some(short)) return null;
+      max = 1 + s.era + Math.floor(homes / 10);
+    } else if (it.kind === 'power') {
+      if (e && e.power.demand > e.power.supply * 0.9) return null;
+      max = 1 + Math.floor(homes / 20);
+    } else if (it.kind === 'storage') max = it.zone === 'far' ? 3 + 2 * s.era : 1 + s.era + Math.floor(homes / 15);
+    else if (it.kind === 'knowledge') max = 1 + Math.floor(homes / 12);
+    else max = 1 + Math.floor(homes / 8);
+    return count < max ? null : { count };
+  }
+
+  // !build past the limit: the smallest one of the kind grows a level
+  // instead, so the town grows up, not out. Or a friendly no.
+  growInstead(item, full, u, now) {
+    const s = this.state;
+    const kind = evolvedItem(item, s.era);
+    const why = full.room
+      ? 'Everyone in BotWorld has a roof over their head'
+      : 'BotWorld has ' + full.count + ' ' + plural(label(kind)) + ', plenty for a town its size';
+    const grows = this.builds.some((x) => !x.home && !x.wonder && x.status === 'done' && x.built && evolvedItem(x.item, s.era) === kind && (x.level || 1) < BUILD_LEVELS);
+    if (!grows) return this.refuse(u, now, why + (full.count ? ', each as big as it gets' : '') + '. A bigger town makes room for more: invite friends to !home');
+    const res = this.upgradeBuilding({ type: 'upgrade', item: kind }, u, now);
+    if (res.ok) res.message = why + '. ' + res.message;
+    return res;
+  }
+
   // !upgrade tools: a better tool for your own bot, paid by the town.
   upgradeTools(u, now) {
     const s = this.state;
@@ -618,6 +669,10 @@ export class World {
     const item = cmd.item === 'house' ? houseFor(s.era) : cmd.item;
     const it = ITEMS[item];
     if (it.era > s.era) return this.refuse(u, now, it.label + ' arrives in ' + ERAS[it.era].the + '. For now try: ' + itemsOfEra(s.era).slice(0, 5).join(', ') + '.');
+    // A real village has a few of each kind: past that, chat makes the ones
+    // it has bigger instead of scattering more over the map.
+    const full = this.crowded(item);
+    if (full) return this.growInstead(item, full, u, now);
     const active = this.projects();
     const urgent = this.urgentRoom(item, active);
     if (active.length >= this.limits.maxProjects && !urgent) {
@@ -1761,7 +1816,7 @@ export class World {
     if (room) {
       const reach = this.reachMap();
       const far = this.builds.filter((b) => E.isUp(b) && ITEMS[b.item].recipe && (reach.get(b.id) ?? 1) < 0.75);
-      if (far.length) add({ kind: 'build', item: 'outpost', text: far.length + (far.length === 1 ? ' producer is' : ' producers are') + ' far from a store: build an outpost', cmd: '!build outpost' });
+      if (far.length && !this.crowded('outpost')) add({ kind: 'build', item: 'outpost', text: far.length + (far.length === 1 ? ' producer is' : ' producers are') + ' far from a store: build an outpost', cmd: '!build outpost' });
     }
     if (w && w.status !== 'done') add({ kind: 'wonder', item: w.item, pending: !!w.pending, text: 'Haul goods to ' + this.wonderTitle(w), cmd: '!help wonder' });
     if (room && s.population >= popCap - 1 && popCap < ERAS[s.era].popGoal) add({ kind: 'build', item: houseFor(s.era), text: 'More homes, so more people move in', cmd: '!build ' + houseFor(s.era) });
